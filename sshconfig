@@ -1,0 +1,11 @@
+Host dardel
+Hostname dardel.pdc.kth.se
+User obollner
+IdentityFile ~/.ssh/dardel
+ForwardAgent yes
+ForwardX11 yes
+
+Host dardel-file
+Hostname dardel-ftn01.pdc.kth.se
+User obollner
+IdentityFile ~/.ssh/dardel 
