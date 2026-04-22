@@ -1,5 +1,5 @@
 from argparse import ArgumentParser as Parser
-from phonon_manager import PhononManager
+from beyblade.phonon_manager import PhononManager
 
 if __name__ == "__main__":
   parser = Parser("Determine symmetry of phonon modes.")
