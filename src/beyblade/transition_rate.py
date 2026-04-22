@@ -99,7 +99,7 @@ class TransitionRate:
 
     V_0_pm_2ph = self.get_2ph_coupling("V_0_pm")
     V_p_m_2ph  = self.get_2ph_coupling("V_p_m")
-    V_0_0_2ph  = self.get_2ph_coupling("V_0_")
+    V_0_0_2ph  = self.get_2ph_coupling("V_0_0")
     omega_x, omega_y, J_0_pm     = MathUtils.get_2d_spectral_density(freqs, V_0_pm_2ph, sigma, 1)
     _, _, J_p_m      = MathUtils.get_2d_spectral_density(freqs, V_p_m_2ph, sigma, 1)
     _, _, J_0_0_base = MathUtils.get_2d_spectral_density(freqs, V_0_0_2ph, sigma, 1)
