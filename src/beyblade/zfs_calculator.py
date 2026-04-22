@@ -100,8 +100,9 @@ class ZFSCalculator:
         self.debug: bool = debug
 
     def _save_derivative_data(self, save_name, **kwargs):
+        save_name += datetime.now().strftime('%Y-%m-%d')
         if not save_name.endswith(".npz"):
-            save_name += datetime.now().strftime('%Y-%m-%d') + ".npz"
+            save_name += ".npz"
 
         metadata = {
             "cell_size": self.cell_size,
