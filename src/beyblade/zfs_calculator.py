@@ -6,6 +6,7 @@ from scipy import constants as Cn
 from pathlib import Path
 from typing import Optional, Any
 from tqdm import tqdm
+from datetime import datetime
 
 from beyblade.constants import CONSTANTS
 from beyblade.utils import MathUtils
@@ -100,7 +101,7 @@ class ZFSCalculator:
 
     def _save_derivative_data(self, save_name, **kwargs):
         if not save_name.endswith(".npz"):
-            save_name += ".npz"
+            save_name += datetime.now().strftime('%Y-%m-%d') + ".npz"
 
         metadata = {
             "cell_size": self.cell_size,
