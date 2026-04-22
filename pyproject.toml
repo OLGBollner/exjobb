@@ -1,5 +1,6 @@
 [build-system]
 requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "beyblade"
@@ -12,3 +13,6 @@ dependencies = [
     "pymatgen",
     "matplotlib",
 ]
+
+[tool.setuptools.packages.find]
+where = ["src"]

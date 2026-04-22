@@ -1,9 +1,9 @@
 import numpy as np
 from scipy import constants as Cn
-from utils import MathUtils
-from constants import CONSTANTS
 from pathlib import Path
 
+from beyblade.utils import MathUtils
+from beyblade.constants import CONSTANTS
 
 # (sign_l, sign_lp) for energy conservation: omega_spin = s*omega_l + s'*omega_lp
 PHONON_PROCESSES = {

@@ -9,8 +9,8 @@ try:
 except ImportError:
     from yaml import Loader
 
-from constants import CONSTANTS
-from utils import MathUtils
+from beyblade.constants import CONSTANTS
+from beyblade.utils import MathUtils
 
 @dataclass
 class PhononManager:

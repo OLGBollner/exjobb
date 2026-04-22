@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from constants import CONSTANTS
-from utils import MathUtils
+from beyblade.constants import CONSTANTS
+from beyblade.utils import MathUtils
 
 
 class ZFSPlotter:

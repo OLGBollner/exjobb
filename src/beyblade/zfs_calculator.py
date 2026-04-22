@@ -2,15 +2,14 @@ from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import re
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import constants as Cn
 from pathlib import Path
 from typing import Optional, Any
 from tqdm import tqdm
 
-from constants import CONSTANTS
-from utils import MathUtils
-from phonon_manager import PhononManager
+from beyblade.constants import CONSTANTS
+from beyblade.utils import MathUtils
+from beyblade.phonon_manager import PhononManager
 
 def read_zfs_tensor(outcar_file: str) -> Optional[dict[str, Any]]:
     """

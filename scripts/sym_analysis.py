@@ -1,8 +1,4 @@
-import numpy as np
-from scipy import constants as Cn
-from pathlib import Path
 from argparse import ArgumentParser as Parser
-from utils import MathUtils
 from phonon_manager import PhononManager
 
 if __name__ == "__main__":

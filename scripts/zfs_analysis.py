@@ -1,9 +1,9 @@
 import argparse
-
-from zfs_calculator import ZFSCalculator
-from phonon_manager import PhononManager
 from pathlib import Path
-from plotter import ZFSPlotter
+
+from beyblade.zfs_calculator import ZFSCalculator
+from beyblade.phonon_manager import PhononManager
+from beyblade.plotter import ZFSPlotter
 
 def main():
     parser = argparse.ArgumentParser(description="Manage and analyze ZFS phonon derivatives and plot the results.")
@@ -51,7 +51,7 @@ def main():
             print("Using default phonon file: ", path_to_phonon)
             if not path_to_phonon.exists():
                 raise FileNotFoundError(f"Default phonon file not found at {path_to_phonon}. Please provide a valid phonon data file.")
-        
+
         phonon_manager = PhononManager(data_path=path_to_phonon)
         calculator = ZFSCalculator(
             sim_folder=args.sim_folder,
