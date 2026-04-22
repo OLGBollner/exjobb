@@ -70,7 +70,7 @@ class MathUtils:
 
         X, Y = np.meshgrid(x_grid, y_grid)
 
-        return X, Y, convolve(dense_values**2, kernel)
+        return X, Y, convolve(dense_values, kernel)
 
     @staticmethod
     def calc_ipr(phonons: Dict[str, Any]) -> np.ndarray:

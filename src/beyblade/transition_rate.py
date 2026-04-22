@@ -115,7 +115,7 @@ class TransitionRate:
     mask = (omega_x > 0.1) & (omega_y > 0.1)
     bose = Phonons.bose_einstein_2d(omega_x[0, :], T)
 
-    f2ph     = (2 * np.pi / Cn.hbar) * CONSTANTS["meV2J"]**2 * res**2
+    f2ph     = (2 * np.pi / Cn.hbar) * (CONSTANTS["meV2J"] * res)**2
 
     for ms in self.ms_values:
       for ms_prime in self.ms_values:
@@ -125,7 +125,6 @@ class TransitionRate:
         rate_key = f"{ms}_to_{ms_prime}"
         #V2 = np.abs(self._get_V2ph(ms_prime, ms, V_0_pm_2ph, V_p_m_2ph, V_0_0_2ph)[np.ix_(mask, mask)])**2
         J = get_J_path(ms_prime, ms)
-        print("Spectral function: ", J.shape)
         J_m = J[mask]
         total = 0.0
 
