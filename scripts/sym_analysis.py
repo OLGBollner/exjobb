@@ -9,5 +9,5 @@ if __name__ == "__main__":
 
   phonon_mgr = PhononManager(args.phonon_path)
   phonon_mgr.analyze_c3v_symmetry()
-  #phonon_mgr.filter_sym_pairs(save=True)
+  phonon_mgr.filter_sym_pairs(save=True)
 
