@@ -9,7 +9,7 @@ import sys
 sys.path.append(str(Path(__file__).parent))
 
 try:
-    from transition_rate import TransitionRate
+    from beyblade.transition_rate import TransitionRate
 except ImportError:
     print("Error: Could not import TransitionRate class. Ensure transition_rate.py is in the same directory.")
     sys.exit(1)
