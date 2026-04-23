@@ -59,7 +59,7 @@ class MathUtils:
         mask = (idx_x >= 0) & (idx_x < len(x_grid)) & \
                (idx_y >= 0) & (idx_y < len(y_grid))
 
-        np.add.at(dense_values, (idx_x[mask], idx_y[mask]), values[mask])
+        np.add.at(dense_values, (idx_x[mask], idx_y[mask]), values[mask]**2)
 
         radius_pixel = int(np.ceil(4 * sigma_pixel))
         grid_1d = np.arange(-radius_pixel, radius_pixel + 1)
