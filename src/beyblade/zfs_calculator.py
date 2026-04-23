@@ -352,25 +352,23 @@ class ZFSCalculator:
                 if self.debug:
                     self._debug_derivs(d2D_dqidqj, (symmetry[i], symmetry[j]), (phonon_idx[i]+1, phonon_idx[j]+1))
 
-                sys.exit(1)
+                zfs_2nd_derivs[i, j] = d2D_dqidqj
+                zfs_2nd_derivs[j, i] = d2D_dqidqj
 
-                # zfs_2nd_derivs[i, j] = d2D_dqidqj
-                # zfs_2nd_derivs[j, i] = d2D_dqidqj
+                trace_in_plane = d2D_dqidqj[0, 0] + d2D_dqidqj[1, 1]
+                diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
+                off_diag_in_plane = d2D_dqidqj[0, 1]
 
-                # trace_in_plane = d2D_dqidqj[0, 0] + d2D_dqidqj[1, 1]
-                # diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
-                # off_diag_in_plane = d2D_dqidqj[0, 1]
+                if symmetry[i] == symmetry[j]: # Måste ta hänsyn till att E moder bidrar till både 00 och +- i andra ordningens fononer
+                    V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / (q_i*q_j)
 
-                # if symmetry[i] == symmetry[j]: # Måste ta hänsyn till att E moder bidrar till både 00 och +- i andra ordningens fononer
-                #     V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane)
+                if symmetry[i] in ["Ex"] and symmetry[j] in ["A1", "A2", "Ex"]:
+                    V_p_m_2nd[i, j] = 2 * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2)) / (q_i*q_j)
+                    V_0_pm_2nd[i, j] = 2 * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2)) / (q_i*q_j)
 
-                # if symmetry[i] in ["Ex"] and symmetry[j] in ["A1", "A2", "Ex"]:
-                #     V_p_m_2nd[i, j] = 2 * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
-                #     V_0_pm_2nd[i, j] = 2 * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2))
-
-                # V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
-                # V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
-                # V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
+                V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
+                V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
+                V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
 
         print("Symmetry adjusted coefficients: ")
         print("V_00: ", np.sum(V_0_0_2nd > 0))
