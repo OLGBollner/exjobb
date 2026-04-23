@@ -90,6 +90,7 @@ class ZFSCalculator:
         if "pert" not in self.sim_folder.name:
             raise ValueError("Perturbation scale not found in folder name. Ensure the folder name contains the perturbation scale (e.g., 'pert_0.01').")
         self.perturbation_scale: float = float(self.sim_folder.name.split("_")[1])
+        self.defect: str = self.sim_folder.parent.parent.name.split("_")[0]
         self.cell_size: int = int(self.sim_folder.parent.parent.name.split("_")[-1])
         print(f"Initialized ZFSCalculator with perturbation scale: {self.perturbation_scale}, cell size: {self.cell_size}")
 
@@ -105,6 +106,7 @@ class ZFSCalculator:
         save_name.replace(".npz", datetime.now().strftime('%Y-%m-%d') + ".npz")
 
         metadata = {
+            "defect": self.defect,
             "cell_size": self.cell_size,
             "sub_folder": self.sub_folder,
             "pert_scale": self.perturbation_scale
@@ -132,7 +134,7 @@ class ZFSCalculator:
             zfs_tensor, zfs_relaxed, phonon_pert["eigs"], phonon_pert.get("sym"), phonon_pert.get("idx")
         )
 
-        save_name = f"{output_filename}.npz" if output_filename else f"derivatives/zfs_coefficients_{self.cell_size}_{self.sub_folder}_{self.perturbation_scale}_.npz"
+        save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
 
         self._save_derivative_data(save_name, zfs_derivs=zfs_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0*CONSTANTS["MHz2meV"], V_p_m=V_p_m*CONSTANTS["MHz2meV"],
                                     V_0_pm=V_0_pm*CONSTANTS["MHz2meV"], freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
@@ -146,7 +148,7 @@ class ZFSCalculator:
             
         pert_SI = abs(self.perturbation_scale) * CONSTANTS["ang_amu2SI"]
 
-        save_name = f"{output_filename}.npz" if output_filename else f"derivatives/zfs2d_coefficients_{self.cell_size}_{self.sub_folder}_{self.perturbation_scale}_.npz"
+        save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
 
         """if Path(save_name).exists:
             zfs_2d = np.load(save_name)
