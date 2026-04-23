@@ -200,7 +200,7 @@ class ZFSCalculator:
         print("Reading ZFS tensors from: ", search_path)
 
         zfs_tensor = {}
-        total_modes = int(len(phonon_pert["idx"])**2/2)
+        total_modes = int(len(phonon_pert["idx"])**2 / 2)
         print(f"Expecting up to {total_modes} OUTCAR files for 2D perturbations.")
         outcars = search_path.glob("**/OUTCAR")
         eigen_rotation_t = np.transpose(eigen_rotation)
@@ -228,7 +228,7 @@ class ZFSCalculator:
             return None
 
         index_parts = outcar.parent.name.split("_")
-        indices = tuple(int(part) for part in index_parts if part.isdigit())
+        indices = tuple(int(part)-1 for part in index_parts if part.isdigit())
         if len(indices) != 2:
             print(f"Warning: Could not extract valid indices from folder name {outcar.parent.name}. Skipping this file.")
             return None
