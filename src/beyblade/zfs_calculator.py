@@ -1,6 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import re
+import sys
 import numpy as np
 from scipy import constants as Cn
 from pathlib import Path
@@ -351,6 +352,7 @@ class ZFSCalculator:
 
                 self._debug_derivs(d2D_dqidqj, (symmetry[i], symmetry[j]), (phonon_idx[i], phonon_idx[j]))
 
+                sys.exit(1)
 
                 # zfs_2nd_derivs[i, j] = d2D_dqidqj
                 # zfs_2nd_derivs[j, i] = d2D_dqidqj
