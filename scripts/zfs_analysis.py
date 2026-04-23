@@ -1,20 +1,22 @@
 import argparse
 from pathlib import Path
 
-from beyblade.zfs_calculator import ZFSCalculator
+from beyblade.zfs_manager import ZFSManager
 from beyblade.phonon_manager import PhononManager
 from beyblade.plotter import ZFSPlotter
 
 def main():
     parser = argparse.ArgumentParser(description="Manage and analyze ZFS phonon derivatives and plot the results.")
 
-    # Commands for ZFS calculations
+    # Commands for ZFS derivative calculation
     parser.add_argument("--calc", action="store_true", help="Run calculation of ZFS derivatives.")
-    parser.add_argument("--sim_folder", type=str, help="Folder containing simulation results for calculation.")
+    parser.add_argument("-d", "--debug", action="store_true", help="Print debug information for derivatives.")
+
+    # Commands for ZFS management
+    parser.add_argument("--sim_folder", type=str, default=None, help="Folder containing simulation results for calculation.")
     parser.add_argument("-ph", "--phonon_file", type=str, help="Phonon data file to use.")
     parser.add_argument("--all", action="store_true", help="Use results from all_bands (for calculation).")
     parser.add_argument("--approx", action="store_true", help="Use results from defect_band_approx (for calculation).")
-    parser.add_argument("-d", "--debug", action="store_true", help="Print debug information for derivatives.")
 
     # Commands for plotting
     parser.add_argument("--plot", action="store_true", help="Display the plot directly on the screen.")
@@ -32,10 +34,7 @@ def main():
 
     generated_files = []
 
-    if args.calc:
-        if not args.sim_folder:
-            print("Error: --sim_folder must be specified when --calc is used.")
-            return
+    if args.sim_folder:
 
         sub_folder, zfs_folder = ("all_bands", "ZFS_hyp") if args.all else ("defect_band_approx", "ZFS_occup")
 
@@ -53,7 +52,7 @@ def main():
                 raise FileNotFoundError(f"Default phonon file not found at {path_to_phonon}. Please provide a valid phonon data file.")
 
         phonon_manager = PhononManager(data_path=path_to_phonon)
-        calculator = ZFSCalculator(
+        zfs_manager = ZFSManager(
             sim_folder=args.sim_folder,
             sub_folder=sub_folder,
             zfs_folder=zfs_folder,
@@ -62,14 +61,21 @@ def main():
         )
 
         order = 1 if "first_order" in args.sim_folder else 2
+        
+        save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{order}d.npz"
 
-        print("Starting calculation of ZFS derivatives...")
-        if order == 1:
-            print("Processing first-order perturbations...")
-            generated_files = calculator.process_first_order_perturbations(args.output)
-        elif order == 2:
-            print("Processing second-order perturbations...")
-            generated_files = calculator.process_second_order_perturbations(args.data_files[0], args.output)
+        if not Path(save_name).exists():
+            zfs_relaxed, zfs_tensor, phonon_pert = zfs_manager.load_outcar_zfs_data(order)
+            zfs_manager.save_data(save_name, zfs_relaxed=zfs_relaxed, zfs_tensors=zfs_tensor, freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
+
+        if args.calc:
+            print("Starting calculation of ZFS derivatives...")
+            if order == 1:
+                print("Processing first-order perturbations...")
+                generated_files = zfs_manager.process_first_order_perturbations(args.output)
+            elif order == 2:
+                print("Processing second-order perturbations...")
+                generated_files = zfs_manager.process_second_order_perturbations(args.data_files[0], args.output)
 
     if args.data_files and not args.sim_folder:
         files_to_plot = args.data_files

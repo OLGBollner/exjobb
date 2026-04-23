@@ -7,7 +7,9 @@ class MathUtils:
 
     @staticmethod
     def broad_delta(omega, omega_p, sigma):
-        return np.exp(-0.5 * (omega_p - omega)**2 / (sigma**2)) * 1 /(np.sqrt(2*Cn.pi)*sigma)
+        delta = np.exp(-0.5 * (omega_p - omega)**2 / (sigma**2)) * 1 / (np.sqrt(2*Cn.pi)*sigma)**omega.ndim
+        print(np.sum(delta))
+        return delta
 
     @staticmethod
     def smear_data(freqs: np.ndarray, values: np.ndarray, res: float, sigma: float) -> Tuple[np.ndarray, np.ndarray]:

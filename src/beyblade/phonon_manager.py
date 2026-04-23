@@ -174,7 +174,7 @@ class PhononManager:
 
         self.symmetry_data = output_dict
 
-    def filter_sym_pairs(self, save=True, tol=0.01):
+    def filter_sym_pairs(self, save=True, debug=False, tol=0.01):
         if self.symmetry_data is None:
             raise ValueError("No symmetry data available. Call analyze_c3v_symmetry() first.")
         if self.data is None:
@@ -184,6 +184,9 @@ class PhononManager:
         num_modes = len(self.symmetry_data["freqs"])
 
         for i in range(num_modes):
+            if debug:
+                print("Symmetry: ", self.symmetry_data["sym"][i], "\nIndex: ", i+1)
+
             if i in skip_indices:
                 continue
 
