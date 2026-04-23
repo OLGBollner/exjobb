@@ -154,7 +154,7 @@ class ZFSPlotter:
         sigma = 7.5
         res = 1
 
-        X, Y, spectral_density = MathUtils.get_2d_spectral_density(data["freqs"], allowed_transitions, sigma, res)
+        X, Y, spectral_density = MathUtils.get_2d_spectral_density(data["freqs"]*CONSTANTS["MHz2meV"], allowed_transitions, sigma, res)
 
         mesh = ax.pcolormesh(X, Y, spectral_density/CONSTANTS["MHz2meV"]**2, cmap="viridis", shading="auto")
         ax.set_xlabel("Vibration frequency (meV)")

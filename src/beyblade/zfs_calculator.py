@@ -103,7 +103,7 @@ class ZFSCalculator:
     def _save_derivative_data(self, save_name, **kwargs):
         if not save_name.endswith(".npz"):
             save_name += ".npz"
-        save_name.replace(".npz", datetime.now().strftime('%Y-%m-%d') + ".npz")
+        save_name = save_name.replace(".npz", datetime.now().strftime('%Y-%m-%d') + ".npz")
 
         metadata = {
             "defect": self.defect,
