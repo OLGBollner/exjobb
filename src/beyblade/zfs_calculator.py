@@ -312,7 +312,7 @@ class ZFSCalculator:
 
             if sym == "A1":
                 V_0_0[i] = np.abs(dD[2, 2] - 0.5 * trace_in_plane) / q
-            elif sym in ["Ex"]: # HUR FAN SKA DETTA SE UT?
+            elif sym in ["Ex"]:
                 V_p_m[i] = 2*(0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2) / q)
                 V_0_pm[i] = 2*(np.sqrt(dD[0, 2]**2 + dD[1, 2]**2) / q)
 
@@ -345,25 +345,30 @@ class ZFSCalculator:
 
                 D_qi_qj = zfs_2d_dict[(i, j)]
 
-                d2D_dqidqj = (D_qi_qj - zfs_relaxed) / (q_i * q_j) - (dD_qi / q_j) - (dD_qj / q_i)
+                # d2D_dqidqj = (D_qi_qj - zfs_relaxed) / (q_i * q_j) - (dD_qi / q_j) - (dD_qj / q_i)
 
-                zfs_2nd_derivs[i, j] = d2D_dqidqj
-                zfs_2nd_derivs[j, i] = d2D_dqidqj
+                d2D_dqidqj = (D_qi_qj - zfs_relaxed - dD_qi*q_i - dD_qj*q_j)
 
-                trace_in_plane = d2D_dqidqj[0, 0] + d2D_dqidqj[1, 1]
-                diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
-                off_diag_in_plane = d2D_dqidqj[0, 1]
+                self._debug_derivs(d2D_dqidqj, (symmetry[i], symmetry[j]), (phonon_idx[i], phonon_idx[j]))
 
-                if symmetry[i] == symmetry[j]: # Måste ta hänsyn till att E moder bidrar till både 00 och +- i andra ordningens fononer
-                    V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane)
 
-                if symmetry[i] in ["Ex"] and symmetry[j] in ["A1", "A2", "Ex"]:
-                    V_p_m_2nd[i, j] = 2 * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
-                    V_0_pm_2nd[i, j] = 2 * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2))
+                # zfs_2nd_derivs[i, j] = d2D_dqidqj
+                # zfs_2nd_derivs[j, i] = d2D_dqidqj
 
-                V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
-                V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
-                V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
+                # trace_in_plane = d2D_dqidqj[0, 0] + d2D_dqidqj[1, 1]
+                # diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
+                # off_diag_in_plane = d2D_dqidqj[0, 1]
+
+                # if symmetry[i] == symmetry[j]: # Måste ta hänsyn till att E moder bidrar till både 00 och +- i andra ordningens fononer
+                #     V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane)
+
+                # if symmetry[i] in ["Ex"] and symmetry[j] in ["A1", "A2", "Ex"]:
+                #     V_p_m_2nd[i, j] = 2 * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
+                #     V_0_pm_2nd[i, j] = 2 * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2))
+
+                # V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
+                # V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
+                # V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
 
         print("Symmetry adjusted coefficients: ")
         print("V_00: ", np.sum(V_0_0_2nd > 0))
