@@ -283,7 +283,7 @@ class ZFSCalculator:
         double_line = "=" * total_width
 
         print(f"\n{double_line}\n DEBUG DERIVATIVES\n{'-' * total_width}")
-        print(f" Mode: {idx+1}\n Symmetry: {symmetry}\n{double_line}\n Max Value: {max_val:<10.6f}")
+        print(f" Mode: {idx}\n Symmetry: {symmetry}\n{double_line}\n Max Value: {max_val:<10.6f}")
         print(" Tensor Structure (3x3):\n")
         for row in dD:
             formatted_row = "  ".join(f"{val:>{col_width}.6f}" for val in row)
@@ -309,7 +309,7 @@ class ZFSCalculator:
             sym = symmetry[i]
 
             if self.debug:
-                self._debug_derivs(dD, sym, phonon_idx[i])
+                self._debug_derivs(dD, sym, phonon_idx[i]+1)
 
             if sym == "A1":
                 V_0_0[i] = np.abs(dD[2, 2] - 0.5 * trace_in_plane) / q
@@ -349,8 +349,8 @@ class ZFSCalculator:
                 # d2D_dqidqj = (D_qi_qj - zfs_relaxed) / (q_i * q_j) - (dD_qi / q_j) - (dD_qj / q_i)
 
                 d2D_dqidqj = (D_qi_qj - zfs_relaxed - dD_qi*q_i - dD_qj*q_j)
-
-                self._debug_derivs(d2D_dqidqj, (symmetry[i], symmetry[j]), (phonon_idx[i], phonon_idx[j]))
+                if self.debug:
+                    self._debug_derivs(d2D_dqidqj, (symmetry[i], symmetry[j]), (phonon_idx[i]+1, phonon_idx[j]+1))
 
                 sys.exit(1)
 
