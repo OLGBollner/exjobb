@@ -59,6 +59,7 @@ class ZFSManager:
         print(f"Saved ZFS data to: {save_name}")
         
         np.savez(save_name, **metadata, **kwargs)
+        return save_name
 
     def read_zfs_tensor(self, outcar_file: str) -> Optional[dict[str, Any]]:
         """
@@ -147,7 +148,7 @@ class ZFSManager:
 
         save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
 
-        self.save_data(save_name, zfs_derivs=zfs_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0*CONSTANTS["MHz2meV"], V_p_m=V_p_m*CONSTANTS["MHz2meV"],
+        save_name = self.save_data(save_name, zfs_derivs=zfs_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0*CONSTANTS["MHz2meV"], V_p_m=V_p_m*CONSTANTS["MHz2meV"],
                                     V_0_pm=V_0_pm*CONSTANTS["MHz2meV"], freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
 
         results.append(save_name)
@@ -180,7 +181,7 @@ class ZFSManager:
             zfs_2d, zfs_1d_derivs, zfs_relaxed, phonon_pert["eigs"], phonon_pert["sym"], phonon_pert["idx"]
         )
         
-        self.save_data(save_name, second_order=True, zfs_derivs=zfs_2nd_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0_2nd*CONSTANTS["MHz2meV"], V_p_m=V_p_m_2nd*CONSTANTS["MHz2meV"],
+        save_name = self.save_data(save_name, second_order=True, zfs_derivs=zfs_2nd_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0_2nd*CONSTANTS["MHz2meV"], V_p_m=V_p_m_2nd*CONSTANTS["MHz2meV"],
                                     V_0_pm=V_0_pm_2nd*CONSTANTS["MHz2meV"], freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
 
         results.append(save_name)
