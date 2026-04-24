@@ -65,7 +65,7 @@ def main():
         order = 1 if "first_order" in sim_folder.parent.name else 2
         zfs_manager.load_outcar_zfs_data(sim_folder=sim_folder, sub_folder=sub_folder, zfs_folder=zfs_folder)
 
-        save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{order}d.npz"
+        save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{zfs_manager.sub_folder}_{order}d.npz"
 
         raw_zfs_data = zfs_manager.save_data(save_name,
                                              order=order,
