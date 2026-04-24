@@ -219,3 +219,32 @@ class PhononManager:
             print(f"Saving file in: {filename}")
 
             np.savez(filename, **phonons, sym=phonon_symmetries["sym"], ipr=MathUtils.calc_ipr(phonons), idx=phonon_symmetries["idx"])
+
+    def get_phonon_pert(self, perturbation_scale):
+        phonon_pert = {}
+        if self.data is None:
+            raise ValueError("No phonon data loaded.")
+        if self.symmetry_data is None:
+            raise ValueError("No symmetry data loaded.")
+
+        mask = self.data["freqs"] > 0
+
+        if self.data.get("sym") is not None:
+            phonon_pert["sym"] = self.data["sym"][mask]
+            phonon_pert["idx"] = self.data["idx"][mask]
+        else:
+            print("No symmetry data, find symmetries.")
+            phonon_pert["sym"] = self.symmetry_data["sym"][mask]
+            phonon_pert["idx"] = self.symmetry_data["idx"][mask]
+
+        Q = [np.sqrt(np.sum(mode**2)) for mode in self.data["eigs"]]
+
+        phonon_pert["eigs"] = np.array([
+            perturbation_scale * mode * np.sqrt(2 * CONSTANTS["meV2rads"] * freq / Cn.hbar) if freq > 0 else None
+            for mode, freq in zip(Q, self.data["freqs"])
+        ])[mask]
+
+        phonon_pert["freqs"] = self.data["freqs"][mask]
+        phonon_pert["ipr"] = MathUtils.calc_ipr(self.data)[mask]
+
+        return phonon_pert

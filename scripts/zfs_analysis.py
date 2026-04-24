@@ -13,7 +13,7 @@ def main():
     parser.add_argument("-d", "--debug", action="store_true", help="Print debug information for derivatives.")
 
     # Commands for ZFS management
-    parser.add_argument("--sim_folder", type=str, default=None, help="Folder containing simulation results for calculation.")
+    parser.add_argument("--sim_folder", type=str, help="Folder containing simulation results for calculation.")
     parser.add_argument("-ph", "--phonon_file", type=str, help="Phonon data file to use.")
     parser.add_argument("--all", action="store_true", help="Use results from all_bands (for calculation).")
     parser.add_argument("--approx", action="store_true", help="Use results from defect_band_approx (for calculation).")
@@ -36,9 +36,9 @@ def main():
 
     if args.sim_folder:
 
-        sub_folder, zfs_folder = ("all_bands", "ZFS_hyp") if args.all else ("defect_band_approx", "ZFS_occup")
-
         sim_folder = Path(args.sim_folder)
+
+        sub_folder, zfs_folder = ("all_bands", "ZFS_hyp") if args.all else ("defect_band_approx", "ZFS_occup")
 
         if args.phonon_file:
             path_to_phonon = Path(args.phonon_file)
@@ -53,20 +53,26 @@ def main():
 
         phonon_manager = PhononManager(data_path=path_to_phonon)
         zfs_manager = ZFSManager(
-            sim_folder=args.sim_folder,
-            sub_folder=sub_folder,
-            zfs_folder=zfs_folder,
             phonon_manager=phonon_manager,
             debug=args.debug
         )
 
-        order = 1 if "first_order" in args.sim_folder else 2
+        order = 1 if "first_order" in sim_folder.parent.name else 2
         
         save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{order}d.npz"
 
         if not Path(save_name).exists():
-            zfs_relaxed, zfs_tensor, phonon_pert = zfs_manager.load_outcar_zfs_data(order)
-            zfs_manager.save_data(save_name, zfs_relaxed=zfs_relaxed, zfs_tensors=zfs_tensor, freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
+            zfs_manager.load_outcar_zfs_data(sim_folder=sim_folder, sub_folder=sub_folder, zfs_folder=zfs_folder)
+
+            raw_zfs_data = zfs_manager.save_data(save_name,
+                                                 order=order,
+                                                 eigen_rotation=zfs_manager.eigen_rotation,
+                                                 zfs_relaxed=zfs_manager.zfs_relaxed,
+                                                 zfs_tensors=zfs_manager.zfs_tensors,
+                                                 zfs_tensors_2d=zfs_manager.zfs_tensors_2d
+                                                 )
+        else:
+            zfs_manager.load_outcar_zfs_data(raw_data_path=save_name)
 
         if args.calc:
             print("Starting calculation of ZFS derivatives...")
@@ -92,6 +98,8 @@ def main():
         plotter = ZFSPlotter()
         plotter.plot_data(files_to_plot, args)
     elif not args.calc:
+        print("Finnished loading raw ZFS data.")
+    else:
         parser.print_help()
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ class ZFSPlotter:
         zfs_data = [np.load(file) for file in data_files]
 
         cell_size = zfs_data[0]["cell_size"]
-        sim_type = zfs_data[0]["sub_folder"]
+        sim_type = str(zfs_data[0]["sub_folder"])
 
         if zfs_data[0].get("second_order"):
             fig_2d, ax_2d = self._process_2d_plots(zfs_data, args)
@@ -150,15 +150,18 @@ class ZFSPlotter:
     def _render_heatmap(self, ax, fig, data):
         Z = np.linalg.norm(data["zfs_derivs"], axis=(2, 3))
         freqs = data["freqs"]
-        allowed_transitions = Z * MathUtils.broad_delta(freqs[:, None], freqs[None, :], 7.5)
         sigma = 7.5
         res = 1
 
-        X, Y, spectral_density = MathUtils.get_2d_spectral_density(data["freqs"]*CONSTANTS["MHz2meV"], allowed_transitions, sigma, res)
+        X, Y, spectral_density = MathUtils.get_2d_spectral_density(freqs, Z, sigma, res)
+        freq_x = freqs[None, :]
+        freq_y = freq_x.T
 
-        mesh = ax.pcolormesh(X, Y, spectral_density/CONSTANTS["MHz2meV"]**2, cmap="viridis", shading="auto")
+        allowed_transitions = MathUtils.broad_delta(X, Y, sigma)
+
+        mesh = ax.pcolormesh(X, Y, spectral_density * allowed_transitions, cmap="viridis", shading="auto")
         ax.set_xlabel("Vibration frequency (meV)")
         ax.set_ylabel("Vibration frequency (meV)")
 
         cbar = fig.colorbar(mesh, ax=ax)
-        cbar.set_label("Spectral function intensity (meV)")
+        cbar.set_label("Spectral function intensity")

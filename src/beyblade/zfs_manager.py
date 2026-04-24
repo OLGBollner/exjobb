@@ -1,53 +1,101 @@
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import re
-import sys
 import numpy as np
-from scipy import constants as Cn
 from pathlib import Path
 from typing import Optional, Any
 from tqdm import tqdm
 from datetime import datetime
 
 from beyblade.constants import CONSTANTS
-from beyblade.utils import MathUtils
 from beyblade.phonon_manager import PhononManager
 
 
 class ZFSManager:
-    def __init__(self, sim_folder, sub_folder, zfs_folder, phonon_manager: PhononManager, debug=False):
-        self.sim_folder = Path(sim_folder)
-        if "pert" not in self.sim_folder.name:
-            raise ValueError("Perturbation scale not found in folder name. Ensure the folder name contains the perturbation scale (e.g., 'pert_0.01').")
-        self.perturbation_scale: float = float(self.sim_folder.name.split("_")[1])
-        self.defect: str = self.sim_folder.parent.parent.name.split("_")[0]
-        self.cell_size: int = int(self.sim_folder.parent.parent.name.split("_")[-1])
-        print(f"Initialized ZFSManager with perturbation scale: {self.perturbation_scale}, cell size: {self.cell_size}")
-
-        self.sub_folder: str = sub_folder
-        self.zfs_folder: str = zfs_folder
-
+    def __init__(self, phonon_manager: PhononManager, debug=False):
+        # Phonons
         self.phonon_manager = phonon_manager
+
+        # Crystal data
+        self.defect: str =               None
+        self.cell_size: int =            None
+
+        # Simulation metadata
+        self.perturbation_scale: float = None
+        self.sub_folder: str =           None
+
+        # ZFS Data
+        self.zfs_relaxed: np.ndarray =    None
+        self.zfs_tensors: np.ndarray =    None
+        self.zfs_tensors_2d: np.ndarray = None
+        self.eigen_rotation: np.ndarray = None
+
+        # Other flags
         self.debug: bool = debug
 
-    def load_outcar_zfs_data(self, order: int):
-        zfs_relaxed, phonon_pert, eigen_rotation = self._get_zfs_data()
 
-        search_path = self.sim_folder / self.sub_folder
-        if order == 1:
-            zfs_tensor = self._load_zfs_perts(search_path, eigen_rotation, phonon_pert)
-        if order == 2:
-            zfs_tensor = self._load_zfs_perts_2d(search_path, eigen_rotation, phonon_pert)
-        else:
-            raise ValueError(f"Order must be 1 or 2, but was: {order}")
+    def load_outcar_zfs_data(self, **kwargs):
+        if (kwargs.get("sim_folder", None) is not None
+            and kwargs.get("sub_folder", None) is not None 
+            and kwargs.get("zfs_folder", None) is not None):
 
-        return zfs_relaxed, zfs_tensor, phonon_pert
+            sim_folder = Path(kwargs["sim_folder"])
+            zfs_folder = kwargs["zfs_folder"]
+
+            self.sub_folder = kwargs["sub_folder"]
+
+            if "pert" not in sim_folder.name:
+                raise ValueError("Perturbation scale not found in folder name. Ensure the folder name contains the perturbation scale (e.g., 'pert_0.01').")
+
+            self.perturbation_scale: float = float(sim_folder.name.split("_")[1])
+            self.defect: str =               sim_folder.parent.parent.name.split("_")[0]
+            self.cell_size: int =            int(sim_folder.parent.parent.name.split("_")[-1])
+
+            print(f"Initialized ZFSManager with perturbation scale: {self.perturbation_scale}, cell size: {self.cell_size}")
+
+            self._get_zfs_data(sim_folder, zfs_folder)
+
+            pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
+            phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
+
+            search_path = sim_folder / self.sub_folder
             
+            if "first" in sim_folder.parent.name:
+                self.zfs_tensors = self._load_zfs_perts(search_path, phonon_pert)
+            if "second" in sim_folder.parent.name:
+                self.zfs_tensors_2d = self._load_zfs_perts_2d(search_path, phonon_pert)
+            else:
+                raise ValueError(f"No valid order was specified: {sim_folder.parent.name}")
+  
+
+            print("Succesfully loaded ZFS data from OUTCARs")
+            return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation
+
+        elif kwargs.get("raw_data_path", None) is not None:
+            raw_data = np.load(kwargs["raw_data_path"])
+
+            self.sub_folder = raw_data["sub_folder"]
+            self.perturbation_scale = raw_data["perturbation_scale"]
+            self.defect = raw_data["defect"]
+            self.cell_size = raw_data["cell_size"]
+
+            self.zfs_relaxed = raw_data["zfs_relaxed"]
+            self.eigen_rotation = raw_data["eigen_rotation"]
+
+            if raw_data["order"] == 1:
+                self.zfs_tensors = raw_data["zfs_tensors"]
+            if raw_data["order"] == 2:
+                self.zfs_tensors_2d = raw_data["zfs_tensors"]
+            print("Succesfully loaded ZFS data from .npz file")
+
+        else:
+            print("Initialized empty phonon_manager, no data was given.")
+
 
     def save_data(self, save_name, **kwargs):
         if not save_name.endswith(".npz"):
             save_name += ".npz"
-        save_name = save_name.replace(".npz", datetime.now().strftime('%Y-%m-%d') + ".npz")
+        #save_name = save_name.replace(".npz", datetime.now().strftime('%Y-%m-%d') + ".npz")
 
         metadata = {
             "defect": self.defect,
@@ -60,6 +108,7 @@ class ZFSManager:
         
         np.savez(save_name, **metadata, **kwargs)
         return save_name
+
 
     def read_zfs_tensor(self, outcar_file: str) -> Optional[dict[str, Any]]:
         """
@@ -133,17 +182,19 @@ class ZFSManager:
             }
         }
 
+
     def process_first_order_perturbations(self, output_filename=None):
         results = []
 
-        zfs_relaxed, zfs_tensor, phonon_pert = self.load_outcar_zfs_data(order=1)
-
         if "approx" in self.sub_folder:
-            zfs_tensor *= 3/2
-            zfs_relaxed *= 3/2
+            self.zfs_tensors *= 3/2
+            self.zfs_relaxed *= 3/2
+
+        pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
+        phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
 
         zfs_derivs, V_0_0, V_p_m, V_0_pm = self._calc_derivative(
-            zfs_tensor, zfs_relaxed, phonon_pert["eigs"], phonon_pert.get("sym"), phonon_pert.get("idx")
+            phonon_pert["eigs"], phonon_pert.get("sym"), phonon_pert.get("idx")
         )
 
         save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
@@ -170,15 +221,16 @@ class ZFSManager:
         first_order_data = np.load(zfs_1d_derivs_file)
         zfs_1d_derivs = first_order_data["zfs_derivs"] / CONSTANTS["MHz2meV"]
 
-        zfs_relaxed, zfs_2d, phonon_pert = self.load_outcar_zfs_data(order=2)
-
         if "approx" in self.sub_folder:
-            for key in zfs_2d:
-                zfs_2d[key] *= 3/2
-            zfs_relaxed *= 3/2
+            for key in self.zfs_tensors_2d:
+                self.zfs_tensors_2d[key] *= 3/2
+            self.zfs_relaxed *= 3/2
+
+        pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
+        phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
 
         zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd = self._calc_second_order_derivatives(
-            zfs_2d, zfs_1d_derivs, zfs_relaxed, phonon_pert["eigs"], phonon_pert["sym"], phonon_pert["idx"]
+            self.zfs_tensors_2d, zfs_1d_derivs, self.zfs_relaxed, phonon_pert["eigs"], phonon_pert["sym"], phonon_pert["idx"]
         )
         
         save_name = self.save_data(save_name, second_order=True, zfs_derivs=zfs_2nd_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0_2nd*CONSTANTS["MHz2meV"], V_p_m=V_p_m_2nd*CONSTANTS["MHz2meV"],
@@ -187,43 +239,45 @@ class ZFSManager:
         results.append(save_name)
         return results
 
-    def _load_zfs_perts(self, search_path, eigen_rotation, phonon_pert):
+
+    def _load_zfs_perts(self, search_path, phonon_pert):
         print("Reading ZFS tensors from: ", search_path)
         outcars = list(search_path.glob("**/OUTCAR"))
-        zfs_tensor = {int(outcar.parent.name): val for outcar in outcars if (val := self.read_zfs_tensor(str(outcar)))}
-        zfs_tensor = [val for key, val in sorted(zfs_tensor.items(), key=lambda item: item[0]) if (key-1) in phonon_pert["idx"]]
+        zfs_tensors = {int(outcar.parent.name): val for outcar in outcars if (val := self.read_zfs_tensor(str(outcar)))}
+        zfs_tensors = [val for key, val in sorted(zfs_tensors.items(), key=lambda item: item[0]) if (key-1) in phonon_pert["idx"]]
 
-        zfs_tensor = np.array([eigen_rotation @ mode["D_tensor"] @ np.transpose(eigen_rotation) for mode in zfs_tensor])
+        eigen_rotation_t = self.eigen_rotation.T
+        zfs_tensors = np.array([self.eigen_rotation @ mode["D_tensor"] @ eigen_rotation_t for mode in zfs_tensors])
 
-        print("ZFS shape: ", zfs_tensor.shape)
-        return zfs_tensor
+        print("ZFS shape: ", zfs_tensors.shape)
+        return zfs_tensors
 
-    def _load_zfs_perts_2d(self, search_path, eigen_rotation, phonon_pert):
+
+    #TODO: Never use phonon index?
+    def _load_zfs_perts_2d(self, search_path, phonon_pert):
         # Implementation to read the 2D grid of OUTCAR files
         print("Reading ZFS tensors from: ", search_path)
 
-        zfs_tensor = {}
+        zfs_tensors = {}
         total_modes = int(len(phonon_pert["idx"])**2 / 2)
         print(f"Expecting up to {total_modes} OUTCAR files for 2D perturbations.")
         outcars = search_path.glob("**/OUTCAR")
-        eigen_rotation_t = np.transpose(eigen_rotation)
+        eigen_rotation_t = self.eigen_rotation.T
 
-        worker_task = partial(self._process_outcar_worker, eigen_rotation=eigen_rotation, eigen_rotation_t=eigen_rotation_t)
+        worker_task = partial(self._process_outcar_worker, eigen_rotation=self.eigen_rotation, eigen_rotation_t=eigen_rotation_t)
 
         with ProcessPoolExecutor(max_workers=4) as executor:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensor = {r[0]: r[1] for r in results if r is not None}
+        zfs_tensors = {r[0]: r[1] for r in results if r is not None}
 
-        #zfs_tensor = {(int(outcar.parent.name.split("_")[0]), int(outcar.parent.name.split("_")[1])): val for outcar in outcars if (val := read_zfs_tensor(str(outcar)))}
-        #zfs_tensor = {key: eigen_rotation @ mode["D_tensor"] @ np.transpose(eigen_rotation) for key, mode in zfs_tensor.items()}
-                
-        num_entries = len(zfs_tensor)
+        num_entries = len(zfs_tensors)
 
         print(f"Total stored pairs: {num_entries}")
 
-        return zfs_tensor
+        return zfs_tensors
+
 
     def _process_outcar_worker(self, outcar, eigen_rotation, eigen_rotation_t) -> Optional[tuple[tuple[int, int], np.ndarray]] | None:
         zfs = self.read_zfs_tensor(str(outcar))
@@ -239,45 +293,20 @@ class ZFSManager:
         transformed_zfs = eigen_rotation @ zfs["D_tensor"] @ eigen_rotation_t
         return indices, transformed_zfs
 
-    def _get_zfs_data(self):
-        pert_SI = abs(self.perturbation_scale) * CONSTANTS["ang_amu2SI"]
-        main_path = self.sim_folder.parent.parent
 
-        phonons = self.phonon_manager.data
-        sym_data = self.phonon_manager.symmetry_data
-        if phonons is None:
-            raise ValueError("No phonon data loaded. Ensure the phonon data file is present and correctly formatted.")
-        
-        if sym_data is None:
-            raise ValueError("No symmetry data loaded. Ensure the phonon data file is present and correctly formatted.")
-        phonon_pert = {}
-        mask = phonons["freqs"] > 0
+    def _get_zfs_data(self, sim_folder, zfs_folder):
+        if self.zfs_relaxed is None and self.eigen_rotation is None:
+            main_path = sim_folder.parent.parent
 
-        if phonons.get("sym") is not None:
-            phonon_pert["sym"] = phonons["sym"][mask]
-            phonon_pert["idx"] = phonons["idx"][mask]
-        else:
-            print("No symmetry data, find symmetries.")
-            phonon_pert["sym"] = sym_data["sym"][mask]
-            phonon_pert["idx"] = sym_data["idx"][mask]
+            zfs_relaxed = self.read_zfs_tensor(str(main_path / zfs_folder / "OUTCAR"))
+            if zfs_relaxed is None:
+                raise ValueError("Relaxed ZFS tensor not found. Ensure the OUTCAR file exists and contains the ZFS tensor data.")
+            eigen_rotation = zfs_relaxed["eigenvectors"]
+            self.zfs_relaxed = np.diag(zfs_relaxed["D_diag"])
+            self.eigen_rotation = np.array(eigen_rotation)
 
-        Q = [np.sqrt(np.sum(mode**2)) for mode in phonons["eigs"]]
+        return self.zfs_relaxed, self.eigen_rotation
 
-        phonon_pert["eigs"] = np.array([
-            pert_SI * mode * np.sqrt(2 * CONSTANTS["meV2rads"] * freq / Cn.hbar) if freq > 0 else None
-            for mode, freq in zip(Q, phonons["freqs"])
-        ])[mask]
-
-        phonon_pert["freqs"] = phonons["freqs"][mask]
-        phonon_pert["ipr"] = MathUtils.calc_ipr(phonons)[mask]
-
-        zfs_relaxed = self.read_zfs_tensor(str(main_path / self.zfs_folder / "OUTCAR"))
-        if zfs_relaxed is None:
-            raise ValueError("Relaxed ZFS tensor not found. Ensure the OUTCAR file exists and contains the ZFS tensor data.")
-        eigen_rotation = zfs_relaxed["eigenvectors"]
-        zfs_relaxed = np.diag(zfs_relaxed["D_diag"])
-
-        return zfs_relaxed, phonon_pert, np.array(eigen_rotation)
 
     def _debug_derivs(self, dD, symmetry, idx):
         max_val = np.max(np.abs(dD))
@@ -294,16 +323,17 @@ class ZFSManager:
             print(f"  [ {formatted_row} ]")
         print(f"{double_line}\n")
 
-    def _calc_derivative(self, zfs_tensor, zfs_relaxed, phonon_eigs, symmetry, phonon_idx):
+
+    def _calc_derivative(self, phonon_eigs, symmetry, phonon_idx):
         print("Calculating derivatives...")
 
-        zfs_deriv = np.zeros(shape=zfs_tensor.shape)
+        zfs_deriv = np.zeros(shape=self.zfs_tensors.shape)
         V_0_0 = np.zeros(shape=phonon_eigs.shape[0])
         V_0_pm = np.zeros(shape=phonon_eigs.shape[0])
         V_p_m = np.zeros(shape=phonon_eigs.shape[0])
 
         for i, q in enumerate(phonon_eigs):
-            dD = (zfs_tensor[i] - zfs_relaxed)
+            dD = (self.zfs_tensors[i] - self.zfs_relaxed)
             zfs_deriv[i] = dD / q
 
             trace_in_plane = dD[0, 0] + dD[1, 1]
@@ -327,6 +357,7 @@ class ZFSManager:
         print("V_0pm: ", np.sum(V_0_pm > 0))
 
         return zfs_deriv, V_0_0 / 3, V_p_m, V_0_pm / np.sqrt(2)
+
 
     def _calc_second_order_derivatives(self, zfs_2d_dict, zfs_1d_derivs, zfs_relaxed, phonon_eigs, symmetry, phonon_idx):
         print("Calculating derivatives...")
