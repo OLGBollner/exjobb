@@ -60,13 +60,18 @@ class ZFSManager:
 
             search_path = sim_folder / self.sub_folder
             
+            found_valid_order = False
+
             if "first" in sim_folder.parent.name:
                 self.zfs_tensors = self._load_zfs_perts(search_path, phonon_pert)
+                found_valid_order = True
+
             if "second" in sim_folder.parent.name:
                 self.zfs_tensors_2d = self._load_zfs_perts_2d(search_path, phonon_pert)
-            else:
+                found_valid_order = True
+
+            if not found_valid_order:
                 raise ValueError(f"No valid order was specified: {sim_folder.parent.name}")
-  
 
             print("Succesfully loaded ZFS data from OUTCARs")
             return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation
