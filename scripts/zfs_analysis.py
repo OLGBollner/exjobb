@@ -14,6 +14,7 @@ def main():
 
     # Commands for ZFS management
     parser.add_argument("--sim_folder", type=str, help="Folder containing simulation results for calculation.")
+    parser.add_argument("--raw_zfs_file", type=str, help="Path to raw ZFS data in .npz file")
     parser.add_argument("-ph", "--phonon_file", type=str, help="Phonon data file to use.")
     parser.add_argument("--all", action="store_true", help="Use results from all_bands (for calculation).")
     parser.add_argument("--approx", action="store_true", help="Use results from defect_band_approx (for calculation).")
@@ -59,10 +60,16 @@ def main():
 
         order = 1 if "first_order" in sim_folder.parent.name else 2
         
-        save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{order}d.npz"
 
-        if not Path(save_name).exists():
+        if args.raw_zfs_file:
+            try:
+                zfs_manager.load_outcar_zfs_data(raw_data_path=args.raw_zfs_file)
+            except Exception as e:
+                raise e
+        else:
             zfs_manager.load_outcar_zfs_data(sim_folder=sim_folder, sub_folder=sub_folder, zfs_folder=zfs_folder)
+
+            save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{order}d.npz"
 
             raw_zfs_data = zfs_manager.save_data(save_name,
                                                  order=order,
@@ -71,8 +78,6 @@ def main():
                                                  zfs_tensors=zfs_manager.zfs_tensors,
                                                  zfs_tensors_2d=zfs_manager.zfs_tensors_2d
                                                  )
-        else:
-            zfs_manager.load_outcar_zfs_data(raw_data_path=save_name)
 
         if args.calc:
             print("Starting calculation of ZFS derivatives...")

@@ -42,14 +42,14 @@ class ZFSManager:
             sim_folder = Path(kwargs["sim_folder"])
             zfs_folder = kwargs["zfs_folder"]
 
-            self.sub_folder = kwargs["sub_folder"]
-
             if "pert" not in sim_folder.name:
                 raise ValueError("Perturbation scale not found in folder name. Ensure the folder name contains the perturbation scale (e.g., 'pert_0.01').")
 
-            self.perturbation_scale: float = float(sim_folder.name.split("_")[1])
-            self.defect: str =               sim_folder.parent.parent.name.split("_")[0]
-            self.cell_size: int =            int(sim_folder.parent.parent.name.split("_")[-1])
+            self.defect =    sim_folder.parent.parent.name.split("_")[0]
+            self.cell_size = int(sim_folder.parent.parent.name.split("_")[-1])
+
+            self.perturbation_scale = float(sim_folder.name.split("_")[1])
+            self.sub_folder =                kwargs["sub_folder"]
 
             print(f"Initialized ZFSManager with perturbation scale: {self.perturbation_scale}, cell size: {self.cell_size}")
 
