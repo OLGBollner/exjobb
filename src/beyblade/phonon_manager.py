@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from scipy import constants as Cn
 import numpy as np
 from pymatgen.core import Structure
 from pathlib import Path
