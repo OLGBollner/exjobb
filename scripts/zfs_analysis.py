@@ -10,14 +10,16 @@ def main():
 
     # Commands for ZFS derivative calculation
     parser.add_argument("--calc", action="store_true", help="Run calculation of ZFS derivatives.")
+    parser.add_argument("--order", type=int, help="Derivative order")
     parser.add_argument("-d", "--debug", action="store_true", help="Print debug information for derivatives.")
 
     # Commands for ZFS management
-    parser.add_argument("--sim_folder", type=str, help="Folder containing simulation results for calculation.")
     parser.add_argument("--raw_zfs_file", type=str, help="Path to raw ZFS data in .npz file")
     parser.add_argument("-ph", "--phonon_file", type=str, help="Phonon data file to use.")
     parser.add_argument("--all", action="store_true", help="Use results from all_bands (for calculation).")
     parser.add_argument("--approx", action="store_true", help="Use results from defect_band_approx (for calculation).")
+    
+    parser.add_argument("--sim_folder", type=str, help="Folder containing simulation results for calculation.")
 
     # Commands for plotting
     parser.add_argument("--plot", action="store_true", help="Display the plot directly on the screen.")
@@ -34,6 +36,8 @@ def main():
     args = parser.parse_args()
 
     generated_files = []
+    
+    zfs_manager = None
 
     if args.sim_folder:
 
@@ -59,41 +63,43 @@ def main():
         )
 
         order = 1 if "first_order" in sim_folder.parent.name else 2
-        
+        zfs_manager.load_outcar_zfs_data(sim_folder=sim_folder, sub_folder=sub_folder, zfs_folder=zfs_folder)
 
-        if args.raw_zfs_file:
-            try:
-                zfs_manager.load_outcar_zfs_data(raw_data_path=args.raw_zfs_file)
-            except Exception as e:
-                raise e
-        else:
-            zfs_manager.load_outcar_zfs_data(sim_folder=sim_folder, sub_folder=sub_folder, zfs_folder=zfs_folder)
+        save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{order}d.npz"
 
-            save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{order}d.npz"
+        raw_zfs_data = zfs_manager.save_data(save_name,
+                                             order=order,
+                                             eigen_rotation=zfs_manager.eigen_rotation,
+                                             zfs_relaxed=zfs_manager.zfs_relaxed,
+                                             zfs_tensors=zfs_manager.zfs_tensors,
+                                             zfs_tensors_2d=zfs_manager.zfs_tensors_2d
+                                             )
 
-            raw_zfs_data = zfs_manager.save_data(save_name,
-                                                 order=order,
-                                                 eigen_rotation=zfs_manager.eigen_rotation,
-                                                 zfs_relaxed=zfs_manager.zfs_relaxed,
-                                                 zfs_tensors=zfs_manager.zfs_tensors,
-                                                 zfs_tensors_2d=zfs_manager.zfs_tensors_2d
-                                                 )
+    elif args.raw_zfs_file:
+        try:
+            phonon_manager = PhononManager(data_path=args.phonon_file)
+            zfs_manager = ZFSManager(phonon_manager=phonon_manager, debug=args.debug)
 
-        if args.calc:
-            print("Starting calculation of ZFS derivatives...")
-            if order == 1:
-                print("Processing first-order perturbations...")
-                generated_files = zfs_manager.process_first_order_perturbations(args.output)
-            elif order == 2:
-                print("Processing second-order perturbations...")
-                generated_files = zfs_manager.process_second_order_perturbations(args.data_files[0], args.output)
+            zfs_manager.load_outcar_zfs_data(raw_data_path=args.raw_zfs_file)
+        except Exception as e:
+            raise e
 
-    if args.data_files and not args.sim_folder:
+
+    if args.calc:
+        print("Starting calculation of ZFS derivatives...")
+        if args.order == 1:
+            print("Processing first-order perturbations...")
+            generated_files = zfs_manager.process_first_order_perturbations(args.output)
+        elif args.order == 2:
+            print("Processing second-order perturbations...")
+            generated_files = zfs_manager.process_second_order_perturbations(args.data_files[0], args.output)
+
+    if args.data_files and zfs_manager is None:
         files_to_plot = args.data_files
-    elif args.sim_folder:
-        if order == 1 and args.data_files:
+    elif zfs_manager is not None:
+        if args.order == 1 and args.data_files:
             files_to_plot = args.data_files
-        elif order == 2 and not generated_files:
+        elif args.order == 2 and not generated_files:
             files_to_plot = args.data_files
         else:
             files_to_plot = generated_files

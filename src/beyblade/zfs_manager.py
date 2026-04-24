@@ -77,20 +77,19 @@ class ZFSManager:
             return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation
 
         elif kwargs.get("raw_data_path", None) is not None:
-            raw_data = np.load(kwargs["raw_data_path"])
+            raw_data = np.load(kwargs["raw_data_path"], allow_pickle=True)
 
             self.sub_folder = raw_data["sub_folder"]
-            self.perturbation_scale = raw_data["perturbation_scale"]
+            self.perturbation_scale = raw_data["pert_scale"]
             self.defect = raw_data["defect"]
             self.cell_size = raw_data["cell_size"]
 
             self.zfs_relaxed = raw_data["zfs_relaxed"]
             self.eigen_rotation = raw_data["eigen_rotation"]
 
-            if raw_data["order"] == 1:
-                self.zfs_tensors = raw_data["zfs_tensors"]
-            if raw_data["order"] == 2:
-                self.zfs_tensors_2d = raw_data["zfs_tensors"]
+            self.zfs_tensors = raw_data["zfs_tensors"]
+            self.zfs_tensors_2d = raw_data["zfs_tensors_2d"]
+
             print("Succesfully loaded ZFS data from .npz file")
 
         else:
@@ -189,6 +188,8 @@ class ZFSManager:
 
 
     def process_first_order_perturbations(self, output_filename=None):
+        if None in self.zfs_tensors:
+            raise ValueError("First order ZFS data not available. Make sure to load the data first with load_outcar_zfs_data()")
         results = []
 
         if "approx" in self.sub_folder:
@@ -213,15 +214,11 @@ class ZFSManager:
 
     def process_second_order_perturbations(self, zfs_1d_derivs_file, output_filename=None):
         results = []
+        if None in self.zfs_tensors_2d:
+           raise ValueError("Second order ZFS data not available. Make sure to load the data first with load_outcar_zfs_data()")
             
         save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
 
-        """if Path(save_name).exists:
-            zfs_2d = np.load(save_name)
-            results.append(save_name)
-            print("ZFS derivatives already calculated: ", save_name)
-            return results
-        """
         # Load the pre-calculated first order derivatives to optimize compute
         first_order_data = np.load(zfs_1d_derivs_file)
         zfs_1d_derivs = first_order_data["zfs_derivs"] / CONSTANTS["MHz2meV"]
