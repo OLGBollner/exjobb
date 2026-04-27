@@ -36,7 +36,7 @@ class ZFSManager:
 
     def load_outcar_zfs_data(self, **kwargs):
         if (kwargs.get("sim_folder", None) is not None
-            and kwargs.get("sub_folder", None) is not None 
+            and kwargs.get("sub_folder", None) is not None
             and kwargs.get("zfs_folder", None) is not None):
 
             sim_folder = Path(kwargs["sim_folder"])
@@ -59,7 +59,7 @@ class ZFSManager:
             phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
 
             search_path = sim_folder / self.sub_folder
-            
+
             found_valid_order = False
 
             if "first" in sim_folder.parent.name:
@@ -109,7 +109,7 @@ class ZFSManager:
         }
 
         print(f"Saved ZFS data to: {save_name}")
-        
+
         np.savez(save_name, **metadata, **kwargs)
         return save_name
 
@@ -210,13 +210,13 @@ class ZFSManager:
 
         results.append(save_name)
         return results
-    
+
 
     def process_second_order_perturbations(self, zfs_1d_derivs_file, output_filename=None):
         results = []
         if None in self.zfs_tensors_2d:
            raise ValueError("Second order ZFS data not available. Make sure to load the data first with load_outcar_zfs_data()")
-            
+
         save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
 
         # Load the pre-calculated first order derivatives to optimize compute
@@ -234,7 +234,7 @@ class ZFSManager:
         zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd = self._calc_second_order_derivatives(
             self.zfs_tensors_2d, zfs_1d_derivs, self.zfs_relaxed, phonon_pert["eigs"], phonon_pert["sym"], phonon_pert["idx"]
         )
-        
+
         save_name = self.save_data(save_name, second_order=True, zfs_derivs=zfs_2nd_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0_2nd*CONSTANTS["MHz2meV"], V_p_m=V_p_m_2nd*CONSTANTS["MHz2meV"],
                                     V_0_pm=V_0_pm_2nd*CONSTANTS["MHz2meV"], freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
 
@@ -271,6 +271,7 @@ class ZFSManager:
         with ProcessPoolExecutor(max_workers=4) as executor:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
+        #TODO: ADD PHONON DATA TO ZFS TENSOR!!!
         # Filter out any None results
         zfs_tensors = {r[0]: r[1] for r in results if r is not None}
 
@@ -310,7 +311,7 @@ class ZFSManager:
         return self.zfs_relaxed, self.eigen_rotation
 
 
-    def _debug_derivs(self, dD, symmetry, idx):
+    def _debug_derivs(self, dD, q, symmetry, idx):
         max_val = np.max(np.abs(dD))
 
         col_width = 12
@@ -318,7 +319,7 @@ class ZFSManager:
         double_line = "=" * total_width
 
         print(f"\n{double_line}\n DEBUG DERIVATIVES\n{'-' * total_width}")
-        print(f" Mode: {idx}\n Symmetry: {symmetry}\n{double_line}\n Max Value: {max_val:<10.6f}")
+        print(f" Mode: {idx}\n Symmetry: {symmetry}\n Perturbation: {q}\n{double_line}\n Max Value: {max_val:<10.6f}")
         print(" Tensor Structure (3x3):\n")
         for row in dD:
             formatted_row = "  ".join(f"{val:>{col_width}.6f}" for val in row)
@@ -345,7 +346,7 @@ class ZFSManager:
             sym = symmetry[i]
 
             if self.debug:
-                self._debug_derivs(dD, sym, phonon_idx[i]+1)
+                self._debug_derivs(dD, q, sym, phonon_idx[i]+1)
 
             if sym == "A1":
                 V_0_0[i] = np.abs(dD[2, 2] - 0.5 * trace_in_plane) / q
@@ -364,7 +365,7 @@ class ZFSManager:
     def _calc_second_order_derivatives(self, zfs_2d_dict, zfs_1d_derivs, zfs_relaxed, phonon_eigs, symmetry, phonon_idx):
         print("Calculating derivatives...")
         n_modes = len(phonon_eigs)
-        
+
         zfs_2nd_derivs = np.zeros((n_modes, n_modes, 3, 3))
         V_0_0_2nd = np.zeros((n_modes, n_modes))
         V_p_m_2nd = np.zeros((n_modes, n_modes))
