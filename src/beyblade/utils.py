@@ -103,10 +103,51 @@ class MathUtils:
         return mode_iprs
 
     @staticmethod
-    def get_c3_111_matrix():
-        return np.array([[0, 0, 1],
-                         [1, 0, 0],
-                         [0, 1, 0]])
+    def rotation_matrix_around_axis(axis, angle):
+        """
+        Compute the 3x3 rotation matrix for a rotation by `angle` (in radians)
+        around the given axis.
+
+        Parameters
+        ----------
+        axis : array_like (3,)
+            The rotation axis. It will be normalized internally.
+        angle : float
+            Rotation angle in radians (right-hand rule).
+
+        Returns
+        -------
+        R : numpy.ndarray (3,3)
+            Rotation matrix.
+        """
+        axis = np.asarray(axis, dtype=float)
+        axis = axis / np.linalg.norm(axis)
+        x, y, z = axis
+
+        cos_a = np.cos(angle)
+        sin_a = np.sin(angle)
+        omc = 1 - cos_a  # 1 - cos(angle)
+
+        R = np.array([
+            [cos_a + x*x*omc,      x*y*omc - z*sin_a,   x*z*omc + y*sin_a],
+            [y*x*omc + z*sin_a,    cos_a + y*y*omc,     y*z*omc - x*sin_a],
+            [z*x*omc - y*sin_a,    z*y*omc + x*sin_a,   cos_a + z*z*omc]
+        ])
+        return R
+
+    @staticmethod
+    def rotation_around_symmetry_axis(eigvec, order=3):
+        """
+        Return the rotation matrix for a C<order> rotation around the given
+        eigenvector (symmetry axis).
+
+        eigvec : array_like (3,)
+            The “z‑axis” eigenvector (e.g., the one with unique eigenvalue).
+        order  : int
+            Rotation order (2 → 180°, 3 → 120°, etc.).
+        """
+        angle = 2 * np.pi / order
+        return MathUtils.rotation_matrix_around_axis(eigvec, angle)
 
     @staticmethod
     def get_sv_matrix(axis_sv: list = [1, -1, 0]):

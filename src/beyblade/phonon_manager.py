@@ -127,7 +127,14 @@ class PhononManager:
         eigs = self.data['eigs']
         lattice = self.data['lattice']
 
-        R_C3 = MathUtils.get_c3_111_matrix()
+        if "Si" in symbols and "Cl" in symbols:
+            principal_axis = [0, 0, 1]
+        elif "C" in symbols and "N" in symbols:
+            principal_axis = [1, 1, 1]
+        else:
+            raise NotImplementedError(f"Defect type not yet implemented: {set(symbols)}")
+
+        R_C3 = MathUtils.rotation_around_symmetry_axis(principal_axis, 3)
         R_sv = MathUtils.get_sv_matrix([1, -1, 0])
 
         inv_lat = np.linalg.inv(lattice)
