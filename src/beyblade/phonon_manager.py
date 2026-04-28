@@ -121,13 +121,13 @@ class PhononManager:
         if self.data is None:
             raise ValueError("No phonon data loaded.")
 
+        shift = self.translate_defect_to_origin()
+
         frac_atoms = self.data['atoms']
         symbols = self.data['atom_symbols']
         freqs = self.data['freqs']
         eigs = self.data['eigs']
         lattice = self.data['lattice']
-
-        shift = self.translate_defect_to_origin()
 
         if "Si" in symbols and "Cl" in symbols:
             principal_axis = [0, 0, 1]
