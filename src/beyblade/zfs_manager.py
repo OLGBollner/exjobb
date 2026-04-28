@@ -287,7 +287,6 @@ class ZFSManager:
 
         index_parts = outcar.parent.name.split("_")
         indices = tuple(int(part)-1 for part in index_parts if part.isdigit())
-        print(indices)
         if len(indices) != 2:
             print(f"Warning: Could not extract valid indices from folder name {outcar.parent.name}. Skipping this file.")
             return None

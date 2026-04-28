@@ -228,15 +228,13 @@ class PhononManager:
         if self.symmetry_data is None:
             raise ValueError("No symmetry data loaded.")
 
-        mask = self.data["freqs"] > 0
-
         if self.data.get("sym") is not None:
-            phonon_pert["sym"] = self.data["sym"][mask]
-            phonon_pert["idx"] = self.data["idx"][mask]
+            phonon_pert["sym"] = self.data["sym"]
+            phonon_pert["idx"] = self.data["idx"]
         else:
             print("No symmetry data, find symmetries.")
-            phonon_pert["sym"] = self.symmetry_data["sym"][mask]
-            phonon_pert["idx"] = self.symmetry_data["idx"][mask]
+            phonon_pert["sym"] = self.symmetry_data["sym"]
+            phonon_pert["idx"] = self.symmetry_data["idx"]
 
         Q = [np.sqrt(np.sum(mode**2)) for mode in self.data["eigs"]]
 
@@ -246,9 +244,9 @@ class PhononManager:
         phonon_pert["eigs"] = np.array([
             perturbation_scale * mode * np.sqrt(2 * CONSTANTS["meV2rads"] * freq / Cn.hbar) if freq > 0 else None
             for mode, freq in zip(Q, self.data["freqs"])
-        ])[mask]
+        ])
 
-        phonon_pert["freqs"] = self.data["freqs"][mask]
-        phonon_pert["ipr"] = MathUtils.calc_ipr(self.data)[mask]
+        phonon_pert["freqs"] = self.data["freqs"]
+        phonon_pert["ipr"] = MathUtils.calc_ipr(self.data)
 
         return phonon_pert
