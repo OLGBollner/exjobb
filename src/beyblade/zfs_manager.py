@@ -270,9 +270,8 @@ class ZFSManager:
         with ProcessPoolExecutor(max_workers=4) as executor:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
-        #TODO: ADD PHONON DATA TO ZFS TENSOR!!!
         # Filter out any None results
-        zfs_tensors = {r[0]: r[1] for r in results if r is not None}
+        zfs_tensors = {r[0]: {"tensor": r[1], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["eigs"][r[0][0]], phonon_pert["eigs"][r[0][1]]) } for r in results if r is not None}
 
         num_entries = len(zfs_tensors)
 
