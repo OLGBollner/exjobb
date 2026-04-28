@@ -182,18 +182,18 @@ class PhononManager:
             raise ValueError("No phonon data loaded.")
         
         skip_indices = set()
-        num_modes = len(self.symmetry_data["freqs"])
 
-        for i in range(num_modes):
+        for i in range(self.nmodes):
             if debug:
-                print("Symmetry: ", self.symmetry_data["sym"][i], "\nIndex: ", i+1)
+                delimiter = 10*"="
+                print(delimiter,"\n", "Symmetry: ", self.symmetry_data["sym"][i], "\nIndex: ", i+1, "\nC3: ", self.symmetry_data["char_C3"][i], "\nsv: ", self.symmetry_data["char_sv"][i], "\n", delimiter, "\n")
 
             if i in skip_indices:
                 continue
 
             if "E" in self.symmetry_data['sym'][i]:
                 # Check for nearly degenerate partner
-                for j in range(i + 1, num_modes):
+                for j in range(i + 1, self.nmodes):
                     if j not in skip_indices and "E" in self.symmetry_data['sym'][j]:
                         if abs(self.symmetry_data['freqs'][j] - self.symmetry_data['freqs'][i]) < tol:
                             skip_idx = j if self.symmetry_data["sym"][i] == "Ex" else i
