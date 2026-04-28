@@ -150,9 +150,23 @@ class MathUtils:
         return MathUtils.rotation_matrix_around_axis(eigvec, angle)
 
     @staticmethod
-    def get_sv_matrix(axis_sv: list = [1, -1, 0]):
-        n = np.array(axis_sv) / np.linalg.norm(axis_sv)
-        return np.eye(3) - 2 * np.outer(n, n)
+    def reflection_matrix(plane_normal):
+        """
+        Return the 3x3 Householder matrix that reflects a vector
+        across the plane whose unit normal is `plane_normal`.
+
+        Parameters
+        ----------
+        plane_normal : array_like (3,)
+            A vector perpendicular to the mirror plane. It will be normalised.
+
+        Returns
+        -------
+        M : numpy.ndarray (3,3)
+        """
+        n = np.asarray(plane_normal, dtype=float)
+        n = n / np.linalg.norm(n)
+        return np.eye(3) - 2.0 * np.outer(n, n)
 
     @staticmethod
     def fmt(val, precision=6):

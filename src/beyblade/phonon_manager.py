@@ -129,13 +129,15 @@ class PhononManager:
 
         if "Si" in symbols and "Cl" in symbols:
             principal_axis = [0, 0, 1]
+            reflection_normal = lattice[0] - lattice[1]
         elif "C" in symbols and "N" in symbols:
             principal_axis = [1, 1, 1]
+            reflection_normal = [1, -1, 0]
         else:
             raise NotImplementedError(f"Defect type not yet implemented: {set(symbols)}")
 
         R_C3 = MathUtils.rotation_around_symmetry_axis(principal_axis, 3)
-        R_sv = MathUtils.get_sv_matrix([1, -1, 0])
+        R_sv = MathUtils.reflection_matrix(reflection_normal)
 
         inv_lat = np.linalg.inv(lattice)
         num_atoms = frac_atoms.shape[0]
