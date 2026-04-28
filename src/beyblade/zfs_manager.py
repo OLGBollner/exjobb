@@ -11,6 +11,103 @@ from beyblade.constants import CONSTANTS
 from beyblade.phonon_manager import PhononManager
 
 
+    def read_zfs_tensor(outcar_file: str) -> Optional[dict[str, Any]]:
+        """
+        Read the zero-field splitting (ZFS) tensor from a VASP OUTCAR file.
+
+        Args:
+            outcar_file: Path to the OUTCAR file
+
+        Returns:
+            Dictionary containing:
+                - 'D_tensor': 3x3 matrix of ZFS tensor components (MHz)
+                - 'D_diag': List of diagonal eigenvalues (MHz)
+                - 'eigenvectors': List of eigenvectors
+                - 'raw_values': Dictionary with D_xx, D_yy, D_zz, D_xy, D_xz, D_yz
+            Returns None if ZFS tensor not found
+        """
+        try:
+            with open(outcar_file, 'r') as f:
+                content = f.read()
+        except FileNotFoundError:
+            print(f"Error: File {outcar_file} not found")
+            return None
+
+        # Search for the ZFS tensor section
+        zfs_pattern = r'Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*D_xx\s+D_yy\s+D_zz\s+D_xy\s+D_xz\s+D_yz\s*-+\s*([\s\d\.\-]+?)(?=\s*-{3,})'
+
+        match = re.search(zfs_pattern, content)
+        if not match:
+            print("Warning: ZFS tensor section not found in OUTCAR: ", outcar_file)
+            return None
+
+        # Parse the tensor values
+        values_str = match.group(1).strip()
+        values = [float(x) for x in values_str.split()]
+        if len(values) != 6:
+            print(f"Error: Expected 6 ZFS tensor values, got {len(values)}")
+            return None
+
+        D_xx, D_yy, D_zz, D_xy, D_xz, D_yz = values
+
+        # Construct the symmetric 3x3 tensor
+        D_tensor = np.array([
+            [D_xx, D_xy, D_xz],
+            [D_xy, D_yy, D_yz],
+            [D_xz, D_yz, D_zz]
+        ])
+
+        # Parse diagonalized values and eigenvectors
+        diag_pattern = r'after diagonalization\s*-+\s*D_diag\s+eigenvector \(x,y,z\)\s*-+\s*((?:[\d\.\s\-]+\s+[\d\.\-]+\s+[\d\.\-]+\s+[\d\.\-]+\n?)+)'
+
+        diag_match = re.search(diag_pattern, content)
+        D_diag: list[float] = []
+        eigenvectors: list[list[float]] = []
+
+        if diag_match:
+            diag_lines = diag_match.group(1).strip().split('\n')
+            for line in diag_lines:
+                if line.strip():
+                    parts = line.split()
+                    if len(parts) == 4:
+                        D_diag.append(float(parts[0]))
+                        eigenvectors.append([float(parts[1]), float(parts[2]), float(parts[3])])
+
+        return {
+            'D_tensor': D_tensor,
+            'D_diag': D_diag,
+            'eigenvectors': eigenvectors,
+            'raw_values': {
+                'D_xx': D_xx, 'D_yy': D_yy, 'D_zz': D_zz,
+                'D_xy': D_xy, 'D_xz': D_xz, 'D_yz': D_yz
+            }
+        }
+
+    def _process_outcar_worker_1d(outcar, eigen_rotation, eigen_rotation_t):
+        zfs = read_zfs_tensor(str(outcar))
+        if zfs is None:
+            return None
+
+        index = int(outcar.parent.name)
+        transformed_zfs = eigen_rotation @ zfs["D_tensor"] @ eigen_rotation_t
+        return index, transformed_zfs
+
+    def _process_outcar_worker_2d(outcar, eigen_rotation, eigen_rotation_t) -> Optional[tuple[tuple[int, int], np.ndarray]] | None:
+        zfs = read_zfs_tensor(str(outcar))
+        if zfs is None:
+            return None
+
+        index_parts = outcar.parent.name.split("_")
+        indices = tuple(int(part)-1 for part in index_parts if part.isdigit())
+        if len(indices) != 2:
+            print(f"Warning: Could not extract valid indices from folder name {outcar.parent.name}. Skipping this file.")
+            return None
+
+        transformed_zfs = eigen_rotation @ zfs["D_tensor"] @ eigen_rotation_t
+        return indices, transformed_zfs
+
+
+
 class ZFSManager:
     def __init__(self, phonon_manager: PhononManager, debug=False):
         # Phonons
@@ -87,7 +184,7 @@ class ZFSManager:
             self.zfs_relaxed = raw_data["zfs_relaxed"]
             self.eigen_rotation = raw_data["eigen_rotation"]
 
-            self.zfs_tensors = raw_data["zfs_tensors"]
+            self.zfs_tensors = raw_data["zfs_tensors"][()]
             self.zfs_tensors_2d = raw_data["zfs_tensors_2d"][()]
 
             print("Succesfully loaded ZFS data from .npz file")
@@ -113,78 +210,6 @@ class ZFSManager:
         np.savez(save_name, **metadata, **kwargs)
         return save_name
 
-
-    def read_zfs_tensor(self, outcar_file: str) -> Optional[dict[str, Any]]:
-        """
-        Read the zero-field splitting (ZFS) tensor from a VASP OUTCAR file.
-
-        Args:
-            outcar_file: Path to the OUTCAR file
-
-        Returns:
-            Dictionary containing:
-                - 'D_tensor': 3x3 matrix of ZFS tensor components (MHz)
-                - 'D_diag': List of diagonal eigenvalues (MHz)
-                - 'eigenvectors': List of eigenvectors
-                - 'raw_values': Dictionary with D_xx, D_yy, D_zz, D_xy, D_xz, D_yz
-            Returns None if ZFS tensor not found
-        """
-        try:
-            with open(outcar_file, 'r') as f:
-                content = f.read()
-        except FileNotFoundError:
-            print(f"Error: File {outcar_file} not found")
-            return None
-
-        # Search for the ZFS tensor section
-        zfs_pattern = r'Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*D_xx\s+D_yy\s+D_zz\s+D_xy\s+D_xz\s+D_yz\s*-+\s*([\s\d\.\-]+?)(?=\s*-{3,})'
-
-        match = re.search(zfs_pattern, content)
-        if not match:
-            print("Warning: ZFS tensor section not found in OUTCAR: ", outcar_file)
-            return None
-
-        # Parse the tensor values
-        values_str = match.group(1).strip()
-        values = [float(x) for x in values_str.split()]
-        if len(values) != 6:
-            print(f"Error: Expected 6 ZFS tensor values, got {len(values)}")
-            return None
-
-        D_xx, D_yy, D_zz, D_xy, D_xz, D_yz = values
-
-        # Construct the symmetric 3x3 tensor
-        D_tensor = np.array([
-            [D_xx, D_xy, D_xz],
-            [D_xy, D_yy, D_yz],
-            [D_xz, D_yz, D_zz]
-        ])
-
-        # Parse diagonalized values and eigenvectors
-        diag_pattern = r'after diagonalization\s*-+\s*D_diag\s+eigenvector \(x,y,z\)\s*-+\s*((?:[\d\.\s\-]+\s+[\d\.\-]+\s+[\d\.\-]+\s+[\d\.\-]+\n?)+)'
-
-        diag_match = re.search(diag_pattern, content)
-        D_diag: list[float] = []
-        eigenvectors: list[list[float]] = []
-
-        if diag_match:
-            diag_lines = diag_match.group(1).strip().split('\n')
-            for line in diag_lines:
-                if line.strip():
-                    parts = line.split()
-                    if len(parts) == 4:
-                        D_diag.append(float(parts[0]))
-                        eigenvectors.append([float(parts[1]), float(parts[2]), float(parts[3])])
-
-        return {
-            'D_tensor': D_tensor,
-            'D_diag': D_diag,
-            'eigenvectors': eigenvectors,
-            'raw_values': {
-                'D_xx': D_xx, 'D_yy': D_yy, 'D_zz': D_zz,
-                'D_xy': D_xy, 'D_xz': D_xz, 'D_yz': D_yz
-            }
-        }
 
 
     def process_first_order_perturbations(self, output_filename=None):
@@ -248,18 +273,9 @@ class ZFSManager:
         eigen_rotation_t = self.eigen_rotation.T
 
         total_modes = len(phonon_pert["idx"])
-        print(f"Expecting up to {total_modes} OUTCAR files for 2D perturbations.")
+        print(f"Expecting up to {total_modes} OUTCAR files.")
         
-        def _process_outcar_worker(outcar, eigen_rotation, eigen_rotation_t):
-            zfs = self.read_zfs_tensor(str(outcar))
-            if zfs is None:
-                return None
-
-            index = int(outcar.parent.name)
-            transformed_zfs = eigen_rotation @ zfs["D_tensor"] @ eigen_rotation_t
-            return index, transformed_zfs
-
-        worker_task = partial(_process_outcar_worker, eigen_rotation=self.eigen_rotation, eigen_rotation_t=eigen_rotation_t)
+        worker_task = partial(_process_outcar_worker_1d, eigen_rotation=self.eigen_rotation, eigen_rotation_t=eigen_rotation_t)
 
         with ProcessPoolExecutor(max_workers=4) as executor:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
@@ -288,7 +304,7 @@ class ZFSManager:
         outcars = search_path.glob("**/OUTCAR")
         eigen_rotation_t = self.eigen_rotation.T
 
-        worker_task = partial(self._process_outcar_worker, eigen_rotation=self.eigen_rotation, eigen_rotation_t=eigen_rotation_t)
+        worker_task = partial(_process_outcar_worker_2d, eigen_rotation=self.eigen_rotation, eigen_rotation_t=eigen_rotation_t)
 
         with ProcessPoolExecutor(max_workers=4) as executor:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
@@ -303,26 +319,11 @@ class ZFSManager:
         return zfs_tensors
 
 
-    def _process_outcar_worker(self, outcar, eigen_rotation, eigen_rotation_t) -> Optional[tuple[tuple[int, int], np.ndarray]] | None:
-        zfs = self.read_zfs_tensor(str(outcar))
-        if zfs is None:
-            return None
-
-        index_parts = outcar.parent.name.split("_")
-        indices = tuple(int(part)-1 for part in index_parts if part.isdigit())
-        if len(indices) != 2:
-            print(f"Warning: Could not extract valid indices from folder name {outcar.parent.name}. Skipping this file.")
-            return None
-
-        transformed_zfs = eigen_rotation @ zfs["D_tensor"] @ eigen_rotation_t
-        return indices, transformed_zfs
-
-
     def _get_zfs_data(self, sim_folder, zfs_folder):
         if self.zfs_relaxed is None and self.eigen_rotation is None:
             main_path = sim_folder.parent.parent
 
-            zfs_relaxed = self.read_zfs_tensor(str(main_path / zfs_folder / "OUTCAR"))
+            zfs_relaxed = read_zfs_tensor(str(main_path / zfs_folder / "OUTCAR"))
             if zfs_relaxed is None:
                 raise ValueError("Relaxed ZFS tensor not found. Ensure the OUTCAR file exists and contains the ZFS tensor data.")
             eigen_rotation = zfs_relaxed["eigenvectors"]
