@@ -127,6 +127,8 @@ class PhononManager:
         eigs = self.data['eigs']
         lattice = self.data['lattice']
 
+        shift = self.translate_defect_to_origin()
+
         if "Si" in symbols and "Cl" in symbols:
             principal_axis = [0, 0, 1]
             reflection_normal = lattice[0] - lattice[1]
@@ -259,3 +261,60 @@ class PhononManager:
         phonon_pert["ipr"] = MathUtils.calc_ipr(self.data)
 
         return phonon_pert
+
+
+    def translate_defect_to_origin(self, defect_pos=None, wrap=True):
+        """
+        Shift all atoms so that the defect position becomes the origin.
+
+        Parameters
+        ----------
+        defect_pos : (3,) array-like, optional
+            Defect position in Cartesian coordinates. If not given, the
+            defect centre is guessed from the atom symbols (N for NV,
+            centroid of Cl atoms for ClV).
+        wrap : bool, default True
+            If True, wrap the shifted fractional coordinates to [0,1).
+
+        Returns
+        -------
+        shift_frac : np.ndarray
+            The shift that was applied, in fractional coordinates.
+            Useful for translating the structure back later.
+        """
+        frac_atoms = self.data['atoms']
+        lattice = self.data['lattice']
+        inv_lat = np.linalg.inv(lattice)
+
+        if defect_pos is None:
+            # ─ autodetect defect centre in fractional coords ─
+            symbols = self.data['atom_symbols']
+            if 'N' in symbols and 'C' in symbols:
+                # NV centre: nitrogen atom defines the centre
+                n_idx = np.where(np.array(symbols) == 'N')[0]
+                if len(n_idx) != 1:
+                    raise ValueError(f"Expected exactly one N, found {len(n_idx)}")
+                defect_frac = frac_atoms[n_idx[0]]
+            elif 'Cl' in symbols and 'Si' in symbols:
+                # ClV centre: centroid of all chlorine atoms
+                cl_indices = np.where(np.array(symbols) == 'Cl')[0]
+                defect_frac = frac_atoms[cl_indices].mean(axis=0)
+            else:
+                # Fallback: leave structure unchanged
+                print("Warning: Could not guess defect centre, no shift applied.")
+                return np.zeros(3)
+            # The detected position is already fractional
+        else:
+            # Convert Cartesian input to fractional
+            defect_pos = np.asarray(defect_pos, dtype=float)
+            defect_frac = defect_pos @ inv_lat
+
+        # Shift all atoms so that defect_frac becomes (0,0,0)
+        shifted_frac = frac_atoms - defect_frac
+        if wrap:
+            shifted_frac = np.mod(shifted_frac, 1.0)
+
+        self.data['atoms'] = shifted_frac
+        # Store the shift for possible reversal
+        self._defect_shift = defect_frac.copy()
+        return defect_frac
