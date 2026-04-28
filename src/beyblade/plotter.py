@@ -81,15 +81,8 @@ class ZFSPlotter:
     def _render_single_dataset(self, ax, ax2, data, args, plot_name, colors):
         freqs = data["freqs"]
         pert_scale = data["pert_scale"]
-        sym = data["sym"]
         sigma = 7.5
         res = 0.5
-        marker_map = {
-            "A1": "o",
-            "A2": "s",
-            "Ex": "^",
-            "Ey": "v"
-        }
 
         if args.norm:
             color = next(colors)
@@ -108,14 +101,22 @@ class ZFSPlotter:
             V_0_0 = data["V_0_0"] / CONSTANTS["MHz2meV"]
 
             if not args.ipr:
-                ax.vlines(freqs, [0], V_p_m, label=plot_name + r"$V_{+-}^l$", color="red", alpha=0.6)
-                ax.vlines(freqs, [0], V_0_pm, label=plot_name + r"$V_{0\pm}^l$", color="blue", alpha=0.6)
-                ax.vlines(freqs, [0], V_0_0, label=plot_name + r"$V_{00}^l$", color="black", alpha=0.6)
-                # for sym_type, marker_shape in marker_map.items():
-                #     mask = sym == sym_type
-                #     ax.scatter(freqs[mask], V_p_m[mask], marker=marker_shape, edgecolors="none", color="red")
-                #     ax.scatter(freqs[mask], V_0_pm[mask], marker=marker_shape, edgecolors="none", color="blue")
-                #     ax.scatter(freqs[mask], V_0_0[mask], marker=marker_shape, edgecolors="none", color="black")
+                y_data = {
+                    plot_name + r"$V_{+-}^l$":   V_p_m,
+                    plot_name + r"$V_{0\pm}^l$": V_0_pm,
+                    plot_name + r"$V_{00}^l$":   V_0_0,
+                    }
+
+                plot_vlines_sorted_by_magnitude(
+                    ax, freqs, y_data,
+                    sort_metric="mean",            # you can also use "mean" or "median"
+                    colors=["red", "blue", "black"],
+                    alpha=0.6
+                    )
+
+                # ax.vlines(freqs, [0], V_p_m, label=plot_name + r"$V_{+-}^l$", color="red", alpha=0.6)
+                # ax.vlines(freqs, [0], V_0_pm, label=plot_name + r"$V_{0\pm}^l$", color="blue", alpha=0.6)
+                # ax.vlines(freqs, [0], V_0_0, label=plot_name + r"$V_{00}^l$", color="black", alpha=0.6)
 
             for V, col, lbl in [(V_p_m, "red", "+-"), (V_0_pm, "blue", r"0\pm"), (V_0_0, "black", "00")]:
                 smooth_x, smooth_y = MathUtils.smear_data(freqs, V * CONSTANTS["MHz2meV"], res, sigma)
@@ -165,3 +166,73 @@ class ZFSPlotter:
 
         cbar = fig.colorbar(mesh, ax=ax)
         cbar.set_label("Spectral function intensity")
+
+
+def plot_vlines_sorted_by_magnitude(
+    ax, x, y_data_dict,
+    *,
+    sort_metric="max",    # "max", "mean", "median", or custom array of per-dataset values
+    **vlines_kwargs
+):
+    """
+    Plot vertical lines such that the dataset with the *smallest* values
+    is rendered on top (drawn last).
+
+    Parameters
+    ----------
+    ax : matplotlib Axes
+    x : array-like, shape (n,)
+        Common x‑coordinates for all lines.
+    y_data_dict : dict
+        Keys are labels (used in legend), values are either:
+          - an array of y‑values (ymax), ymin is set to 0
+          - a tuple (ymin, ymax), each an array of shape (n,)
+    sort_metric : str or array-like, default "max"
+        How to rank the datasets. "max" uses the overall maximum value;
+        "mean" / "median" uses the mean or median. You can also pass
+        an array of one number per dataset (lower values → drawn last).
+    **vlines_kwargs
+        Additional keyword arguments passed to `ax.vlines`.
+        (e.g., colors, alpha, linewidth, etc.)
+    """
+    # --- Prepare data -----------------------------------------------------
+    labels = list(y_data_dict.keys())
+    data = list(y_data_dict.values())
+
+    # --- Compute a single sorting value per dataset -----------------------
+    if isinstance(sort_metric, str):
+        metric_func = {"max": np.max, "mean": np.mean, "median": np.median}[sort_metric]
+        sort_vals = []
+        for d in data:
+            if isinstance(d, tuple):          # (ymin, ymax)
+                ymax = d[1]
+            else:
+                ymax = d
+            sort_vals.append(metric_func(ymax))
+    else:
+        sort_vals = np.asarray(sort_metric)
+
+    # --- Sort datasets: *smallest* values will be drawn *last* ------------
+    order = np.argsort(sort_vals)[::-1]   # descending → plot large first, small last
+
+    # --- Extract styling --------------------------------------------------
+    colors = vlines_kwargs.pop("colors", [None] * len(labels))
+    alphas = vlines_kwargs.pop("alpha",   1.0)
+    if not isinstance(alphas, (list, tuple)):
+        alphas = [alphas] * len(labels)
+
+    # --- Plot in the determined order --------------------------------------
+    for idx in order:
+        label = labels[idx]
+        y_data = data[idx]
+        if isinstance(y_data, tuple):
+            ymin, ymax = y_data
+        else:
+            ymin, ymax = [0], y_data   # vlines expects ymin as a scalar/list, not array?
+            # Convenience: vlines can broadcast ymin/ymax if they are scalars or arrays
+        ax.vlines(x, ymin, ymax,
+                  label=label,
+                  color=colors[idx],
+                  alpha=alphas[idx],
+                  **vlines_kwargs)
+    ax.legend()

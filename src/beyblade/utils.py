@@ -113,3 +113,13 @@ class MathUtils:
         n = np.array(axis_sv) / np.linalg.norm(axis_sv)
         return np.eye(3) - 2 * np.outer(n, n)
 
+    @staticmethod
+    def fmt(val, precision=6):
+        """Return a nicely formatted string for either a number or a tuple of numbers."""
+        if isinstance(val, tuple):
+            # For tuples, show each element with the given precision,
+            # separated by commas, inside parentheses.
+            return "(" + ", ".join(f"{v:.{precision}f}" for v in val) + ")"
+        else:
+            # Assume it's a single number (float/int).
+            return f"{val:.{precision}f}"
