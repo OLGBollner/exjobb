@@ -8,7 +8,6 @@ class MathUtils:
     @staticmethod
     def broad_delta(omega, omega_p, sigma):
         delta = np.exp(-0.5 * (omega_p - omega)**2 / (sigma**2)) * 1 / (np.sqrt(2*Cn.pi)*sigma)**omega.ndim
-        print(np.sum(delta))
         return delta
 
     @staticmethod

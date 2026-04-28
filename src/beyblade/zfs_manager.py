@@ -88,7 +88,7 @@ class ZFSManager:
             self.eigen_rotation = raw_data["eigen_rotation"]
 
             self.zfs_tensors = raw_data["zfs_tensors"]
-            self.zfs_tensors_2d = raw_data["zfs_tensors_2d"]
+            self.zfs_tensors_2d = raw_data["zfs_tensors_2d"][()]
 
             print("Succesfully loaded ZFS data from .npz file")
 
@@ -232,7 +232,7 @@ class ZFSManager:
         phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
 
         zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd = self._calc_second_order_derivatives(
-            self.zfs_tensors_2d, zfs_1d_derivs, self.zfs_relaxed, phonon_pert["eigs"], phonon_pert["sym"], phonon_pert["idx"]
+            zfs_1d_derivs, phonon_pert["eigs"], phonon_pert["sym"], phonon_pert["idx"]
         )
 
         save_name = self.save_data(save_name, second_order=True, zfs_derivs=zfs_2nd_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0_2nd*CONSTANTS["MHz2meV"], V_p_m=V_p_m_2nd*CONSTANTS["MHz2meV"],
@@ -255,7 +255,6 @@ class ZFSManager:
         return zfs_tensors
 
 
-    #TODO: Never use phonon index?
     def _load_zfs_perts_2d(self, search_path, phonon_pert):
         # Implementation to read the 2D grid of OUTCAR files
         print("Reading ZFS tensors from: ", search_path)
@@ -289,6 +288,7 @@ class ZFSManager:
 
         index_parts = outcar.parent.name.split("_")
         indices = tuple(int(part)-1 for part in index_parts if part.isdigit())
+        print(indices)
         if len(indices) != 2:
             print(f"Warning: Could not extract valid indices from folder name {outcar.parent.name}. Skipping this file.")
             return None
@@ -362,7 +362,7 @@ class ZFSManager:
         return zfs_deriv, V_0_0 / 3, V_p_m, V_0_pm / np.sqrt(2)
 
 
-    def _calc_second_order_derivatives(self, zfs_2d_dict, zfs_1d_derivs, zfs_relaxed, phonon_eigs, symmetry, phonon_idx):
+    def _calc_second_order_derivatives(self, zfs_1d_derivs, phonon_eigs, symmetry, phonon_idx):
         print("Calculating derivatives...")
         n_modes = len(phonon_eigs)
 
@@ -372,23 +372,30 @@ class ZFSManager:
         V_0_pm_2nd = np.zeros((n_modes, n_modes))
 
         for i in range(n_modes):
+            global_i = phonon_idx[i]
+
             q_i = phonon_eigs[i]
             dD_qi = zfs_1d_derivs[i]
 
             for j in range(i, n_modes):
+                global_j = phonon_idx[j]
+
                 q_j = phonon_eigs[j]
                 dD_qj = zfs_1d_derivs[j]
 
-                if (i, j) not in zfs_2d_dict:
-                    continue
+                if (global_i, global_j) not in self.zfs_tensors_2d:
+                    if (global_j, global_i) not in self.zfs_tensors_2d:
+                        continue
+                    D_qi_qj = self.zfs_tensors_2d[(global_j, global_i)]
+                else:
+                    D_qi_qj = self.zfs_tensors_2d[(global_i, global_j)]
 
-                D_qi_qj = zfs_2d_dict[(i, j)]
+                #print("Phonon index: ", global_i, global_j, "\nLoop index: ", i, j)
 
-                # d2D_dqidqj = (D_qi_qj - zfs_relaxed) / (q_i * q_j) - (dD_qi / q_j) - (dD_qj / q_i)
+                d2D_dqidqj = (D_qi_qj - self.zfs_relaxed)/(q_i*q_j) - dD_qi/q_j - dD_qj/q_i
 
-                d2D_dqidqj = (D_qi_qj - zfs_relaxed - dD_qi*q_i - dD_qj*q_j)
                 if self.debug:
-                    self._debug_derivs(d2D_dqidqj, (symmetry[i], symmetry[j]), (phonon_idx[i]+1, phonon_idx[j]+1))
+                    self._debug_derivs(d2D_dqidqj, (symmetry[i], symmetry[j]), (global_i, global_j))
 
                 zfs_2nd_derivs[i, j] = d2D_dqidqj
                 zfs_2nd_derivs[j, i] = d2D_dqidqj
@@ -397,20 +404,24 @@ class ZFSManager:
                 diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
                 off_diag_in_plane = d2D_dqidqj[0, 1]
 
-                if symmetry[i] == symmetry[j]: # Måste ta hänsyn till att E moder bidrar till både 00 och +- i andra ordningens fononer
-                    V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / (q_i*q_j)
+                if symmetry[i] == symmetry[j]:
+                    V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane)
 
-                if symmetry[i] in ["Ex"] and symmetry[j] in ["A1", "A2", "Ex"]:
-                    V_p_m_2nd[i, j] = 2 * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2)) / (q_i*q_j)
-                    V_0_pm_2nd[i, j] = 2 * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2)) / (q_i*q_j)
+                either_is_E = symmetry[i] == "Ex" or symmetry[j] == "Ex"
+                if either_is_E:
+                    V_p_m_2nd[i, j] = 2 * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
+                    V_0_pm_2nd[i, j] = 2 * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2))
 
                 V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
                 V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
                 V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
 
+        print("Available keys in zfs tensor: ", sorted(self.zfs_tensors_2d.keys()))
+
         print("Symmetry adjusted coefficients: ")
         print("V_00: ", np.sum(V_0_0_2nd > 0))
         print("V_pm: ", np.sum(V_p_m_2nd > 0))
         print("V_0pm: ", np.sum(V_0_pm_2nd > 0))
+        print("Number of tensors: ", zfs_2nd_derivs.shape[0])
 
         return zfs_2nd_derivs, V_0_0_2nd / 3, V_p_m_2nd, V_0_pm_2nd / np.sqrt(2)
