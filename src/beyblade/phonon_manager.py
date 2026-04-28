@@ -195,7 +195,7 @@ class PhononManager:
         for i in range(self.nmodes):
             if debug:
                 delimiter = 20*"="
-                print(delimiter,"\n", "Symmetry: ", self.symmetry_data["sym"][i], "\nIndex: ", i+1, "\nC3: ", self.symmetry_data["char_C3"][i], "\nsv: ", self.symmetry_data["char_sv"][i], "\n", delimiter, "\n")
+                print(delimiter,"\n", "Symmetry: ", self.symmetry_data["sym"][i], "\nIndex: ", i+1, "\nC3: ", self.symmetry_data["char_C3"][i], "\nsv: ", self.symmetry_data["char_sv"][i], "\nFrequency: ", self.symmetry_data["freqs"][i], "\n", delimiter, "\n")
 
             if i in skip_indices:
                 continue
