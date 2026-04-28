@@ -88,7 +88,7 @@ def _process_outcar_worker_1d(outcar, eigen_rotation, eigen_rotation_t):
     if zfs is None:
         return None
 
-    index = int(outcar.parent.name)
+    index = int(outcar.parent.name)-1
     transformed_zfs = eigen_rotation @ zfs["D_tensor"] @ eigen_rotation_t
     return index, transformed_zfs
 
