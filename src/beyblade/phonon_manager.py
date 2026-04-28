@@ -131,7 +131,7 @@ class PhononManager:
 
         if "Si" in symbols and "Cl" in symbols:
             principal_axis = [0, 0, 1]
-            reflection_normal = lattice[0] - lattice[1]
+            reflection_normal = [1, 0, 0]
         elif "C" in symbols and "N" in symbols:
             principal_axis = [1, 1, 1]
             reflection_normal = [1, -1, 0]
