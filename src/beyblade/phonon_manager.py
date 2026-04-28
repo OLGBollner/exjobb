@@ -304,6 +304,7 @@ class PhononManager:
                 print("Warning: Could not guess defect centre, no shift applied.")
                 return np.zeros(3)
             # The detected position is already fractional
+            print("Found defect position: ", defect_frac)
         else:
             # Convert Cartesian input to fractional
             defect_pos = np.asarray(defect_pos, dtype=float)
