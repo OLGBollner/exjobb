@@ -244,14 +244,37 @@ class ZFSManager:
 
     def _load_zfs_perts(self, search_path, phonon_pert):
         print("Reading ZFS tensors from: ", search_path)
-        outcars = list(search_path.glob("**/OUTCAR"))
-        zfs_tensors = {int(outcar.parent.name): val for outcar in outcars if (val := self.read_zfs_tensor(str(outcar)))}
-        zfs_tensors = [val for key, val in sorted(zfs_tensors.items(), key=lambda item: item[0]) if (key-1) in phonon_pert["idx"]]
-
+        outcars = search_path.glob("**/OUTCAR")
         eigen_rotation_t = self.eigen_rotation.T
-        zfs_tensors = np.array([self.eigen_rotation @ mode["D_tensor"] @ eigen_rotation_t for mode in zfs_tensors])
 
-        print("ZFS shape: ", zfs_tensors.shape)
+        total_modes = len(phonon_pert["idx"])
+        print(f"Expecting up to {total_modes} OUTCAR files for 2D perturbations.")
+        
+        def _process_outcar_worker(outcar, eigen_rotation, eigen_rotation_t):
+            zfs = self.read_zfs_tensor(str(outcar))
+            if zfs is None:
+                return None
+
+            index = int(outcar.parent.name)
+            transformed_zfs = eigen_rotation @ zfs["D_tensor"] @ eigen_rotation_t
+            return index, transformed_zfs
+
+        worker_task = partial(_process_outcar_worker, eigen_rotation=self.eigen_rotation, eigen_rotation_t=eigen_rotation_t)
+
+        with ProcessPoolExecutor(max_workers=4) as executor:
+            results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
+
+        # Filter out any None results
+        zfs_tensors = {r[0]: {"tensor": r[1], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["eigs"][r[0]] } for r in results if r is not None}
+
+
+        # zfs_tensors = {int(outcar.parent.name): val for outcar in outcars if (val := self.read_zfs_tensor(str(outcar)))}
+        # zfs_tensors = [val for key, val in sorted(zfs_tensors.items(), key=lambda item: item[0]) if (key-1) in phonon_pert["idx"]]
+
+        # eigen_rotation_t = self.eigen_rotation.T
+        # zfs_tensors = np.array([self.eigen_rotation @ mode["D_tensor"] @ eigen_rotation_t for mode in zfs_tensors])
+
+        print("Number of tensors: ", len(zfs_tensors.keys()))
         return zfs_tensors
 
 
@@ -273,7 +296,7 @@ class ZFSManager:
         # Filter out any None results
         zfs_tensors = {r[0]: {"tensor": r[1], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["eigs"][r[0][0]], phonon_pert["eigs"][r[0][1]]) } for r in results if r is not None}
 
-        num_entries = len(zfs_tensors)
+        num_entries = len(zfs_tensors.keys())
 
         print(f"Total stored pairs: {num_entries}")
 
