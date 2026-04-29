@@ -121,9 +121,8 @@ class PhononManager:
         if self.data is None:
             raise ValueError("No phonon data loaded.")
 
-        shift = self.translate_defect_to_origin()
+        frac_atoms, shift = self.translate_defect_to_origin()
 
-        frac_atoms = self.data['atoms']
         symbols = self.data['atom_symbols']
         freqs = self.data['freqs']
         eigs = self.data['eigs']
@@ -315,7 +314,6 @@ class PhononManager:
         if wrap:
             shifted_frac = np.mod(shifted_frac, 1.0)
 
-        self.data['atoms'] = shifted_frac
         # Store the shift for possible reversal
         self._defect_shift = defect_frac.copy()
-        return defect_frac
+        return shifted_frac, defect_frac

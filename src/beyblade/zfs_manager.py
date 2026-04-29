@@ -349,7 +349,7 @@ class ZFSManager:
     def _calc_derivative(self):
         print("Calculating derivatives...")
         n_modes = self.phonon_manager.nmodes
-        symmetry_factor = 1 if len(self.zfs_tensors.keys()) == n_modes else 2
+        symmetry_factor = self._get_symmetry_factor(n_modes, self.zfs_tensors)
 
         zfs_deriv = np.zeros(shape=(n_modes, 3, 3))
         V_0_0 = np.zeros(shape=n_modes)
@@ -391,15 +391,7 @@ class ZFSManager:
     def _calc_second_order_derivatives(self, zfs_1d_derivs):
         print("Calculating derivatives...")
         n_modes = self.phonon_manager.nmodes
-        tensor_data_size = len(self.zfs_tensors_2d.keys())
-        total_modes = n_modes
-        print("Tensor data size: ", tensor_data_size, " out of ", total_modes, " total modes")
-        if tensor_data_size == total_modes:
-            print("Using all phonon modes")
-            symmetry_factor = 1
-        else:
-            print("Excluding degenerate E modes")
-            symmetry_factor = 2
+        symmetry_factor = self._get_symmetry_factor(n_modes, self.zfs_tensors_2d)
 
 
         zfs_2nd_derivs = np.zeros((n_modes, n_modes, 3, 3))
@@ -435,10 +427,12 @@ class ZFSManager:
             diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
             off_diag_in_plane = d2D_dqidqj[0, 1]
 
+            either_is_E = sym_i in ["Ex", "Ey"] or sym_j in ["Ex", "Ey"]
             if sym_i == sym_j:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane)
+                if either_is_E:
+                    V_0_0_2nd[i, j] *= symmetry_factor
 
-            either_is_E = sym_i in ["Ex", "Ey"] or sym_j in ["Ex", "Ey"]
             if either_is_E:
                 V_p_m_2nd[i, j] = symmetry_factor * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
                 V_0_pm_2nd[i, j] = symmetry_factor * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2))
@@ -454,3 +448,16 @@ class ZFSManager:
         print("Number of tensors: ", zfs_2nd_derivs.shape)
 
         return zfs_2nd_derivs, V_0_0_2nd / 3, V_p_m_2nd, V_0_pm_2nd / np.sqrt(2)
+
+    def _get_symmetry_factor(self, n_modes, zfs_tensors):
+        tensor_data_size = len(zfs_tensors.keys())
+        total_modes = n_modes
+        print("Tensor data size: ", tensor_data_size, " out of ", total_modes, " total modes")
+        if tensor_data_size == total_modes:
+            print("Using all phonon modes")
+            symmetry_factor = 1
+        else:
+            print("Excluding degenerate E modes")
+            symmetry_factor = 2
+
+        return symmetry_factor
