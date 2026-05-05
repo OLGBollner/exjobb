@@ -188,6 +188,9 @@ class ZFSManager:
             self.zfs_tensors = raw_data["zfs_tensors"][()]
             self.zfs_tensors_2d = raw_data["zfs_tensors_2d"][()]
 
+            print("\nRelaxed ZFS tensor:")
+            print(self.zfs_relaxed,"\n")
+
             print("Succesfully loaded ZFS data from .npz file")
 
         else:
@@ -219,8 +222,9 @@ class ZFSManager:
         results = []
 
         if "approx" in self.sub_folder:
-            self.zfs_tensors *= 3/2
-            self.zfs_relaxed *= 3/2
+            for key in self.zfs_tensors:
+                self.zfs_tensors[key]["tensor"] *= 3/2
+                self.zfs_relaxed *= 3/2
 
         pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
         phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
@@ -249,7 +253,7 @@ class ZFSManager:
 
         if "approx" in self.sub_folder:
             for key in self.zfs_tensors_2d:
-                self.zfs_tensors_2d[key] *= 3/2
+                self.zfs_tensors_2d[key]["tensor"] *= 3/2
             self.zfs_relaxed *= 3/2
 
         pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
@@ -327,6 +331,9 @@ class ZFSManager:
             self.zfs_relaxed = np.diag(zfs_relaxed["D_diag"])
             self.eigen_rotation = np.array(eigen_rotation)
 
+            print("\nRelaxed ZFS tensor:")
+            print(self.zfs_relaxed,"\n")
+
         return self.zfs_relaxed, self.eigen_rotation
 
 
@@ -364,6 +371,9 @@ class ZFSManager:
             sym = item["symmetry"]
 
             dD = (D_i - self.zfs_relaxed)
+            
+            self._check_symmetry(dD, sym, i)
+
             zfs_deriv[i] = dD / q
 
             trace_in_plane = dD[0, 0] + dD[1, 1]
@@ -386,6 +396,37 @@ class ZFSManager:
         print("Number of tensors: ", zfs_deriv.shape)
 
         return zfs_deriv, V_0_0 / 3, V_p_m, V_0_pm / np.sqrt(2)
+
+    @staticmethod
+    def _check_symmetry(d_tensor: np.ndarray, symmetry: str | tuple[str, str], idx: int) -> None:
+        """
+        Validate ZFS tensor against C3v constraints using scale-aware tolerances.
+        """
+        sym_prod = (
+            MathUtils.calc_symmetry(*symmetry) 
+            if isinstance(symmetry, tuple) 
+            else [symmetry]
+        )
+
+        if sym_prod == ["A1"]:
+            diag = np.diag(d_tensor)
+            d_xx, d_yy, d_zz = diag
+            
+            tensor_scale = np.max(np.abs(diag))
+            
+            rt, at = 1e0, 1e-4
+            dyn_tol = rt * tensor_scale + at
+
+            is_axial = np.abs(d_xx - d_yy) <= dyn_tol
+            is_traceless_axial = np.abs(2 * d_xx + d_zz) <= dyn_tol
+            
+            off_diag_mask = ~np.eye(3, dtype=bool)
+            off_diags_zero = np.all(np.abs(d_tensor[off_diag_mask]) <= dyn_tol)
+
+            if not (is_axial and is_traceless_axial and off_diags_zero):
+                print(f"\nWarning: Symmetry mismatch at index {idx} with symmetry {sym_prod}")
+                print(f"Threshold: {dyn_tol:.2e} | Scale: {tensor_scale:.2f}")
+                print(d_tensor)
 
 
     def _calc_second_order_derivatives(self, zfs_1d_derivs):
@@ -413,9 +454,12 @@ class ZFSManager:
 
             D_qi_qj = item["tensor"]
 
+
             #print("Phonon index: ", global_i, global_j, "\nLoop index: ", i, j)
 
             d2D_dqidqj = (D_qi_qj - self.zfs_relaxed)/(q_i*q_j) - dD_qi/q_j - dD_qj/q_i
+
+            self._check_symmetry(d2D_dqidqj, (sym_i, sym_j), (i, j))
 
             if self.debug:
                 self._debug_derivs(d2D_dqidqj, item["pert"], item["symmetry"], (i+1, j+1))

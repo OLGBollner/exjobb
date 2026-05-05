@@ -23,9 +23,11 @@ class ZFSPlotter:
 
         cell_size = zfs_data[0]["cell_size"]
         sim_type = str(zfs_data[0]["sub_folder"])
+        defect = zfs_data[0]["defect"]
+        pert_scale = zfs_data[0]["pert_scale"]
 
         if zfs_data[0].get("second_order"):
-            fig_2d, ax_2d = self._process_2d_plots(zfs_data, args)
+            fig_2d, _ = self._process_2d_plots(zfs_data, args)
             diag_data = {key: value for key, value in zfs_data[0].items() if key not in ["zfs_derivs", "V_p_m", "V_0_pm", "V_0_0"]}
 
             print("Extracting diagonal elements...")
@@ -35,16 +37,16 @@ class ZFSPlotter:
             diag_data["V_0_0"] = np.diag(zfs_data[0]["V_0_0"])
             print("Done!")
 
-            fig, ax = self._process_1d_plots([diag_data], args)
+            fig, _ = self._process_1d_plots([diag_data], args)
             sim_type += "_2ph"
         else:
-            fig, ax = self._process_1d_plots(zfs_data, args)
+            fig, _ = self._process_1d_plots(zfs_data, args)
 
         plt.tight_layout()
         if args.plot:
             plt.show()
         else:
-            out_file = f"{args.output}{args.format}" if args.output else f"zfs_plot_{cell_size}_{sim_type}.png"
+            out_file = f"{args.output}{args.format}" if args.output else f"{defect}_{cell_size}_zfs_plot_{sim_type}_{pert_scale}.png"
             Path("figures").mkdir(exist_ok=True)
             fig.savefig(f"figures/{out_file}")
             print(f"Saved figure in figures/{out_file}")
