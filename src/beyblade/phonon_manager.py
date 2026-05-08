@@ -49,11 +49,11 @@ class PhononManager:
             lattice_points = np.array([d["coordinates"] for d in raw_data["points"]])
             lattice_vecs = [np.array(d) for d in raw_data["lattice"]]
 
-            phonon_info += {
+            phonon_info.update({
                 "atom_types": atom_types,
                 "atoms": lattice_points,
                 "lattice": np.array(lattice_vecs),
-            }
+            })
         
         return phonon_info
 
