@@ -81,7 +81,7 @@ class ZFSPlotter:
         return fig, ax
 
     def _render_single_dataset(self, ax, ax2, data, args, plot_name, colors):
-        freqs =      data["freqs"] * 1e-6
+        freqs =      data["freqs"] / CONSTANTS["MHz2J"]
         pert_scale = data["pert_scale"]
 
         sigma = 7.5
@@ -97,7 +97,7 @@ class ZFSPlotter:
             else:
                 if not args.ipr:
                     ax.vlines(freqs, [0], coupling_strength, color=color, alpha=0.6, label=plot_name + r"$|\partial D^{(1)}|$" + f" {pert_scale}")
-                smooth_x, smooth_y = MathUtils.smear_data(freqs*["MHz2meV"], coupling_strength, 1, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs*CONSTANTS["MHz2meV"], coupling_strength, 1, sigma)
                 ax2.plot(smooth_x, smooth_y, color=color, linewidth=2, label=plot_name + r"$F^{(1)}$" + f" {pert_scale}")
         else:
             V_0_pm = data["V_0_pm"] / CONSTANTS["MHz2J"]
@@ -123,7 +123,7 @@ class ZFSPlotter:
                 # ax.vlines(freqs, [0], V_0_0, label=plot_name + r"$V_{00}^l$", color="black", alpha=0.6)
 
             for V, col, lbl in [(V_p_m, "red", "+-"), (V_0_pm, "blue", r"0\pm"), (V_0_0, "black", "00")]:
-                smooth_x, smooth_y = MathUtils.smear_data(freqs*["MHz2meV"], V, res, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs*CONSTANTS["MHz2meV"], V, res, sigma)
                 ax2.plot(smooth_x, smooth_y, color=col, linewidth=2, label=plot_name + f"$F_{{{lbl}}}^{(1)}$")
 
         if args.ipr:
@@ -154,7 +154,7 @@ class ZFSPlotter:
 
     def _render_heatmap(self, ax, fig, data):
         Z = np.linalg.norm(data["zfs_derivs"], axis=(2, 3)) / CONSTANTS["MHz2J"]
-        freqs = data["freqs"] * 1e-6
+        freqs = data["freqs"] / CONSTANTS["MHz2J"]
         sigma = 7.5
         res = 1
 

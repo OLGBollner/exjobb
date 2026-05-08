@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import isclose
 
 from scipy import constants as Cn
 import numpy as np
@@ -31,7 +32,7 @@ class PhononManager:
         phonon_data = raw_data["phonon"][0]
         nphonon = len(phonon_data["band"])
         nlattice = len(phonon_data["band"][0]["eigenvector"])
-        mode_freqs = np.array([d["frequency"] for d in phonon_data["band"]]) * 1e12
+        mode_freqs = np.array([d["frequency"] for d in phonon_data["band"]]) * CONSTANTS["THz2meV"]
 
         mode_eigenvectors = np.zeros((nphonon, nlattice, 3))
         for i in range(nphonon):
@@ -195,8 +196,21 @@ class PhononManager:
 
         for i in range(self.nmodes):
             if debug:
-                delimiter = 20*"="
-                print(delimiter,"\n", "Symmetry: ", self.symmetry_data["sym"][i], "\nIndex: ", i+1, "\nC3: ", self.symmetry_data["char_C3"][i], "\nsv: ", self.symmetry_data["char_sv"][i], "\nFrequency: ", self.symmetry_data["freqs"][i], "\n", delimiter, "\n")
+                c3 = self.symmetry_data["char_C3"][i]
+                sv = self.symmetry_data["char_sv"][i]
+
+                if (not np.isclose(np.abs(c3), 1)
+                  or not np.isclose(np.abs(c3), 0.5)
+                  or not np.isclose(np.abs(sv), 1)
+                  or not np.isclose(np.abs(sv), 0.5)):
+                    delimiter = 20*"="
+                    print(delimiter)
+                    print("Symmetry: ", self.symmetry_data["sym"][i])
+                    print("Index: ", i+1)
+                    print("C3: ", self.symmetry_data["char_C3"][i])
+                    print("sv: ", self.symmetry_data["char_sv"][i])
+                    print("Frequency: ", self.symmetry_data["freqs"][i])
+                    print(delimiter, "\n")
 
             if i in skip_indices:
                 continue
@@ -214,7 +228,7 @@ class PhononManager:
 
         mask = [i not in skip_indices for i in range(self.nmodes)]
 
-        phonons = {key: value[mask] if (isinstance(value, np.ndarray) and value.shape[0] == self.nmodes) else value for key, value in self.data.items()}
+        phonons = {key: value[mask] if value.shape[0] == self.nmodes else value for key, value in self.data.items()}
         phonon_symmetries = {key: value[mask] for key, value in self.symmetry_data.items()}
 
         nmodes = phonon_symmetries["sym"].shape[0]
@@ -256,7 +270,7 @@ class PhononManager:
             for mode, freq in zip(Q, self.data["freqs"])
         ])
 
-        phonon_pert["freqs"] = self.data["freqs"]
+        phonon_pert["freqs"] = self.data["freqs"]*CONSTANTS["meV2J"]
         phonon_pert["ipr"] = MathUtils.calc_ipr(self.data)
 
         return phonon_pert
