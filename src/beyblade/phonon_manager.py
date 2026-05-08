@@ -199,10 +199,8 @@ class PhononManager:
                 c3 = self.symmetry_data["char_C3"][i]
                 sv = self.symmetry_data["char_sv"][i]
 
-                if (not np.isclose(np.abs(c3), 1)
-                  or not np.isclose(np.abs(c3), 0.5)
-                  or not np.isclose(np.abs(sv), 1)
-                  or not np.isclose(np.abs(sv), 0.5)):
+                if ( (not np.isclose(np.abs(c3), 1) and not np.isclose(np.abs(c3), 0.5)) 
+                  or (not np.isclose(np.abs(sv), 1) and not np.isclose(np.abs(sv), 0.5)) ):
                     delimiter = 20*"="
                     print(delimiter)
                     print("Symmetry: ", self.symmetry_data["sym"][i])
