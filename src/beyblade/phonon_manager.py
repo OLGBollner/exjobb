@@ -196,11 +196,14 @@ class PhononManager:
 
         for i in range(self.nmodes):
             if debug:
+                def is_valid_char(val):
+                    abs_val = np.abs(val)
+                    return np.isclose(abs_val, 1) or np.isclose(abs_val, 0.5)
+
                 c3 = self.symmetry_data["char_C3"][i]
                 sv = self.symmetry_data["char_sv"][i]
 
-                if ( (not np.isclose(np.abs(c3), 1) and not np.isclose(np.abs(c3), 0.5)) 
-                  or (not np.isclose(np.abs(sv), 1) and not np.isclose(np.abs(sv), 0.5)) ):
+                if not is_valid_char(c3) or not is_valid_char(sv):
                     delimiter = 20*"="
                     print(delimiter)
                     print("Symmetry: ", self.symmetry_data["sym"][i])
