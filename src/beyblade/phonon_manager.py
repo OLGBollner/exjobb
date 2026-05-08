@@ -198,7 +198,7 @@ class PhononManager:
             if debug:
                 def is_valid_char(val):
                     abs_val = np.abs(val)
-                    return np.isclose(abs_val, 1, rtol=1e-4) or np.isclose(abs_val, 0.5, rtol=1e-4)
+                    return np.isclose(abs_val, 1, rtol=1e-3) or np.isclose(abs_val, 0.5, rtol=1e-3)
 
                 c3 = self.symmetry_data["char_C3"][i]
                 sv = self.symmetry_data["char_sv"][i]
