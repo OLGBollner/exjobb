@@ -229,7 +229,7 @@ class PhononManager:
 
         mask = [i not in skip_indices for i in range(self.nmodes)]
 
-        phonons = {key: value[mask] if value.shape[0] == self.nmodes else value for key, value in self.data.items()}
+        phonons = {key: value[mask] if isinstance(value, np.ndarray) and value.ndim > 0 and value.shape[0] == self.nmodes else value for key, value in self.data.items()}
         phonon_symmetries = {key: value[mask] for key, value in self.symmetry_data.items()}
 
         nmodes = phonon_symmetries["sym"].shape[0]
