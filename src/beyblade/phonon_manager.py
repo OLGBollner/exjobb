@@ -31,7 +31,7 @@ class PhononManager:
         phonon_data = raw_data["phonon"][0]
         nphonon = len(phonon_data["band"])
         nlattice = len(phonon_data["band"][0]["eigenvector"])
-        mode_freqs = np.array([d["frequency"] for d in phonon_data["band"]]) * CONSTANTS["THz2meV"]
+        mode_freqs = np.array([d["frequency"] for d in phonon_data["band"]]) * 1e12
 
         mode_eigenvectors = np.zeros((nphonon, nlattice, 3))
         for i in range(nphonon):

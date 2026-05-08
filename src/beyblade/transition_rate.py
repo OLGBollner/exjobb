@@ -91,18 +91,19 @@ class TransitionRate:
       return V_p_m_2ph
     return np.zeros_like(V_0_pm_2ph)
 
-  def _compute_two_phonon_rates(self, T, omega_spin_meV, res=0.01, sigma=7.5):
+  def _compute_two_phonon_rates(self, T, omega_spin_meV, res=1, sigma=7.5):
     if self.data is None:
       raise ValueError("Data not loaded. Please call load_data() first.")
 
     freqs = self.data["freqs"]  # raw mode frequencies (N_modes,)
 
-    V_0_pm_2ph = self.get_2ph_coupling("V_0_pm")
-    V_p_m_2ph  = self.get_2ph_coupling("V_p_m")
-    V_0_0_2ph  = self.get_2ph_coupling("V_0_0")
-    omega_x, omega_y, J_0_pm     = MathUtils.get_2d_spectral_density(freqs, V_0_pm_2ph, sigma, 1)
-    _, _, J_p_m      = MathUtils.get_2d_spectral_density(freqs, V_p_m_2ph, sigma, 1)
-    _, _, J_0_0_base = MathUtils.get_2d_spectral_density(freqs, V_0_0_2ph, sigma, 1)
+    omega_x, omega_y, V_0_pm_2ph = MathUtils.expand_data_2d(freqs, self.get_2ph_coupling("V_0_pm"), res, sigma)
+    _, _, V_p_m_2ph  = MathUtils.expand_data_2d(freqs, self.get_2ph_coupling("V_p_m"), res, sigma)
+    _, _, V_0_0_2ph  = MathUtils.expand_data_2d(freqs, self.get_2ph_coupling("V_0_0"), res, sigma)
+
+    J_0_pm     = MathUtils.get_2d_spectral_density(freqs, V_0_pm_2ph, res, sigma)
+    J_p_m      = MathUtils.get_2d_spectral_density(freqs, V_p_m_2ph, res, sigma)
+    J_0_0_base = MathUtils.get_2d_spectral_density(freqs, V_0_0_2ph, res, sigma)
 
     def get_J_path(m1, m2) -> np.ndarray:
       if m1 == m2:
@@ -117,20 +118,21 @@ class TransitionRate:
 
     f2ph     = (2 * np.pi / Cn.hbar) * (CONSTANTS["meV2J"] * res)**2
 
+    print("Calculating integral...")
     for ms in self.ms_values:
       for ms_prime in self.ms_values:
         if ms == ms_prime:
           continue
 
         rate_key = f"{ms}_to_{ms_prime}"
-        #V2 = np.abs(self._get_V2ph(ms_prime, ms, V_0_pm_2ph, V_p_m_2ph, V_0_0_2ph)[np.ix_(mask, mask)])**2
+        V2 = np.abs(self._get_V2ph(ms_prime, ms, V_0_pm_2ph, V_p_m_2ph, V_0_0_2ph)[mask])**2
         J = get_J_path(ms_prime, ms)
         J_m = J[mask]
         total = 0.0
 
         for proc, (s, sp) in PHONON_PROCESSES.items():
           delta       = MathUtils.broad_delta(omega_x, omega_y, sigma)
-          total      += np.sum(J_m * bose[proc][mask] * delta[mask])
+          total      += np.sum(V2 * bose[proc][mask] * delta[mask])
 
         self.transition_rate["two_phonon"][rate_key] = f2ph * total
 
@@ -149,13 +151,25 @@ class TransitionRate:
     if self.data is None:
       raise ValueError("Data not loaded. Please call load_data() first.")
 
-    omega, J_0_pm    = self.get_spectral_density("V_0_pm", res, sigma)
+    V_0_0 = self.data["V_0_0"]
+    V_0_pm = self.data["V_0_pm"]
+    V_p_m = self.data["V_p_m"]
+
+    omega, V_0_0 = MathUtils.expand_data(self.data["freqs"], V_0_0, res, sigma)
+    _, V_0_pm = MathUtils.expand_data(self.data["freqs"], V_0_pm, res, sigma)
+    _, V_p_m = MathUtils.expand_data(self.data["freqs"], V_p_m, res, sigma)
+
+    _, J_0_pm    = self.get_spectral_density("V_0_pm", res, sigma)
     _, J_p_m         = self.get_spectral_density("V_p_m",  res, sigma)
-    _, J_0_0_base    = self.get_spectral_density("V_0_0",  res, sigma)
+    _, J_0_0    = self.get_spectral_density("V_0_0",  res, sigma)
+    print("Spectral functions:")
+    print(f"J_0_pm: {J_0_pm.max()}")
+    print(f"J_p_m: {J_p_m.max()}")
+    print(f"J_0_0: {J_0_0.max()}")
 
     def get_J_path(m1, m2):
       if m1 == m2:
-        return (self.Fz_elements[m1]**2) * J_0_0_base
+        return (self.Fz_elements[m1]**2) * J_0_0
       diff = abs(m1 - m2)
       if diff == 1: return J_0_pm
       if diff == 2: return J_p_m
@@ -167,10 +181,17 @@ class TransitionRate:
     delta = MathUtils.broad_delta(omega, omega_spin_meV, sigma)
 
     f1_factor = (2 * np.pi / Cn.hbar) * CONSTANTS["meV2J"] * res
+    print("f1: ", f1_factor)
     self.transition_rate["first_order"]["0_to_1"]  = f1_factor * np.sum(J_0_pm[mask] * (2 * n[mask] + 1) * delta[mask]) * 4
     self.transition_rate["first_order"]["1_to_-1"] = f1_factor * np.sum(J_p_m[mask] * (2 * n[mask] + 1) * delta[mask]) * 2
 
     f2_factor = (4 * np.pi / Cn.hbar) * res * CONSTANTS["meV2J"]
+    print("f2: ", f2_factor)
+
+    print("Integrand values for transition:")
+    print("E_sq: ", np.max(omega[mask]**2))
+    print("n: ", np.max(n[mask]**2 + n[mask]))
+
     for ms in self.ms_values:
       for ms_prime in self.ms_values:
         if ms == ms_prime:

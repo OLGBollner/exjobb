@@ -233,8 +233,8 @@ class ZFSManager:
 
         save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
 
-        save_name = self.save_data(save_name, zfs_derivs=zfs_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0*CONSTANTS["MHz2meV"], V_p_m=V_p_m*CONSTANTS["MHz2meV"],
-                                    V_0_pm=V_0_pm*CONSTANTS["MHz2meV"], freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
+        save_name = self.save_data(save_name, zfs_derivs=zfs_derivs, V_0_0=V_0_0, V_p_m=V_p_m,
+                                    V_0_pm=V_0_pm, freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
 
         results.append(save_name)
         return results
@@ -249,7 +249,7 @@ class ZFSManager:
 
         # Load the pre-calculated first order derivatives to optimize compute
         first_order_data = np.load(zfs_1d_derivs_file)
-        zfs_1d_derivs = first_order_data["zfs_derivs"] / CONSTANTS["MHz2meV"]
+        zfs_1d_derivs = first_order_data["zfs_derivs"]
 
         if "approx" in self.sub_folder:
             for key in self.zfs_tensors_2d:
@@ -261,8 +261,8 @@ class ZFSManager:
 
         zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd = self._calc_second_order_derivatives(zfs_1d_derivs)
 
-        save_name = self.save_data(save_name, second_order=True, zfs_derivs=zfs_2nd_derivs*CONSTANTS["MHz2meV"], V_0_0=V_0_0_2nd*CONSTANTS["MHz2meV"], V_p_m=V_p_m_2nd*CONSTANTS["MHz2meV"],
-                                    V_0_pm=V_0_pm_2nd*CONSTANTS["MHz2meV"], freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
+        save_name = self.save_data(save_name, second_order=True, zfs_derivs=zfs_2nd_derivs, V_0_0=V_0_0_2nd, V_p_m=V_p_m_2nd,
+                                    V_0_pm=V_0_pm_2nd, freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
 
         results.append(save_name)
         return results
@@ -282,8 +282,7 @@ class ZFSManager:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensors = {r[0]: {"tensor": r[1], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["eigs"][r[0]] } for r in results if r is not None}
-
+        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["eigs"][r[0]] } for r in results if r is not None}
 
         # zfs_tensors = {int(outcar.parent.name): val for outcar in outcars if (val := self.read_zfs_tensor(str(outcar)))}
         # zfs_tensors = [val for key, val in sorted(zfs_tensors.items(), key=lambda item: item[0]) if (key-1) in phonon_pert["idx"]]
@@ -311,7 +310,7 @@ class ZFSManager:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensors = {r[0]: {"tensor": r[1], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["eigs"][r[0][0]], phonon_pert["eigs"][r[0][1]]) } for r in results if r is not None}
+        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["eigs"][r[0][0]], phonon_pert["eigs"][r[0][1]]) } for r in results if r is not None}
 
         num_entries = len(zfs_tensors.keys())
 
@@ -328,7 +327,7 @@ class ZFSManager:
             if zfs_relaxed is None:
                 raise ValueError("Relaxed ZFS tensor not found. Ensure the OUTCAR file exists and contains the ZFS tensor data.")
             eigen_rotation = zfs_relaxed["eigenvectors"]
-            self.zfs_relaxed = np.diag(zfs_relaxed["D_diag"])
+            self.zfs_relaxed = np.diag(zfs_relaxed["D_diag"])*CONSTANTS["MHz2J"]
             self.eigen_rotation = np.array(eigen_rotation)
 
             print("\nRelaxed ZFS tensor:")

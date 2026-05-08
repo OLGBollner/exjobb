@@ -8,10 +8,11 @@ class MathUtils:
     @staticmethod
     def broad_delta(omega, omega_p, sigma):
         delta = np.exp(-0.5 * (omega_p - omega)**2 / (sigma**2)) * 1 / (np.sqrt(2*Cn.pi)*sigma)**omega.ndim
+        delta /= delta.sum()
         return delta
 
     @staticmethod
-    def smear_data(freqs: np.ndarray, values: np.ndarray, res: float, sigma: float) -> Tuple[np.ndarray, np.ndarray]:
+    def expand_data(freqs: np.ndarray, values: np.ndarray, res: float, sigma: float) -> Tuple[np.ndarray, np.ndarray]:
         freqs = np.array(freqs)
         values = np.array(values)
         f_min = 0
@@ -24,6 +25,12 @@ class MathUtils:
             if 0 <= idx < len(y_dense):
                 y_dense[idx] += values[i]
 
+        return x_grid, y_dense
+
+    @staticmethod
+    def smear_data(freqs: np.ndarray, values: np.ndarray, res: float, sigma: float) -> Tuple[np.ndarray, np.ndarray]:
+        x_grid, y_dense = MathUtils.expand_data(freqs, values, res, sigma)
+
         x_kernel = np.arange(-4 * sigma, 4 * sigma + res, res)
         kernel = np.exp(-0.5 * (x_kernel / sigma)**2) / (sigma * np.sqrt(2 * Cn.pi))
         kernel /= np.sum(kernel)
@@ -33,21 +40,22 @@ class MathUtils:
         return x_grid, y_smooth
 
     @staticmethod
-    def get_2d_spectral_density(freqs, values, sigma_phys, res):
-        sigma_pixel = sigma_phys / res
-
+    def expand_data_2d(freqs, values, res, sigma):
+        print("Expanding data...")
         freqs = np.array(freqs)
+        print(freqs.shape)
+        print(freqs.max())
+
         values = np.array(values)
 
-        # print("frequency shape: ", freqs.shape)
-        # print("values shape: ", values.shape)
         values = values.flatten()
 
         f_min = 0
-        f_max = np.max(freqs) + 5 * sigma_phys
+        f_max = np.max(freqs) + 5 * sigma
 
         x_grid = np.arange(f_min, f_max, res)
         y_grid = np.arange(f_min, f_max, res)
+        print(x_grid.shape, y_grid.shape)
         dense_values = np.zeros((len(x_grid), len(y_grid)))
 
         freq_x, freq_y = np.meshgrid(freqs, freqs)
@@ -60,8 +68,16 @@ class MathUtils:
         mask = (idx_x >= 0) & (idx_x < len(x_grid)) & \
                (idx_y >= 0) & (idx_y < len(y_grid))
 
-        np.add.at(dense_values, (idx_x[mask], idx_y[mask]), values[mask]**2)
+        np.add.at(dense_values, (idx_x[mask], idx_y[mask]), values[mask])
 
+        return x_grid, y_grid, dense_values
+
+    @staticmethod
+    def get_2d_spectral_density(freqs, values, res, sigma_phys):
+
+        _, _, dense_values = MathUtils.expand_data_2d(freqs, values, sigma=sigma_phys, res=res)
+
+        sigma_pixel = sigma_phys / res
         radius_pixel = int(np.ceil(4 * sigma_pixel))
         grid_1d = np.arange(-radius_pixel, radius_pixel + 1)
         x_kernel, y_kernel = np.meshgrid(grid_1d, grid_1d)
@@ -69,9 +85,7 @@ class MathUtils:
         kernel = np.exp(-0.5 * (x_kernel**2 + y_kernel**2) / sigma_pixel**2) / (2 * np.pi * sigma_pixel**2)
         kernel /= np.sum(kernel)
 
-        X, Y = np.meshgrid(x_grid, y_grid)
-
-        return X, Y, convolve(dense_values, kernel)
+        return convolve(dense_values, kernel)
 
     @staticmethod
     def calc_ipr(phonons: Dict[str, Any]) -> np.ndarray:

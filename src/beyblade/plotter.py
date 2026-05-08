@@ -81,26 +81,28 @@ class ZFSPlotter:
         return fig, ax
 
     def _render_single_dataset(self, ax, ax2, data, args, plot_name, colors):
-        freqs = data["freqs"]
+        freqs =      data["freqs"] * 1e-6
         pert_scale = data["pert_scale"]
+
         sigma = 7.5
-        res = 0.5
+        res =   0.5
+
 
         if args.norm:
             color = next(colors)
-            coupling_strength = np.linalg.norm(data["zfs_derivs"], axis=(1, 2)) / CONSTANTS["MHz2meV"]
+            coupling_strength = np.linalg.norm(data["zfs_derivs"], axis=(1, 2)) / CONSTANTS["MHz2J"]
 
             if args.bar:
                 ax2.bar(range(len(coupling_strength)), coupling_strength, color=color, alpha=0.6, label=plot_name + r"$|\partial D^{(1)}|$")
             else:
                 if not args.ipr:
                     ax.vlines(freqs, [0], coupling_strength, color=color, alpha=0.6, label=plot_name + r"$|\partial D^{(1)}|$" + f" {pert_scale}")
-                smooth_x, smooth_y = MathUtils.smear_data(freqs, coupling_strength, 1, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs*["MHz2meV"], coupling_strength, 1, sigma)
                 ax2.plot(smooth_x, smooth_y, color=color, linewidth=2, label=plot_name + r"$F^{(1)}$" + f" {pert_scale}")
         else:
-            V_0_pm = data["V_0_pm"] / CONSTANTS["MHz2meV"]
-            V_p_m = data["V_p_m"] / CONSTANTS["MHz2meV"]
-            V_0_0 = data["V_0_0"] / CONSTANTS["MHz2meV"]
+            V_0_pm = data["V_0_pm"] / CONSTANTS["MHz2J"]
+            V_p_m = data["V_p_m"] / CONSTANTS["MHz2J"]
+            V_0_0 = data["V_0_0"] / CONSTANTS["MHz2J"]
 
             if not args.ipr:
                 y_data = {
@@ -121,14 +123,14 @@ class ZFSPlotter:
                 # ax.vlines(freqs, [0], V_0_0, label=plot_name + r"$V_{00}^l$", color="black", alpha=0.6)
 
             for V, col, lbl in [(V_p_m, "red", "+-"), (V_0_pm, "blue", r"0\pm"), (V_0_0, "black", "00")]:
-                smooth_x, smooth_y = MathUtils.smear_data(freqs, V * CONSTANTS["MHz2meV"], res, sigma)
-                ax2.plot(smooth_x, smooth_y / CONSTANTS["MHz2meV"]**2, color=col, linewidth=2, label=plot_name + f"$F_{{{lbl}}}^{(1)}$")
+                smooth_x, smooth_y = MathUtils.smear_data(freqs*["MHz2meV"], V, res, sigma)
+                ax2.plot(smooth_x, smooth_y, color=col, linewidth=2, label=plot_name + f"$F_{{{lbl}}}^{(1)}$")
 
         if args.ipr:
             if args.bar:
                 ax.bar(range(len(data["ipr"])), data["ipr"], color="blue", alpha=0.6, label="IPR")
             else:
-                smooth_x, smooth_y = MathUtils.smear_data(freqs, data["ipr"], 1, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs*CONSTANTS["MHz2meV"], data["ipr"], 1, sigma)
                 ax.plot(smooth_x, smooth_y, color="blue", alpha=0.6, label="IPR")
             ax.set_ylabel("Phonon IPR")
         else:
@@ -151,23 +153,21 @@ class ZFSPlotter:
         ax.legend(lines1 + lines2, labels1 + labels2, loc=legend_pos, frameon=True)
 
     def _render_heatmap(self, ax, fig, data):
-        Z = np.linalg.norm(data["zfs_derivs"], axis=(2, 3))
-        freqs = data["freqs"]
+        Z = np.linalg.norm(data["zfs_derivs"], axis=(2, 3)) / CONSTANTS["MHz2J"]
+        freqs = data["freqs"] * 1e-6
         sigma = 7.5
         res = 1
 
-        X, Y, spectral_density = MathUtils.get_2d_spectral_density(freqs, Z, sigma, res)
-        freq_x = freqs[None, :]
-        freq_y = freq_x.T
+        X, Y, spectral_density = MathUtils.get_2d_spectral_density(freqs*CONSTANTS["MHz2meV"], Z, sigma, res)
 
         allowed_transitions = MathUtils.broad_delta(X, Y, sigma)
 
-        mesh = ax.pcolormesh(X, Y, spectral_density * allowed_transitions, cmap="viridis", shading="auto")
+        mesh = ax.pcolormesh(X / CONSTANTS["MHz2meV"], Y / CONSTANTS["MHz2meV"], spectral_density * allowed_transitions, cmap="viridis", shading="auto")
         ax.set_xlabel("Vibration frequency (meV)")
         ax.set_ylabel("Vibration frequency (meV)")
 
         cbar = fig.colorbar(mesh, ax=ax)
-        cbar.set_label("Spectral function intensity")
+        cbar.set_label("Spectral function intensity (MHz)")
 
 
 def plot_vlines_sorted_by_magnitude(
