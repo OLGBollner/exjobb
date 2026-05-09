@@ -75,7 +75,7 @@ class MathUtils:
     @staticmethod
     def get_2d_spectral_density(freqs, values, res, sigma_phys):
 
-        _, _, dense_values = MathUtils.expand_data_2d(freqs, values, sigma=sigma_phys, res=res)
+        X, Y, dense_values = MathUtils.expand_data_2d(freqs, values, sigma=sigma_phys, res=res)
 
         sigma_pixel = sigma_phys / res
         radius_pixel = int(np.ceil(4 * sigma_pixel))
@@ -85,7 +85,7 @@ class MathUtils:
         kernel = np.exp(-0.5 * (x_kernel**2 + y_kernel**2) / sigma_pixel**2) / (2 * np.pi * sigma_pixel**2)
         kernel /= np.sum(kernel)
 
-        return convolve(dense_values, kernel)
+        return X, Y, convolve(dense_values**2, kernel)
 
     @staticmethod
     def calc_ipr(phonons: Dict[str, Any]) -> np.ndarray:

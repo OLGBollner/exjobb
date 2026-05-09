@@ -171,6 +171,12 @@ class ZFSManager:
             if not found_valid_order:
                 raise ValueError(f"No valid order was specified: {sim_folder.parent.name}")
 
+            if "approx" in self.sub_folder:
+                for key in self.zfs_tensors:
+                    self.zfs_tensors[key]["tensor"] *= 3/2
+                    self.zfs_tensors_2d[key]["tensor"] *= 3/2
+                    self.zfs_relaxed *= 3/2
+
             print("Succesfully loaded ZFS data from OUTCARs")
             return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation
 
@@ -221,11 +227,6 @@ class ZFSManager:
             raise ValueError("First order ZFS data not available. Make sure to load the data first with load_outcar_zfs_data()")
         results = []
 
-        if "approx" in self.sub_folder:
-            for key in self.zfs_tensors:
-                self.zfs_tensors[key]["tensor"] *= 3/2
-                self.zfs_relaxed *= 3/2
-
         pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
         phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
 
@@ -250,11 +251,6 @@ class ZFSManager:
         # Load the pre-calculated first order derivatives to optimize compute
         first_order_data = np.load(zfs_1d_derivs_file)
         zfs_1d_derivs = first_order_data["zfs_derivs"]
-
-        if "approx" in self.sub_folder:
-            for key in self.zfs_tensors_2d:
-                self.zfs_tensors_2d[key]["tensor"] *= 3/2
-            self.zfs_relaxed *= 3/2
 
         pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
         phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)

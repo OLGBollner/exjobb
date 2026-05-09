@@ -81,7 +81,7 @@ class ZFSPlotter:
         return fig, ax
 
     def _render_single_dataset(self, ax, ax2, data, args, plot_name, colors):
-        freqs =      data["freqs"] / CONSTANTS["MHz2J"]
+        freqs =      data["freqs"] / CONSTANTS["MHz2J"] * CONSTANTS["MHz2meV"]
         pert_scale = data["pert_scale"]
 
         sigma = 7.5
@@ -97,7 +97,7 @@ class ZFSPlotter:
             else:
                 if not args.ipr:
                     ax.vlines(freqs, [0], coupling_strength, color=color, alpha=0.6, label=plot_name + r"$|\partial D^{(1)}|$" + f" {pert_scale}")
-                smooth_x, smooth_y = MathUtils.smear_data(freqs*CONSTANTS["MHz2meV"], coupling_strength, 1, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs, coupling_strength, 1, sigma)
                 ax2.plot(smooth_x, smooth_y, color=color, linewidth=2, label=plot_name + r"$F^{(1)}$" + f" {pert_scale}")
         else:
             V_0_pm = data["V_0_pm"] / CONSTANTS["MHz2J"]
@@ -123,14 +123,14 @@ class ZFSPlotter:
                 # ax.vlines(freqs, [0], V_0_0, label=plot_name + r"$V_{00}^l$", color="black", alpha=0.6)
 
             for V, col, lbl in [(V_p_m, "red", "+-"), (V_0_pm, "blue", r"0\pm"), (V_0_0, "black", "00")]:
-                smooth_x, smooth_y = MathUtils.smear_data(freqs*CONSTANTS["MHz2meV"], V, res, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs, V, res, sigma)
                 ax2.plot(smooth_x, smooth_y, color=col, linewidth=2, label=plot_name + f"$F_{{{lbl}}}^{(1)}$")
 
         if args.ipr:
             if args.bar:
                 ax.bar(range(len(data["ipr"])), data["ipr"], color="blue", alpha=0.6, label="IPR")
             else:
-                smooth_x, smooth_y = MathUtils.smear_data(freqs*CONSTANTS["MHz2meV"], data["ipr"], 1, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs, data["ipr"], 1, sigma)
                 ax.plot(smooth_x, smooth_y, color="blue", alpha=0.6, label="IPR")
             ax.set_ylabel("Phonon IPR")
         else:
@@ -154,15 +154,15 @@ class ZFSPlotter:
 
     def _render_heatmap(self, ax, fig, data):
         Z = np.linalg.norm(data["zfs_derivs"], axis=(2, 3)) / CONSTANTS["MHz2J"]
-        freqs = data["freqs"] / CONSTANTS["MHz2J"]
+        freqs = data["freqs"] / CONSTANTS["MHz2J"] * CONSTANTS["MHz2meV"]
         sigma = 7.5
         res = 1
 
-        X, Y, spectral_density = MathUtils.get_2d_spectral_density(freqs*CONSTANTS["MHz2meV"], Z, sigma, res)
+        X, Y, spectral_density = MathUtils.get_2d_spectral_density(freqs, Z, sigma, res)
 
         allowed_transitions = MathUtils.broad_delta(X, Y, sigma)
 
-        mesh = ax.pcolormesh(X / CONSTANTS["MHz2meV"], Y / CONSTANTS["MHz2meV"], spectral_density * allowed_transitions, cmap="viridis", shading="auto")
+        mesh = ax.pcolormesh(X, Y, spectral_density * allowed_transitions, cmap="viridis", shading="auto")
         ax.set_xlabel("Vibration frequency (meV)")
         ax.set_ylabel("Vibration frequency (meV)")
 
