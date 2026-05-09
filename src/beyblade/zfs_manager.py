@@ -172,10 +172,13 @@ class ZFSManager:
                 raise ValueError(f"No valid order was specified: {sim_folder.parent.name}")
 
             if "approx" in self.sub_folder:
-                for key in self.zfs_tensors:
-                    self.zfs_tensors[key]["tensor"] *= 3/2
-                    self.zfs_tensors_2d[key]["tensor"] *= 3/2
-                    self.zfs_relaxed *= 3/2
+                self.zfs_relaxed *= 3/2
+                if "first" in sim_folder.parent.name:
+                    for key in self.zfs_tensors:
+                        self.zfs_tensors[key]["tensor"] *= 3/2
+                else:
+                    for key in self.zfs_tensors_2d:
+                        self.zfs_tensors_2d[key]["tensor"] *= 3/2
 
             print("Succesfully loaded ZFS data from OUTCARs")
             return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation
