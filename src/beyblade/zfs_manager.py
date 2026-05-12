@@ -13,12 +13,13 @@ from beyblade.phonon_manager import PhononManager
 from beyblade.utils import MathUtils
 
 
-def read_zfs_tensor(outcar_file: str) -> Optional[dict[str, Any]]:
+def read_zfs_tensor(outcar_file: str, debug: bool = False) -> Optional[dict[str, Any]]:
     """
     Read the zero-field splitting (ZFS) tensor from a VASP OUTCAR file.
 
     Args:
         outcar_file: Path to the OUTCAR file
+        debug: If True, print additional debug information
 
     Returns:
         Dictionary containing:
@@ -74,6 +75,11 @@ def read_zfs_tensor(outcar_file: str) -> Optional[dict[str, Any]]:
                 if len(parts) == 4:
                     D_diag.append(float(parts[0]))
                     eigenvectors.append([float(parts[1]), float(parts[2]), float(parts[3])])
+
+    if debug:
+        print(f"Debug: Extracted ZFS tensor values string:\n{values_str}\n")
+        print(f"Debug: Extracted diagonal values: {D_diag}")
+        print(f"Debug: Extracted eigenvectors: {eigenvectors}")
 
     return {
         'D_tensor': D_tensor,
@@ -483,14 +489,16 @@ class ZFSManager:
             V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
             V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
 
-            if self.debug:
-                self._debug_derivs(d2D_dqidqj,
-                                   item["pert"],
-                                   item["symmetry"],
-                                   (i+1, j+1),
-                                   V_0_0_2nd[i, j],
-                                   V_0_pm_2nd[i, j],
-                                   V_p_m_2nd[i, j])
+            if (i,j) == (15,15):
+                print("ZFS tensor at (15,15):", d2D_dqidqj/CONSTANTS["MHz2J"])
+                if self.debug:
+                    self._debug_derivs(d2D_dqidqj,
+                                    item["pert"],
+                                    item["symmetry"],
+                                    (i, j),
+                                    V_0_0_2nd[i, j],
+                                    V_0_pm_2nd[i, j],
+                                    V_p_m_2nd[i, j])
 
 
         print("Symmetry adjusted coefficients: ")
@@ -498,6 +506,14 @@ class ZFSManager:
         print("V_pm: ", np.sum(V_p_m_2nd > 0))
         print("V_0pm: ", np.sum(V_0_pm_2nd > 0))
         print("Number of tensors: ", zfs_2nd_derivs.shape)
+
+        #plt.plot([item["pert"] for (i, j), item in self.zfs_tensors_2d.items() if i == j])
+        plt.plot(V_0_pm_2nd.diagonal()/CONSTANTS["MHz2J"], color="red", label=r"$V_{00}^{(2)}$")
+        plt.plot(V_p_m_2nd.diagonal()/CONSTANTS["MHz2J"], color="blue", label=r"$V_{00}^{(2)}$")
+        plt.xlabel("Mode")
+        plt.ylabel("Perturbation")
+        plt.title("ZFS Perturbations")
+        plt.show()
         
         return zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd
 

@@ -32,9 +32,9 @@ class ZFSPlotter:
 
             print("Extracting diagonal elements...")
             diag_data["zfs_derivs"] = np.zeros(zfs_data[0]["zfs_derivs"].shape[0]) # Dummy data
-            diag_data["V_p_m"] = np.diag(zfs_data[0]["V_p_m"])
-            diag_data["V_0_pm"] = np.diag(zfs_data[0]["V_0_pm"])
-            diag_data["V_0_0"] = np.diag(zfs_data[0]["V_0_0"])
+            diag_data["V_p_m"] = zfs_data[0]["V_p_m"].diagonal()
+            diag_data["V_0_pm"] = zfs_data[0]["V_0_pm"].diagonal()
+            diag_data["V_0_0"] = zfs_data[0]["V_0_0"].diagonal()
             print("Done!")
 
             fig, _ = self._process_1d_plots([diag_data], args)
@@ -90,6 +90,7 @@ class ZFSPlotter:
 
         if args.norm:
             color = next(colors)
+            print(data["zfs_derivs"].shape)
             coupling_strength = np.linalg.norm(data["zfs_derivs"], axis=(1, 2)) / CONSTANTS["MHz2J"]
 
             if args.bar:
