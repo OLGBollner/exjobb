@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from math import isclose
 
 from scipy import constants as Cn
 import numpy as np
@@ -57,6 +56,16 @@ class PhononManager:
             })
         
         return phonon_info
+
+    def get_ipr(self):
+        if self.data.get("ipr", None) is not None:
+            return self.data["ipr"]
+        else:
+            self.data["ipr"] = MathUtils.calc_ipr(self.data)
+            return self.data["ipr"]
+
+    def get_freqs(self):
+        return self.data["freqs"]
 
     def read_structure_data(self, poscar_file):
         structure = Structure.from_file(poscar_file)

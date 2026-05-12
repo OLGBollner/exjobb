@@ -35,7 +35,7 @@ class MathUtils:
         kernel = np.exp(-0.5 * (x_kernel / sigma)**2) / (sigma * np.sqrt(2 * Cn.pi))
         kernel /= np.sum(kernel)
 
-        y_smooth = np.convolve(y_dense**2, kernel, mode="same")
+        y_smooth = np.convolve(y_dense**2, kernel, mode="same") * res
 
         return x_grid, y_smooth
 
@@ -85,7 +85,7 @@ class MathUtils:
         kernel = np.exp(-0.5 * (x_kernel**2 + y_kernel**2) / sigma_pixel**2) / (2 * np.pi * sigma_pixel**2)
         kernel /= np.sum(kernel)
 
-        return X, Y, convolve(dense_values**2, kernel)
+        return X, Y, convolve(dense_values**2, kernel) * res**2
 
     @staticmethod
     def calc_ipr(phonons: Dict[str, Any]) -> np.ndarray:

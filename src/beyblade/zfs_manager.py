@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Any
 from tqdm import tqdm
 from datetime import datetime
+from matplotlib import pyplot as plt
 
 from beyblade.constants import CONSTANTS
 from beyblade.phonon_manager import PhononManager
@@ -283,12 +284,6 @@ class ZFSManager:
         # Filter out any None results
         zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["eigs"][r[0]] } for r in results if r is not None}
 
-        # zfs_tensors = {int(outcar.parent.name): val for outcar in outcars if (val := self.read_zfs_tensor(str(outcar)))}
-        # zfs_tensors = [val for key, val in sorted(zfs_tensors.items(), key=lambda item: item[0]) if (key-1) in phonon_pert["idx"]]
-
-        # eigen_rotation_t = self.eigen_rotation.T
-        # zfs_tensors = np.array([self.eigen_rotation @ mode["D_tensor"] @ eigen_rotation_t for mode in zfs_tensors])
-
         print("Number of tensors: ", len(zfs_tensors.keys()))
         return zfs_tensors
 
@@ -335,7 +330,7 @@ class ZFSManager:
         return self.zfs_relaxed, self.eigen_rotation
 
 
-    def _debug_derivs(self, dD, q, symmetry, idx):
+    def _debug_derivs(self, dD, q, symmetry, idx, V_0_0, V_0_pm, V_p_m):
         max_val = np.max(np.abs(dD))
 
         col_width = 12
@@ -343,10 +338,17 @@ class ZFSManager:
         double_line = "=" * total_width
 
         print(f"\n{double_line}\n DEBUG DERIVATIVES\n{'-' * total_width}")
-        print(f" Mode: {idx}\n Symmetry: {symmetry}\n Perturbation: {MathUtils.fmt(q)}\n{double_line}\n Max Value: {max_val:<10.6f}")
+        print((f" Mode: {idx}\n"
+               f" Symmetry: {symmetry}\n"
+               f" Perturbation: {MathUtils.fmt(q)}\n"
+               f"{double_line}\n"
+               f" Max Value: {max_val:<10.6e}\n"
+               f" V_0_0: {V_0_0/CONSTANTS['MHz2J']}\n"
+               f" V_0_pm: {V_0_pm/CONSTANTS['MHz2J']}\n"
+               f" V_p_m: {V_p_m/CONSTANTS['MHz2J']}"))
         print(" Tensor Structure (3x3):\n")
         for row in dD:
-            formatted_row = "  ".join(f"{val:>{col_width}.6f}" for val in row)
+            formatted_row = "  ".join(f"{val:>{col_width}.6e}" for val in row)
             print(f"  [ {formatted_row} ]")
         print(f"{double_line}\n")
 
@@ -378,14 +380,14 @@ class ZFSManager:
             diff_in_plane = dD[0, 0] - dD[1, 1]
             off_diag_in_plane = dD[0, 1]
 
-            if self.debug:
-                self._debug_derivs(dD, q, sym, i+1)
-
             if sym == "A1":
-                V_0_0[i] = np.abs(dD[2, 2] - 0.5 * trace_in_plane) / q
+                V_0_0[i] = (np.abs(dD[2, 2] - 0.5 * trace_in_plane) / q) / 3
             elif sym in ["Ex", "Ey"]:
                 V_p_m[i] = symmetry_factor*(0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2) / q)
-                V_0_pm[i] = symmetry_factor*(np.sqrt(dD[0, 2]**2 + dD[1, 2]**2) / q)
+                V_0_pm[i] = symmetry_factor*(np.sqrt(dD[0, 2]**2 + dD[1, 2]**2) / q) / np.sqrt(2)
+
+            if self.debug:
+                self._debug_derivs(dD, q, sym, i+1, V_0_0, V_0_pm, V_p_m)
 
         print("Symmetry adjusted coefficients: ")
         print("V_00: ", np.sum(V_0_0 > 0))
@@ -393,7 +395,7 @@ class ZFSManager:
         print("V_0pm: ", np.sum(V_0_pm > 0))
         print("Number of tensors: ", zfs_deriv.shape)
 
-        return zfs_deriv, V_0_0 / 3, V_p_m, V_0_pm / np.sqrt(2)
+        return zfs_deriv, V_0_0, V_p_m, V_0_pm
 
     @staticmethod
     def _check_symmetry(d_tensor: np.ndarray, symmetry: str | tuple[str, str], idx: int) -> None:
@@ -440,8 +442,11 @@ class ZFSManager:
 
         for (i, j), item in self.zfs_tensors_2d.items():
             (q_i, q_j) = item["pert"]
-            
+
             if q_i is None or q_j is None:
+                continue
+
+            if q_i != q_j:
                 continue
 
             dD_qi = zfs_1d_derivs[i]
@@ -452,15 +457,9 @@ class ZFSManager:
 
             D_qi_qj = item["tensor"]
 
-
-            #print("Phonon index: ", global_i, global_j, "\nLoop index: ", i, j)
-
             d2D_dqidqj = (D_qi_qj - self.zfs_relaxed)/(q_i*q_j) - dD_qi/q_j - dD_qj/q_i
 
             self._check_symmetry(d2D_dqidqj, (sym_i, sym_j), (i, j))
-
-            if self.debug:
-                self._debug_derivs(d2D_dqidqj, item["pert"], item["symmetry"], (i+1, j+1))
 
             zfs_2nd_derivs[i, j] = d2D_dqidqj
             zfs_2nd_derivs[j, i] = d2D_dqidqj
@@ -469,27 +468,38 @@ class ZFSManager:
             diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
             off_diag_in_plane = d2D_dqidqj[0, 1]
 
-            either_is_E = sym_i in ["Ex", "Ey"] or sym_j in ["Ex", "Ey"]
-            if sym_i == sym_j:
-                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane)
-                if either_is_E:
+            sym = MathUtils.calc_symmetry(sym_i, sym_j)
+
+            if "A1" in sym:
+                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3
+                if "E" in sym:
                     V_0_0_2nd[i, j] *= symmetry_factor
 
-            if either_is_E:
+            if "E" in sym:
                 V_p_m_2nd[i, j] = symmetry_factor * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
-                V_0_pm_2nd[i, j] = symmetry_factor * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2))
+                V_0_pm_2nd[i, j] = symmetry_factor * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2)) / np.sqrt(2)
 
             V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
             V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
             V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
+
+            if self.debug:
+                self._debug_derivs(d2D_dqidqj,
+                                   item["pert"],
+                                   item["symmetry"],
+                                   (i+1, j+1),
+                                   V_0_0_2nd[i, j],
+                                   V_0_pm_2nd[i, j],
+                                   V_p_m_2nd[i, j])
+
 
         print("Symmetry adjusted coefficients: ")
         print("V_00: ", np.sum(V_0_0_2nd > 0))
         print("V_pm: ", np.sum(V_p_m_2nd > 0))
         print("V_0pm: ", np.sum(V_0_pm_2nd > 0))
         print("Number of tensors: ", zfs_2nd_derivs.shape)
-
-        return zfs_2nd_derivs, V_0_0_2nd / 3, V_p_m_2nd, V_0_pm_2nd / np.sqrt(2)
+        
+        return zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd
 
     def _get_symmetry_factor(self, n_modes, zfs_tensors):
         tensor_data_size = len(zfs_tensors.keys())
