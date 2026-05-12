@@ -27,7 +27,7 @@ class ZFSPlotter:
         pert_scale = zfs_data[0]["pert_scale"]
 
         if zfs_data[0].get("second_order"):
-            fig_2d, _ = self._process_2d_plots(zfs_data, args)
+            #fig_2d, _ = self._process_2d_plots(zfs_data, args)
             diag_data = {key: value for key, value in zfs_data[0].items() if key not in ["zfs_derivs", "V_p_m", "V_0_pm", "V_0_0"]}
 
             print("Extracting diagonal elements...")
@@ -81,11 +81,11 @@ class ZFSPlotter:
         return fig, ax
 
     def _render_single_dataset(self, ax, ax2, data, args, plot_name, colors):
-        freqs =      data["freqs"] / CONSTANTS["MHz2J"] * CONSTANTS["MHz2meV"]
+        freqs =      data["freqs"] / CONSTANTS["meV2J"]
         pert_scale = data["pert_scale"]
 
         sigma = 7.5
-        res =   0.5
+        res =   1
 
 
         if args.norm:
@@ -97,7 +97,7 @@ class ZFSPlotter:
             else:
                 if not args.ipr:
                     ax.vlines(freqs, [0], coupling_strength, color=color, alpha=0.6, label=plot_name + r"$|\partial D^{(1)}|$" + f" {pert_scale}")
-                smooth_x, smooth_y = MathUtils.smear_data(freqs, coupling_strength, 1, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs, coupling_strength**2, 1, sigma)
                 ax2.plot(smooth_x, smooth_y, color=color, linewidth=2, label=plot_name + r"$F^{(1)}$" + f" {pert_scale}")
         else:
             V_0_pm = data["V_0_pm"] / CONSTANTS["MHz2J"]
@@ -118,12 +118,8 @@ class ZFSPlotter:
                     alpha=0.6
                     )
 
-                # ax.vlines(freqs, [0], V_p_m, label=plot_name + r"$V_{+-}^l$", color="red", alpha=0.6)
-                # ax.vlines(freqs, [0], V_0_pm, label=plot_name + r"$V_{0\pm}^l$", color="blue", alpha=0.6)
-                # ax.vlines(freqs, [0], V_0_0, label=plot_name + r"$V_{00}^l$", color="black", alpha=0.6)
-
             for V, col, lbl in [(V_p_m, "red", "+-"), (V_0_pm, "blue", r"0\pm"), (V_0_0, "black", "00")]:
-                smooth_x, smooth_y = MathUtils.smear_data(freqs, V, res, sigma)
+                smooth_x, smooth_y = MathUtils.smear_data(freqs, V**2, res, sigma)
                 ax2.plot(smooth_x, smooth_y, color=col, linewidth=2, label=plot_name + f"$F_{{{lbl}}}^{(1)}$")
 
         if args.ipr:
@@ -135,7 +131,8 @@ class ZFSPlotter:
             ax.set_ylabel("Phonon IPR")
         else:
             ax.set_ylabel("Coupling coefficient (MHz)")
-            ax.set_ylim(0)
+            y_lim = 200
+            ax.set_ylim(0, y_lim)
 
         if args.bar:
             ax.set_xlabel("Mode index")

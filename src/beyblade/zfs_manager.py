@@ -342,13 +342,13 @@ class ZFSManager:
                f" Symmetry: {symmetry}\n"
                f" Perturbation: {MathUtils.fmt(q)}\n"
                f"{double_line}\n"
-               f" Max Value: {max_val:<10.6e}\n"
+               f" Max Value: {max_val/CONSTANTS['MHz2J']:<10.6f}\n"
                f" V_0_0: {V_0_0/CONSTANTS['MHz2J']}\n"
                f" V_0_pm: {V_0_pm/CONSTANTS['MHz2J']}\n"
                f" V_p_m: {V_p_m/CONSTANTS['MHz2J']}"))
         print(" Tensor Structure (3x3):\n")
         for row in dD:
-            formatted_row = "  ".join(f"{val:>{col_width}.6e}" for val in row)
+            formatted_row = "  ".join(f"{val/CONSTANTS['MHz2J']:>{col_width}.6f}" for val in row)
             print(f"  [ {formatted_row} ]")
         print(f"{double_line}\n")
 
@@ -356,7 +356,7 @@ class ZFSManager:
     def _calc_derivative(self):
         print("Calculating derivatives...")
         n_modes = self.phonon_manager.nmodes
-        symmetry_factor = self._get_symmetry_factor(n_modes, self.zfs_tensors)
+        symmetry_factor = self._get_symmetry_factor(n_modes, len(self.zfs_tensors.keys()))
 
         zfs_deriv = np.zeros(shape=(n_modes, 3, 3))
         V_0_0 = np.zeros(shape=n_modes)
@@ -432,8 +432,7 @@ class ZFSManager:
     def _calc_second_order_derivatives(self, zfs_1d_derivs):
         print("Calculating derivatives...")
         n_modes = self.phonon_manager.nmodes
-        symmetry_factor = self._get_symmetry_factor(n_modes, self.zfs_tensors_2d)
-
+        symmetry_factor = 1 # self._get_symmetry_factor(n_modes, len(self.zfs_tensors_2d.keys()))
 
         zfs_2nd_derivs = np.zeros((n_modes, n_modes, 3, 3))
         V_0_0_2nd = np.zeros((n_modes, n_modes))
@@ -455,6 +454,8 @@ class ZFSManager:
 
             (sym_i, sym_j) = item["symmetry"]
 
+            sym = MathUtils.calc_symmetry(sym_i, sym_j)
+
             D_qi_qj = item["tensor"]
 
             d2D_dqidqj = (D_qi_qj - self.zfs_relaxed)/(q_i*q_j) - dD_qi/q_j - dD_qj/q_i
@@ -468,7 +469,6 @@ class ZFSManager:
             diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
             off_diag_in_plane = d2D_dqidqj[0, 1]
 
-            sym = MathUtils.calc_symmetry(sym_i, sym_j)
 
             if "A1" in sym:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3
@@ -501,11 +501,10 @@ class ZFSManager:
         
         return zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd
 
-    def _get_symmetry_factor(self, n_modes, zfs_tensors):
-        tensor_data_size = len(zfs_tensors.keys())
+    def _get_symmetry_factor(self, n_modes, nr_zfs_tensors):
         total_modes = n_modes
-        print("Tensor data size: ", tensor_data_size, " out of ", total_modes, " total modes")
-        if tensor_data_size == total_modes:
+        print("Tensor data size: ", nr_zfs_tensors, " out of ", total_modes, " total modes")
+        if nr_zfs_tensors == total_modes:
             print("Using all phonon modes")
             symmetry_factor = 1
         else:

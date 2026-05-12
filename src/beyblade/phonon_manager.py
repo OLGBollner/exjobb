@@ -209,10 +209,11 @@ class PhononManager:
                     abs_val = np.abs(val)
                     return np.isclose(abs_val, 1, rtol=1e-1) or np.isclose(abs_val, 0.5, rtol=1e-1)
 
+                sym = self.symmetry_data["sym"][i]
                 c3 = self.symmetry_data["char_C3"][i]
                 sv = self.symmetry_data["char_sv"][i]
 
-                if not is_valid_char(c3) or not is_valid_char(sv):
+                if "E" not in sym and not is_valid_char(c3) or not is_valid_char(sv):
                     delimiter = 20*"="
                     print(delimiter)
                     print("Symmetry: ", self.symmetry_data["sym"][i])

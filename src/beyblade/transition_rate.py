@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import constants as Cn
 from pathlib import Path
+from matplotlib import pyplot as plt
 
 from beyblade.utils import MathUtils
 from beyblade.constants import CONSTANTS
@@ -67,13 +68,91 @@ class TransitionRate:
   def load_data(self, filename: str) -> None:
     self.data = np.load(filename)
 
-  def get_spectral_density(self, V_key: str, res: float, sigma: float) -> tuple[np.ndarray, np.ndarray]:
+
+  def compute_transition_rates(self, T, res=0.01, sigma=7.5):
     if self.data is None:
       raise ValueError("Data not loaded. Please call load_data() first.")
-    freqs = self.data["freqs"]
-    values = self.data[V_key]
-    return MathUtils.smear_data(freqs, values, res, sigma)
 
+    V_0_0 =  self.data["V_0_0"]  / CONSTANTS["meV2J"]
+    V_0_pm = self.data["V_0_pm"] / CONSTANTS["meV2J"]
+    V_p_m =  self.data["V_p_m"]  / CONSTANTS["meV2J"]
+    freqs =  self.data["freqs"]  / CONSTANTS["meV2J"]
+
+    omega , J_0_pm    = MathUtils.smear_data(freqs, V_0_pm, res, sigma)
+    _, J_p_m         = MathUtils.smear_data(freqs, V_p_m,  res, sigma)
+    _, J_0_0    = MathUtils.smear_data(freqs, V_0_0,  res, sigma)
+
+    print("Spectral functions:")
+    print(f"J_0_pm: {J_0_pm.mean()}")
+    print(f"J_p_m: {J_p_m.mean()}")
+    print(f"J_0_0: {J_0_0.mean()}")
+    print(f"V_0_pm: {V_0_pm.mean()}")
+    print(f"V_p_m: {V_p_m.mean()}")
+    print(f"V_0_0: {V_0_0.mean()}")
+
+    omega_spin_meV = 2.87 * CONSTANTS["GHz2meV"]
+    n        = Phonons.bose_einstein(omega, T)
+    mask     = omega > 0.1
+    delta = MathUtils.broad_delta(omega, omega_spin_meV, 1)
+
+    #plt.plot(omega, delta)
+    plt.plot(omega, J_0_pm, color="blue")
+    plt.plot(omega, J_0_0, color="black")
+    plt.plot(omega, J_p_m, color="red")
+    plt.show()
+
+    f1_factor = (2 * np.pi / (Cn.hbar / CONSTANTS["meV2J"])) * res
+    print("f1: ", f1_factor)
+    self.transition_rate["first_order"]["0_to_1"]  = f1_factor * np.sum(J_0_pm[mask] * (2 * n[mask] + 1) * delta[mask]) * 4
+    self.transition_rate["first_order"]["1_to_-1"] = f1_factor * np.sum(J_p_m[mask] * (2 * n[mask] + 1) * delta[mask]) * 2
+
+    f2_factor = 2 * f1_factor
+    print("f2: ", f2_factor)
+
+    print("Integrand values for transition:")
+    print("E_sq: ", np.mean(omega[mask]**2))
+    print("n: ", np.mean(n[mask]**2 + n[mask]))
+
+
+    def get_J_path(m1, m2):
+      if m1 == m2:
+        return (self.Fz_elements[m1]**2) * J_0_0
+      diff = abs(m1 - m2)
+      if diff == 1: return J_0_pm
+      if diff == 2: return J_p_m
+      return np.zeros_like(omega)
+
+    for ms in self.ms_values:
+      for ms_prime in self.ms_values:
+        if ms == ms_prime:
+          continue
+        rate_key = f"{ms}_to_{ms_prime}"
+        total_integrand = np.zeros_like(omega[mask])
+        for ms_double_prime in self.ms_values:
+          J_a    = get_J_path(ms_prime, ms_double_prime)[mask]
+          J_b    = get_J_path(ms_double_prime, ms)[mask]
+          E_sq   = omega[mask]**2
+          total_integrand += (J_a * J_b / E_sq) * n[mask] * (n[mask] + 1)
+        plt.plot(omega[mask], total_integrand)
+        self.transition_rate["second_order"][rate_key] = f2_factor * np.sum(total_integrand)
+
+    self.transition_rate["second_order"]["0_to_1"]  = (
+        self.transition_rate["second_order"]["0_to_1"]
+      + self.transition_rate["second_order"]["0_to_-1"]
+      + self.transition_rate["second_order"]["-1_to_0"]
+      + self.transition_rate["second_order"]["1_to_0"]
+    )
+    self.transition_rate["second_order"]["1_to_-1"] = (
+        self.transition_rate["second_order"]["1_to_-1"]
+      + self.transition_rate["second_order"]["-1_to_1"]
+    )
+
+    if self.data_2ph is not None:
+      self._compute_two_phonon_rates(T, omega_spin_meV, res=res, sigma=sigma)
+
+    return self.transition_rate
+
+# Two phonon stuff
   def get_2ph_coupling(self, V_key: str) -> np.ndarray:
     if self.data_2ph is None:
       raise ValueError("Data not loaded. Please call load_data_2ph() first.")
@@ -146,77 +225,3 @@ class TransitionRate:
         self.transition_rate["two_phonon"].get("1_to_-1", 0)
       + self.transition_rate["two_phonon"].get("-1_to_1", 0)
     )
-
-  def compute_transition_rates(self, T, res=0.01, sigma=7.5):
-    if self.data is None:
-      raise ValueError("Data not loaded. Please call load_data() first.")
-
-    V_0_0 = self.data["V_0_0"]
-    V_0_pm = self.data["V_0_pm"]
-    V_p_m = self.data["V_p_m"]
-
-    omega, V_0_0 = MathUtils.expand_data(self.data["freqs"], V_0_0, res, sigma)
-    _, V_0_pm = MathUtils.expand_data(self.data["freqs"], V_0_pm, res, sigma)
-    _, V_p_m = MathUtils.expand_data(self.data["freqs"], V_p_m, res, sigma)
-
-    _, J_0_pm    = self.get_spectral_density("V_0_pm", res, sigma)
-    _, J_p_m         = self.get_spectral_density("V_p_m",  res, sigma)
-    _, J_0_0    = self.get_spectral_density("V_0_0",  res, sigma)
-    print("Spectral functions:")
-    print(f"J_0_pm: {J_0_pm.max()}")
-    print(f"J_p_m: {J_p_m.max()}")
-    print(f"J_0_0: {J_0_0.max()}")
-
-    def get_J_path(m1, m2):
-      if m1 == m2:
-        return (self.Fz_elements[m1]**2) * J_0_0
-      diff = abs(m1 - m2)
-      if diff == 1: return J_0_pm
-      if diff == 2: return J_p_m
-      return np.zeros_like(omega)
-
-    omega_spin_meV = 2.87 * CONSTANTS["GHz2meV"]
-    n        = Phonons.bose_einstein(omega, T)
-    mask     = omega > 0.1
-    delta = MathUtils.broad_delta(omega, omega_spin_meV, sigma)
-
-    f1_factor = (2 * np.pi / Cn.hbar) * CONSTANTS["meV2J"] * res
-    print("f1: ", f1_factor)
-    self.transition_rate["first_order"]["0_to_1"]  = f1_factor * np.sum(J_0_pm[mask] * (2 * n[mask] + 1) * delta[mask]) * 4
-    self.transition_rate["first_order"]["1_to_-1"] = f1_factor * np.sum(J_p_m[mask] * (2 * n[mask] + 1) * delta[mask]) * 2
-
-    f2_factor = (4 * np.pi / Cn.hbar) * res * CONSTANTS["meV2J"]
-    print("f2: ", f2_factor)
-
-    print("Integrand values for transition:")
-    print("E_sq: ", np.max(omega[mask]**2))
-    print("n: ", np.max(n[mask]**2 + n[mask]))
-
-    for ms in self.ms_values:
-      for ms_prime in self.ms_values:
-        if ms == ms_prime:
-          continue
-        rate_key = f"{ms}_to_{ms_prime}"
-        total_integrand = np.zeros_like(omega[mask])
-        for ms_double_prime in self.ms_values:
-          J_a    = get_J_path(ms_prime, ms_double_prime)[mask]
-          J_b    = get_J_path(ms_double_prime, ms)[mask]
-          E_sq   = omega[mask]**2
-          total_integrand += (J_a * J_b / E_sq) * n[mask] * (n[mask] + 1)
-        self.transition_rate["second_order"][rate_key] = f2_factor * np.sum(total_integrand)
-
-    self.transition_rate["second_order"]["0_to_1"]  = (
-        self.transition_rate["second_order"]["0_to_1"]
-      + self.transition_rate["second_order"]["0_to_-1"]
-      + self.transition_rate["second_order"]["-1_to_0"]
-      + self.transition_rate["second_order"]["1_to_0"]
-    )
-    self.transition_rate["second_order"]["1_to_-1"] = (
-        self.transition_rate["second_order"]["1_to_-1"]
-      + self.transition_rate["second_order"]["-1_to_1"]
-    )
-
-    if self.data_2ph is not None:
-      self._compute_two_phonon_rates(T, omega_spin_meV, res=res, sigma=sigma)
-
-    return self.transition_rate

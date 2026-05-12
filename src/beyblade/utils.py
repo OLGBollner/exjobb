@@ -33,9 +33,8 @@ class MathUtils:
 
         x_kernel = np.arange(-4 * sigma, 4 * sigma + res, res)
         kernel = np.exp(-0.5 * (x_kernel / sigma)**2) / (sigma * np.sqrt(2 * Cn.pi))
-        kernel /= np.sum(kernel)
 
-        y_smooth = np.convolve(y_dense**2, kernel, mode="same") * res
+        y_smooth = np.convolve(y_dense, kernel, mode="same")
 
         return x_grid, y_smooth
 
