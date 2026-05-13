@@ -507,9 +507,9 @@ class ZFSManager:
         print("V_0pm: ", np.sum(V_0_pm_2nd > 0))
         print("Number of tensors: ", zfs_2nd_derivs.shape)
 
-        #plt.plot([item["pert"] for (i, j), item in self.zfs_tensors_2d.items() if i == j])
-        plt.plot(V_0_pm_2nd.diagonal()/CONSTANTS["MHz2J"], color="red", label=r"$V_{00}^{(2)}$")
-        plt.plot(V_p_m_2nd.diagonal()/CONSTANTS["MHz2J"], color="blue", label=r"$V_{00}^{(2)}$")
+        plt.plot([item["pert"] for (i, j), item in self.zfs_tensors_2d.items() if i == j])
+        #plt.plot(V_0_0_2nd.diagonal()/CONSTANTS["MHz2J"], color="red", label=r"$V_{00}^{(2)}$")
+        #plt.plot(V_p_m_2nd.diagonal()/CONSTANTS["MHz2J"], color="blue", label=r"$V_{00}^{(2)}$")
         plt.xlabel("Mode")
         plt.ylabel("Perturbation")
         plt.title("ZFS Perturbations")

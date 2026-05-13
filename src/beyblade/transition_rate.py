@@ -78,9 +78,9 @@ class TransitionRate:
     V_p_m =  self.data["V_p_m"]  / CONSTANTS["meV2J"]
     freqs =  self.data["freqs"]  / CONSTANTS["meV2J"]
 
-    omega , J_0_pm    = MathUtils.smear_data(freqs, V_0_pm, res, sigma)
-    _, J_p_m         = MathUtils.smear_data(freqs, V_p_m,  res, sigma)
-    _, J_0_0    = MathUtils.smear_data(freqs, V_0_0,  res, sigma)
+    omega , J_0_pm    = MathUtils.smear_data(freqs, V_0_pm**2, res, sigma)
+    _, J_p_m         = MathUtils.smear_data(freqs, V_p_m**2,  res, sigma)
+    _, J_0_0    = MathUtils.smear_data(freqs, V_0_0**2,  res, sigma)
 
     print("Spectral functions:")
     print(f"J_0_pm: {J_0_pm.mean()}")
@@ -94,12 +94,6 @@ class TransitionRate:
     n        = Phonons.bose_einstein(omega, T)
     mask     = omega > 0.1
     delta = MathUtils.broad_delta(omega, omega_spin_meV, 1)
-
-    #plt.plot(omega, delta)
-    plt.plot(omega, J_0_pm, color="blue")
-    plt.plot(omega, J_0_0, color="black")
-    plt.plot(omega, J_p_m, color="red")
-    plt.show()
 
     f1_factor = (2 * np.pi / (Cn.hbar / CONSTANTS["meV2J"])) * res
     print("f1: ", f1_factor)
@@ -133,7 +127,7 @@ class TransitionRate:
           J_b    = get_J_path(ms_double_prime, ms)[mask]
           E_sq   = omega[mask]**2
           total_integrand += (J_a * J_b / E_sq) * n[mask] * (n[mask] + 1)
-        plt.plot(omega[mask], total_integrand)
+
         self.transition_rate["second_order"][rate_key] = f2_factor * np.sum(total_integrand)
 
     self.transition_rate["second_order"]["0_to_1"]  = (
