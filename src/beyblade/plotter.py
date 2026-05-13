@@ -101,9 +101,9 @@ class ZFSPlotter:
                 smooth_x, smooth_y = MathUtils.smear_data(freqs, coupling_strength**2, 1, sigma)
                 ax2.plot(smooth_x, smooth_y, color=color, linewidth=2, label=plot_name + r"$F^{(1)}$" + f" {pert_scale}")
         else:
-            V_0_pm = data["V_0_pm"] # / CONSTANTS["MHz2J"]
-            V_p_m = data["V_p_m"]   # / CONSTANTS["MHz2J"]
-            V_0_0 = data["V_0_0"]   # / CONSTANTS["MHz2J"]
+            V_0_pm = data["V_0_pm"] / CONSTANTS["MHz2J"]
+            V_p_m = data["V_p_m"]   / CONSTANTS["MHz2J"]
+            V_0_0 = data["V_0_0"]   / CONSTANTS["MHz2J"]
 
             if not args.ipr:
                 y_data = {
@@ -132,8 +132,7 @@ class ZFSPlotter:
             ax.set_ylabel("Phonon IPR")
         else:
             ax.set_ylabel("Coupling coefficient (MHz)")
-            y_lim = 200
-            ax.set_ylim(0, y_lim)
+            ax.set_ylim(0,200)
 
         if args.bar:
             ax.set_xlabel("Mode index")

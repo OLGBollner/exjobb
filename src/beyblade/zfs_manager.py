@@ -354,7 +354,7 @@ class ZFSManager:
                f" V_p_m: {V_p_m}"))
         print(" Tensor Structure (3x3):\n")
         for row in dD:
-            formatted_row = "  ".join(f"{val/CONSTANTS['MHz2J']:>{col_width}.6f}" for val in row)
+            formatted_row = "  ".join(f"{val:>{col_width}.6f}" for val in row)
             print(f"  [ {formatted_row} ]")
         print(f"{double_line}\n")
 
@@ -393,7 +393,13 @@ class ZFSManager:
                 V_0_pm[i] = symmetry_factor*(np.sqrt(dD[0, 2]**2 + dD[1, 2]**2) / q) / np.sqrt(2)
 
             if self.debug:
-                self._debug_derivs(dD, q, sym, i+1, V_0_0, V_0_pm, V_p_m)
+                self._debug_derivs(dD/CONSTANTS["MHz2J"],
+                                   q,
+                                   sym,
+                                   i+1,
+                                   V_0_0[i]/CONSTANTS["MHz2J"],
+                                   V_0_pm[i]/CONSTANTS["MHz2J"],
+                                   V_p_m[i]/CONSTANTS["MHz2J"])
 
         print("Symmetry adjusted coefficients: ")
         print("V_00: ", np.sum(V_0_0 > 0))
@@ -401,16 +407,6 @@ class ZFSManager:
         print("V_0pm: ", np.sum(V_0_pm > 0))
         print("Number of tensors: ", zfs_deriv.shape)
 
-
-        # TODO: debugging
-        #plt.plot([item["pert"] for i, item in self.zfs_tensors.items()])
-        plt.plot(V_0_0, color="black", label=r"$V_{00}^{(2)}$")
-        plt.plot(V_p_m, color="red", label=r"$V_{00}^{(2)}$")
-        plt.xlabel("Mode")
-        plt.ylabel("Perturbation")
-        plt.title("ZFS Perturbations")
-        plt.show()
-        
 
         return zfs_deriv, V_0_0, V_p_m, V_0_pm
 
@@ -501,13 +497,13 @@ class ZFSManager:
             V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
 
             if self.debug:
-                self._debug_derivs(d2D_dqidqj,
+                self._debug_derivs(d2D_dqidqj/CONSTANTS["MHz2J"],
                                 item["pert"],
                                 item["symmetry"],
-                                (i, j),
-                                V_0_0_2nd[i, j],
-                                V_0_pm_2nd[i, j],
-                                V_p_m_2nd[i, j])
+                                (i+1, j+1),
+                                V_0_0_2nd[i, j]/CONSTANTS["MHz2J"],
+                                V_0_pm_2nd[i, j]/CONSTANTS["MHz2J"],
+                                V_p_m_2nd[i, j]/CONSTANTS["MHz2J"])
 
 
         print("Symmetry adjusted coefficients: ")
