@@ -288,7 +288,7 @@ class ZFSManager:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["q"][r[0]] } for r in results if r is not None}
+        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["eigs"][r[0]] } for r in results if r is not None}
 
         print("Number of tensors: ", len(zfs_tensors.keys()))
         return zfs_tensors
@@ -310,7 +310,7 @@ class ZFSManager:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["q"][r[0][0]], phonon_pert["q"][r[0][1]]) } for r in results if r is not None}
+        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["eigs"][r[0][0]], phonon_pert["eigs"][r[0][1]]) } for r in results if r is not None}
 
         num_entries = len(zfs_tensors.keys())
 
@@ -348,10 +348,10 @@ class ZFSManager:
                f" Symmetry: {symmetry}\n"
                f" Perturbation: {MathUtils.fmt(q)}\n"
                f"{double_line}\n"
-               f" Max Value: {max_val/CONSTANTS['MHz2J']:<10.6f}\n"
-               f" V_0_0: {V_0_0/CONSTANTS['MHz2J']}\n"
-               f" V_0_pm: {V_0_pm/CONSTANTS['MHz2J']}\n"
-               f" V_p_m: {V_p_m/CONSTANTS['MHz2J']}"))
+               f" Max Value: {max_val:<10.6f}\n"
+               f" V_0_0: {V_0_0}\n"
+               f" V_0_pm: {V_0_pm}\n"
+               f" V_p_m: {V_p_m}"))
         print(" Tensor Structure (3x3):\n")
         for row in dD:
             formatted_row = "  ".join(f"{val/CONSTANTS['MHz2J']:>{col_width}.6f}" for val in row)
@@ -400,6 +400,17 @@ class ZFSManager:
         print("V_pm: ", np.sum(V_p_m > 0))
         print("V_0pm: ", np.sum(V_0_pm > 0))
         print("Number of tensors: ", zfs_deriv.shape)
+
+
+        # TODO: debugging
+        #plt.plot([item["pert"] for i, item in self.zfs_tensors.items()])
+        plt.plot(V_0_0, color="black", label=r"$V_{00}^{(2)}$")
+        plt.plot(V_p_m, color="red", label=r"$V_{00}^{(2)}$")
+        plt.xlabel("Mode")
+        plt.ylabel("Perturbation")
+        plt.title("ZFS Perturbations")
+        plt.show()
+        
 
         return zfs_deriv, V_0_0, V_p_m, V_0_pm
 
@@ -505,9 +516,10 @@ class ZFSManager:
         print("V_0pm: ", np.sum(V_0_pm_2nd > 0))
         print("Number of tensors: ", zfs_2nd_derivs.shape)
 
-        plt.plot([item["pert"] for (i, j), item in self.zfs_tensors_2d.items() if i == j])
-        #plt.plot(V_0_0_2nd.diagonal()/CONSTANTS["MHz2J"], color="red", label=r"$V_{00}^{(2)}$")
-        #plt.plot(V_p_m_2nd.diagonal()/CONSTANTS["MHz2J"], color="blue", label=r"$V_{00}^{(2)}$")
+        # TODO: debugging
+        #plt.plot([item["pert"] for (i, j), item in self.zfs_tensors_2d.items() if i == j])
+        plt.plot(V_0_0_2nd.diagonal(), color="red", label=r"$V_{00}^{(2)}$")
+        plt.plot(V_p_m_2nd.diagonal(), color="blue", label=r"$V_{00}^{(2)}$")
         plt.xlabel("Mode")
         plt.ylabel("Perturbation")
         plt.title("ZFS Perturbations")
