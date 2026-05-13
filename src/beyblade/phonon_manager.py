@@ -33,28 +33,34 @@ class PhononManager:
         nlattice = len(phonon_data["band"][0]["eigenvector"])
         mode_freqs = np.array([d["frequency"] for d in phonon_data["band"]]) * CONSTANTS["THz2meV"]
 
+        # Eigenvectors are the dynamical matrix column vectors, normalized as sum_ja |e_ja|^2 = 1.
+        # For q=0 (Gamma) they are real; take the real part.
         mode_eigenvectors = np.zeros((nphonon, nlattice, 3))
         for i in range(nphonon):
-            mode_eigenvectors[i] = np.reshape(np.array([np.array(d)[:, 0] for d in phonon_data["band"][i]["eigenvector"]]), (nlattice, 3))
+            mode_eigenvectors[i] = np.array(
+                [[comp[0] for comp in atom] for atom in phonon_data["band"][i]["eigenvector"]]
+            )
 
         phonon_info: dict = {
             "freqs": np.array(mode_freqs),
-            "eigs": np.array(mode_eigenvectors),
+            "eigs":  np.array(mode_eigenvectors),
             "n_atoms": nlattice,
-            "n_modes": nphonon
+            "n_modes": nphonon,
         }
 
-        if "points" in raw_data.keys():
-            atom_symbols = np.array([d["symbol"] for d in raw_data["points"]])
+        if "points" in raw_data:
+            atom_symbols  = np.array([d["symbol"]      for d in raw_data["points"]])
             lattice_points = np.array([d["coordinates"] for d in raw_data["points"]])
-            lattice_vecs = [np.array(d) for d in raw_data["lattice"]]
+            masses         = np.array([d["mass"]        for d in raw_data["points"]])
+            lattice_vecs   = np.array([np.array(d) for d in raw_data["lattice"]])
 
             phonon_info.update({
                 "atom_symbols": atom_symbols,
-                "atoms": lattice_points,
-                "lattice": np.array(lattice_vecs),
+                "atoms":        lattice_points,
+                "masses":       masses,
+                "lattice":      lattice_vecs,
             })
-        
+
         return phonon_info
 
     def get_ipr(self):
@@ -73,6 +79,7 @@ class PhononManager:
         structure_info = {
             "atoms": structure.frac_coords,
             "atom_symbols": np.array([site.species_string for site in structure]),
+            "masses": np.array([site.specie.atomic_mass for site in structure]),
             "lattice": structure.lattice.matrix,
             "n_atoms": len(structure)
         }
@@ -88,11 +95,15 @@ class PhononManager:
                 struct_data = self.read_structure_data(poscar_path)
             except FileNotFoundError:
                 raise FileNotFoundError(f"POSCAR file not found at: {poscar_path}")
-        
+
             if struct_data["n_atoms"] != phonon_data["n_atoms"]:
                 raise ValueError(f"Geometry mismatch: {struct_data['n_atoms']} atoms in POSCAR "
                                 f"vs {phonon_data['n_atoms']} atoms in YAML.")
             
+            if not np.allclose(phonon_data["atoms"], struct_data["atoms"], atol=1e-4):
+              raise ValueError("Geometry mismatch of atom positions in POSCAR "
+                                "vs in YAML.")
+
             self.data = {
                 "atoms": struct_data["atoms"],
                 "atom_symbols": struct_data["atom_symbols"],
@@ -273,12 +284,12 @@ class PhononManager:
 
         Q = [np.sqrt(np.sum(mode**2)) for mode in self.data["eigs"]]
 
-        if not np.isclose(Q, 1).all():
-          raise ValueError("Phonon modes not normalized correctly.")
+        if not np.allclose(Q, 1):
+            raise ValueError("Phonon modes not normalized correctly.")
 
-        phonon_pert["eigs"] = np.array([
-            perturbation_scale * mode if freq > 0 else None
-            for mode, freq in zip(Q, self.data["freqs"])
+        phonon_pert["q"] = np.array([
+            perturbation_scale if freq > 0 else None
+            for freq in self.data["freqs"]
         ])
 
         phonon_pert["freqs"] = self.data["freqs"]*CONSTANTS["meV2J"]

@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""
-Script to generate perturbed VASP structures based on phonon eigenvectors.
-
-This script takes a POSCAR file, phonon eigenvector data, a mode index, and a
-perturbation amplitude to create a new perturbed structure.
-
-Usage:
-    python perturb_phonon.py <poscar_file> <npz_file> <mode_index> <perturbation_angstrom>
-
-Arguments:
-    poscar_file: Path to VASP POSCAR file
-    npz_file: Path to npz file containing 'eigs' array with shape (n_modes, n_atoms, 3)
-    mode_index: Phonon mode index (starting from 1)
-    perturbation_angstrom: Perturbation amplitude in Angstroms
-
-Example:
-    python perturb_phonon.py POSCAR phonon_modes.npz 1 0.1
-"""
-
 import argparse
 import sys
 import numpy as np
@@ -27,24 +8,33 @@ try:
     from pymatgen.core.structure import Structure
     from pymatgen.io.vasp.inputs import Poscar
 except ImportError:
-    print("Error: pymatgen is required. Install with: pip install pymatgen")
+    print("Error: pymatgen is required.")
     sys.exit(1)
 
 
-def load_phonon_eigenvectors(npz_file: str) -> np.ndarray:
+def parse_index(value):
+    try:
+        if '-' in value:
+            start, end = map(int, value.split('-'))
+            return list(range(start, end + 1))
+        return [int(value)]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid index format: {value}")
+
+
+def load_poscar(poscar_file: str) -> Structure:
+    try:
+        return Poscar.from_file(poscar_file).structure
+    except FileNotFoundError:
+        raise FileNotFoundError(f"POSCAR not found: {poscar_file}")
+
+
+def load_phonon_data(npz_file: str) -> dict:
     """
-    Load phonon eigenvectors from npz file.
-
-    Args:
-        npz_file: Path to npz file containing 'eigs' array
-
-    Returns:
-        numpy array with shape (n_modes, n_atoms, 3) containing eigenvector perturbations
-
-    Raises:
-        FileNotFoundError: If npz file doesn't exist
-        KeyError: If 'eigs' key not found in npz file
-        ValueError: If 'eigs' array doesn't have expected shape
+    Loads phonon eigenvectors and masses from an npz file produced by PhononManager.
+    Expects keys: 'eigs' (n_modes, n_atoms, 3), 'freqs' (n_modes,), and optionally 'masses' (n_atoms,).
+    The eigenvectors are the raw phonopy eigenvectors of the dynamical matrix,
+    normalized as sum_ja |e_ja|^2 = 1.
     """
     try:
         data = np.load(npz_file)
@@ -52,198 +42,77 @@ def load_phonon_eigenvectors(npz_file: str) -> np.ndarray:
         raise FileNotFoundError(f"NPZ file not found: {npz_file}")
 
     if 'eigs' not in data:
-        available_keys = list(data.keys())
-        raise KeyError(f"'eigs' key not found in {npz_file}. Available keys: {available_keys}")
+        raise KeyError(f"'eigs' not found. Available: {list(data.keys())}")
+    if data['eigs'].ndim != 3 or data['eigs'].shape[2] != 3:
+        raise ValueError(f"Expected eigs shape (n_modes, n_atoms, 3), got {data['eigs'].shape}")
 
-    eigs = data['eigs']
-
-    if len(eigs.shape) != 3:
-        raise ValueError(f"Expected 'eigs' to have 3 dimensions (n_modes, n_atoms, 3), "
-                        f"but got shape {eigs.shape}")
-
-    if eigs.shape[2] != 3:
-        raise ValueError(f"Expected 'eigs' to have 3 components per atom (x,y,z), "
-                        f"but got shape {eigs.shape}")
-
-    print(f"Loaded phonon eigenvectors with shape: {eigs.shape}")
-    print(f"Number of modes: {eigs.shape[0]}")
-    print(f"Number of atoms: {eigs.shape[1]}")
-
-    return eigs
+    return data
 
 
-def load_poscar(poscar_file: str) -> Structure:
+def apply_perturbation(structure: Structure,
+                       eigs: np.ndarray,
+                       masses: np.ndarray,
+                       mode_index: int,
+                       amplitude: float) -> Structure:
     """
-    Load VASP POSCAR file using pymatgen.
+    Applies a mass-weighted phonon perturbation to a structure.
 
-    Args:
-        poscar_file: Path to POSCAR file
+    The phonopy eigenvector e_alpha(j) is the column vector of the dynamical matrix,
+    normalized as sum_ja |e_ja|^2 = 1. The actual atomic displacement for a normal
+    coordinate perturbation Q is:
 
-    Returns:
-        pymatgen Structure object
+        Delta r_alpha(j) [Angstrom] = Q [Angstrom*sqrt(amu)] * e_alpha(j) / sqrt(m_j [amu])
 
-    Raises:
-        FileNotFoundError: If POSCAR file doesn't exist
-        Exception: If POSCAR file cannot be parsed
+    Here `amplitude` is Q in Angstrom*sqrt(amu). For a diamond NV center with C at 12 amu,
+    Q=0.1 gives per-atom displacements on the order of 0.1/sqrt(12) ~ 0.029 Angstrom.
     """
-    try:
-        poscar = Poscar.from_file(poscar_file)
-        structure = poscar.structure
-        print(f"Loaded structure from {poscar_file}")
-        print(f"Number of atoms: {len(structure)}")
-        print(f"Lattice: {structure.lattice}")
-        return structure
-    except FileNotFoundError:
-        raise FileNotFoundError(f"POSCAR file not found: {poscar_file}")
-    except Exception as e:
-        raise Exception(f"Error reading POSCAR file {poscar_file}: {str(e)}")
+    n_modes, n_atoms, _ = eigs.shape
+    idx = mode_index - 1
 
-
-def apply_phonon_perturbation(structure: Structure,
-                             eigenvectors: np.ndarray,
-                             mode_index: int,
-                             amplitude: float) -> Structure:
-    """
-    Apply phonon perturbation to a structure.
-
-    Args:
-        structure: pymatgen Structure object
-        eigenvectors: phonon eigenvectors array with shape (n_modes, n_atoms, 3)
-        mode_index: phonon mode index (1-based)
-        amplitude: perturbation amplitude in Angstroms
-
-    Returns:
-        New pymatgen Structure object with applied perturbation
-
-    Raises:
-        ValueError: If mode_index is out of range or number of atoms doesn't match
-    """
-    n_modes, n_atoms, n_components = eigenvectors.shape
-
-    # Convert to 0-based indexing
-    mode_idx = mode_index - 1
-
-    if mode_idx < 0 or mode_idx >= n_modes:
-        raise ValueError(f"Mode index {mode_index} is out of range. "
-                        f"Available modes: 1 to {n_modes}")
-
+    if not (0 <= idx < n_modes):
+        raise ValueError(f"Mode {mode_index} out of range [1, {n_modes}]")
     if len(structure) != n_atoms:
-        raise ValueError(f"Number of atoms in structure ({len(structure)}) doesn't match "
-                        f"number of atoms in eigenvectors ({n_atoms})")
+        raise ValueError(f"Atom count mismatch: structure={len(structure)}, eigs={n_atoms}")
+    if len(masses) != n_atoms:
+        raise ValueError(f"Mass array length {len(masses)} != n_atoms {n_atoms}")
 
-    # Get the eigenvector for the specified mode
-    mode_eigenvector = eigenvectors[mode_idx]  # shape: (n_atoms, 3)
+    disp = amplitude * eigs[idx] / np.sqrt(masses[:, None])  # (n_atoms, 3) in Angstrom
 
-    # Create a copy of the structure
-    perturbed_structure = structure.copy()
+    perturbed = structure.copy()
+    for j in range(n_atoms):
+        perturbed.sites[j].coords = structure.sites[j].coords + disp[j]
 
-    # Apply perturbation to each atom
-    for atom_idx in range(n_atoms):
-        # Get current cartesian coordinates
-        old_coords = structure.sites[atom_idx].coords  # cartesian coordinates in Angstroms
+    print(f"Mode {mode_index}: max atomic displacement = {np.max(np.linalg.norm(disp, axis=1)):.6f} Å")
+    return perturbed
 
-        # Get perturbation vector for this atom (already in Angstroms)
-        perturbation = amplitude * mode_eigenvector[atom_idx]
-
-        # Apply perturbation
-        new_coords = old_coords + perturbation
-
-        # Update the site coordinates
-        #perturbed_structure.sites[atom_idx] = perturbed_structure.sites[atom_idx].to_unit_cell()
-        perturbed_structure.sites[atom_idx].coords = new_coords
-
-    print(f"Applied perturbation for mode {mode_index} with amplitude {amplitude} Å")
-    print(f"Maximum displacement: {np.max(np.linalg.norm(amplitude * mode_eigenvector, axis=1)):.6f} Å")
-
-    return perturbed_structure
-
-
-def save_perturbed_poscar(structure: Structure,
-                         output_file: str,
-                         mode_index: int,
-                         amplitude: float) -> None:
-    """
-    Save perturbed structure to POSCAR file.
-
-    Args:
-        structure: pymatgen Structure object
-        output_file: output POSCAR filename
-        mode_index: phonon mode index used for perturbation
-        amplitude: perturbation amplitude used
-    """
-    poscar = Poscar(structure)
-
-    # Add comment with perturbation info
-    comment = f"Perturbed structure - Mode {mode_index}, Amplitude {amplitude} Å"
-    poscar.comment = comment
-
-    poscar.write_file(output_file)
-    print(f"Saved perturbed structure to: {output_file}")
-
-def parse_index(value):
-    try:
-      if '-' in value:
-        start, end = map(int, value.split('-'))
-        return list(range(start, end+1))
-      else:
-        return [int(value)]
-    except ValueError:
-      raise argparse.ArgumentTypeError(f"Invalid index format: {value}")
 
 def main():
-    """Main function to run the phonon perturbation script."""
     parser = argparse.ArgumentParser(
-        description="Generate perturbed VASP structure based on phonon eigenvectors",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python perturb_phonon.py POSCAR phonon_modes.npz 1 0.1
-  python perturb_phonon.py input.poscar modes.npz 5 0.05
-        """
+        description="Perturb a VASP POSCAR along a phonon mode using mass-weighted normal coordinates."
     )
-
-    parser.add_argument('poscar_file',
-                       help='Path to VASP POSCAR file')
-    parser.add_argument('npz_file',
-                       help="Path to npz file containing 'eigs' array")
-    parser.add_argument('mode_indices', type=parse_index,
-                       help='Phonon mode index (starting from 1)')
-    parser.add_argument('perturbation_amplitude', type=float,
-                       help='Perturbation amplitude in Angstroms')
-    parser.add_argument('-o', '--output', default=None,
-                       help='Output POSCAR filename (default: POSCAR_perturbed_mode_X)')
-
+    parser.add_argument('poscar_file')
+    parser.add_argument('npz_file')
+    parser.add_argument('mode_indices', type=parse_index)
+    parser.add_argument('amplitude', type=float,
+                        help='Normal coordinate amplitude Q in Angstrom*sqrt(amu)')
+    parser.add_argument('-o', '--output', default=None)
     args = parser.parse_args()
 
-    try:
-        # Load input files
-        print("Loading input files...")
-        structure = load_poscar(args.poscar_file)
-        eigenvectors = load_phonon_eigenvectors(args.npz_file)
+    structure = load_poscar(args.poscar_file)
+    data = load_phonon_data(args.npz_file)
+    eigs = data['eigs']
 
-        for idx in args.mode_indices:
-            # Apply perturbation
-            print(f"\nApplying perturbation...")
-            perturbed_structure = apply_phonon_perturbation(
-                structure, eigenvectors, idx, args.perturbation_amplitude
-            )
+    if 'masses' not in data:
+        raise KeyError("'masses' not found in npz file. Ensure PhononManager stores masses (see read_yaml fix).")
+    masses = data['masses']
 
-            # Generate output filename if not provided
-            if args.output is None:
-                output_file = f"POSCAR_pert_{args.perturbation_amplitude}_mode_{idx}"
-            else:
-                output_file = args.output
-
-            # Save result
-            print(f"\nSaving result...")
-            save_perturbed_poscar(perturbed_structure, output_file,
-                                  idx, args.perturbation_amplitude)
-
-            print(f"\nSuccess! Perturbed structure saved to {output_file}")
-
-    except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
-        sys.exit(1)
+    for idx in args.mode_indices:
+        perturbed = apply_perturbation(structure, eigs, masses, idx, args.amplitude)
+        out = args.output if args.output else f"POSCAR_pert_{args.amplitude}_mode_{idx}"
+        poscar = Poscar(perturbed)
+        poscar.comment = f"Mode {idx}, Q={args.amplitude} Ang*sqrt(amu)"
+        poscar.write_file(out)
+        print(f"Saved: {out}")
 
 
 if __name__ == "__main__":

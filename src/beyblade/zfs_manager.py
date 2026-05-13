@@ -288,7 +288,7 @@ class ZFSManager:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["eigs"][r[0]] } for r in results if r is not None}
+        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["q"][r[0]] } for r in results if r is not None}
 
         print("Number of tensors: ", len(zfs_tensors.keys()))
         return zfs_tensors
@@ -310,7 +310,7 @@ class ZFSManager:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["eigs"][r[0][0]], phonon_pert["eigs"][r[0][1]]) } for r in results if r is not None}
+        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["q"][r[0][0]], phonon_pert["q"][r[0][1]]) } for r in results if r is not None}
 
         num_entries = len(zfs_tensors.keys())
 
@@ -489,16 +489,14 @@ class ZFSManager:
             V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
             V_0_pm_2nd[j, i] = V_0_pm_2nd[i, j]
 
-            if (i,j) == (15,15):
-                print("ZFS tensor at (15,15):", d2D_dqidqj/CONSTANTS["MHz2J"])
-                if self.debug:
-                    self._debug_derivs(d2D_dqidqj,
-                                    item["pert"],
-                                    item["symmetry"],
-                                    (i, j),
-                                    V_0_0_2nd[i, j],
-                                    V_0_pm_2nd[i, j],
-                                    V_p_m_2nd[i, j])
+            if self.debug:
+                self._debug_derivs(d2D_dqidqj,
+                                item["pert"],
+                                item["symmetry"],
+                                (i, j),
+                                V_0_0_2nd[i, j],
+                                V_0_pm_2nd[i, j],
+                                V_p_m_2nd[i, j])
 
 
         print("Symmetry adjusted coefficients: ")
