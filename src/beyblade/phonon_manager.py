@@ -287,9 +287,9 @@ class PhononManager:
         if not np.allclose(Q, 1):
             raise ValueError("Phonon modes not normalized correctly.")
 
-        phonon_pert["q"] = np.array([
-            perturbation_scale if freq > 0 else None
-            for freq in self.data["freqs"]
+        phonon_pert["eigs"] = np.array([
+            perturbation_scale * mode * np.sqrt(2 * CONSTANTS["meV2rads"] * freq / Cn.hbar) if freq > 0 else None
+            for mode, freq in zip(Q, self.data["freqs"])
         ])
 
         phonon_pert["freqs"] = self.data["freqs"]*CONSTANTS["meV2J"]
