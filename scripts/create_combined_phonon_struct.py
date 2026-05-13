@@ -19,23 +19,24 @@ except ImportError:
     sys.exit(1)
 
 
-def load_phonon_eigenvectors(npz_file: str) -> np.ndarray:
-    """Load phonon eigenvectors from npz file."""
+def load_phonon_data(npz_file: str) -> dict:
+    """
+    Loads phonon eigenvectors and masses from an npz file produced by PhononManager.
+    Expects keys: 'eigs' (n_modes, n_atoms, 3), 'freqs' (n_modes,), and optionally 'masses' (n_atoms,).
+    The eigenvectors are the raw phonopy eigenvectors of the dynamical matrix,
+    normalized as sum_ja |e_ja|^2 = 1.
+    """
     try:
         data = np.load(npz_file)
     except FileNotFoundError:
         raise FileNotFoundError(f"NPZ file not found: {npz_file}")
 
     if 'eigs' not in data:
-        available_keys = list(data.keys())
-        raise KeyError(f"'eigs' key not found in {npz_file}. Available keys: {available_keys}")
+        raise KeyError(f"'eigs' not found. Available: {list(data.keys())}")
+    if data['eigs'].ndim != 3 or data['eigs'].shape[2] != 3:
+        raise ValueError(f"Expected eigs shape (n_modes, n_atoms, 3), got {data['eigs'].shape}")
 
-    eigs = data['eigs']
-    if len(eigs.shape) != 3 or eigs.shape[2] != 3:
-        raise ValueError(f"Expected 'eigs' shape (n_modes, n_atoms, 3), got {eigs.shape}")
-
-    print(f"Loaded {eigs.shape[0]} modes for {eigs.shape[1]} atoms.")
-    return eigs
+    return data
 
 
 def load_poscar(poscar_file: str) -> Structure:
@@ -53,6 +54,7 @@ def apply_combined_perturbation(structure: Structure,
                                eigenvectors: np.ndarray,
                                mode_i: int,
                                mode_j: int,
+                               masses: np.ndarray,
                                amplitude: float) -> Structure:
     """
     Apply a combined phonon perturbation (Mode I + Mode J) to a structure.
@@ -76,24 +78,21 @@ def apply_combined_perturbation(structure: Structure,
     if len(structure) != n_atoms:
         raise ValueError(f"Structure atoms ({len(structure)}) != Eigenvector atoms ({n_atoms})")
 
-    # Combine the eigenvectors
-    combined_vector = eigenvectors[idx_i] + eigenvectors[idx_j]
-    
-    # Calculate actual displacements
-    total_displacements = amplitude * combined_vector
 
-    # Create a copy and apply perturbation
-    perturbed_structure = structure.copy()
+    disp_i = amplitude * eigenvectors[idx_i] / np.sqrt(masses[:, None])  # (n_atoms, 3) in Angstrom
+    disp_j = amplitude * eigenvectors[idx_j] / np.sqrt(masses[:, None])  # (n_atoms, 3) in Angstrom
+
+    total_displacements = disp_i + disp_j
+
+    perturbed = structure.copy()
     for atom_idx in range(n_atoms):
-        old_coords = structure.sites[atom_idx].coords
-        new_coords = old_coords + total_displacements[atom_idx]
-        perturbed_structure.sites[atom_idx].coords = new_coords
+        perturbed.sites[atom_idx].coords = structure.sites[atom_idx].coords + total_displacements[atom_idx]
 
     print(f"Applied combined perturbation: Mode {mode_i} + Mode {mode_j}")
     print(f"Amplitude: {amplitude} Å")
-    print(f"Max atom displacement: {np.max(np.linalg.norm(total_displacements, axis=1)):.6f} Å")
+    print(f"Max atom displacement for modes: {np.max(np.linalg.norm(disp_i, axis=1)):.6f} Å and {np.max(np.linalg.norm(disp_j, axis=1)):.6f} Å")
 
-    return perturbed_structure
+    return perturbed
 
 
 def save_perturbed_poscar(structure: Structure,
@@ -130,7 +129,9 @@ Example:
     try:
         print("Loading files...")
         structure = load_poscar(args.poscar_file)
-        eigenvectors = load_phonon_eigenvectors(args.npz_file)
+        phonon_data = load_phonon_data(args.npz_file)
+        eigenvectors = phonon_data["eigs"]
+        masses = phonon_data["masses"]
 
         print("Applying combined perturbation...")
         perturbed_structure = apply_combined_perturbation(
@@ -138,6 +139,7 @@ Example:
             eigenvectors, 
             args.mode_i, 
             args.mode_j, 
+            masses,
             args.amplitude
         )
 
