@@ -43,6 +43,8 @@ def load_phonon_data(npz_file: str) -> dict:
 
     if 'eigs' not in data:
         raise KeyError(f"'eigs' not found. Available: {list(data.keys())}")
+    if 'masses' not in data:
+        raise KeyError(f"'masses' not found. Available: {list(data.keys())}")
     if data['eigs'].ndim != 3 or data['eigs'].shape[2] != 3:
         raise ValueError(f"Expected eigs shape (n_modes, n_atoms, 3), got {data['eigs'].shape}")
 
@@ -91,7 +93,7 @@ def main():
         description="Perturb a VASP POSCAR along a phonon mode using mass-weighted normal coordinates."
     )
     parser.add_argument('poscar_file')
-    parser.add_argument('npz_file')
+    parser.add_argument('phonon_data')
     parser.add_argument('mode_indices', type=parse_index)
     parser.add_argument('amplitude', type=float,
                         help='Normal coordinate amplitude Q in Angstrom*sqrt(amu)')
@@ -99,11 +101,8 @@ def main():
     args = parser.parse_args()
 
     structure = load_poscar(args.poscar_file)
-    data = load_phonon_data(args.npz_file)
+    data = load_phonon_data(args.phonon_data)
     eigs = data['eigs']
-
-    if 'masses' not in data:
-        raise KeyError("'masses' not found in npz file. Ensure PhononManager stores masses (see read_yaml fix).")
     masses = data['masses']
 
     for idx in args.mode_indices:

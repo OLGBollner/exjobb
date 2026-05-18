@@ -55,8 +55,8 @@ class PhononManager:
             lattice_vecs   = np.array([np.array(d) for d in raw_data["lattice"]])
 
             phonon_info.update({
-                "atom_symbols": atom_symbols,
                 "atoms":        lattice_points,
+                "atom_symbols": atom_symbols,
                 "masses":       masses,
                 "lattice":      lattice_vecs,
             })
@@ -103,9 +103,12 @@ class PhononManager:
             self.data = {
                 "atoms": struct_data["atoms"],
                 "atom_symbols": struct_data["atom_symbols"],
+                "masses": struct_data["masses"],
                 "lattice": struct_data["lattice"],
                 "freqs": phonon_data["freqs"],
-                "eigs": phonon_data["eigs"]
+                "eigs": phonon_data["eigs"],
+                "n_atoms": struct_data["n_atoms"],
+                "n_modes": phonon_data["n_modes"]
             }
         else:
             self.data = phonon_data
