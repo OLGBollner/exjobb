@@ -112,6 +112,7 @@ def main():
         poscar.comment = f"Mode {idx}, Q={args.amplitude} Ang*sqrt(amu)"
         poscar.write_file(out)
         print(f"Saved: {out}")
+        print("\nSuccess!")
 
 
 if __name__ == "__main__":
