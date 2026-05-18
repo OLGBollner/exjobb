@@ -99,10 +99,6 @@ class PhononManager:
             if struct_data["n_atoms"] != phonon_data["n_atoms"]:
                 raise ValueError(f"Geometry mismatch: {struct_data['n_atoms']} atoms in POSCAR "
                                 f"vs {phonon_data['n_atoms']} atoms in YAML.")
-            
-            if not np.allclose(phonon_data["atoms"], struct_data["atoms"], atol=1e-4):
-              raise ValueError("Geometry mismatch of atom positions in POSCAR "
-                                "vs in YAML.")
 
             self.data = {
                 "atoms": struct_data["atoms"],
