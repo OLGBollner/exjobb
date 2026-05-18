@@ -123,6 +123,7 @@ class PhononManager:
                 raise ValueError("Failed to load data from .npz file.")
         else:
             raise ValueError("Unsupported file format. Use .yaml or .npz")
+        assert list(self.data.keys()) == ["atoms", "atom_symbols", "masses", "lattice", "freqs", "eigs", "n_atoms", "n_modes"]
 
         self.nmodes = self.data["freqs"].shape[0]
         self.cell_size = self.data["atoms"].shape[0]
