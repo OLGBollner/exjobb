@@ -5,7 +5,6 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, Any
 from tqdm import tqdm
-from datetime import datetime
 from matplotlib import pyplot as plt
 
 from beyblade.constants import CONSTANTS
@@ -276,7 +275,7 @@ class ZFSManager:
 
     def _load_zfs_perts(self, search_path, phonon_pert):
         print("Reading ZFS tensors from: ", search_path)
-        outcars = search_path.glob("**/OUTCAR")
+        outcars = search_path.glob("**/runs/**/OUTCAR")
         eigen_rotation_t = self.eigen_rotation.T
 
         total_modes = len(phonon_pert["idx"])
@@ -382,6 +381,7 @@ class ZFSManager:
 
             zfs_deriv[i] = dD / q
 
+
             trace_in_plane = dD[0, 0] + dD[1, 1]
             diff_in_plane = dD[0, 0] - dD[1, 1]
             off_diag_in_plane = dD[0, 1]
@@ -406,7 +406,6 @@ class ZFSManager:
         print("V_pm: ", np.sum(V_p_m > 0))
         print("V_0pm: ", np.sum(V_0_pm > 0))
         print("Number of tensors: ", zfs_deriv.shape)
-
 
         return zfs_deriv, V_0_0, V_p_m, V_0_pm
 
@@ -512,15 +511,6 @@ class ZFSManager:
         print("V_0pm: ", np.sum(V_0_pm_2nd > 0))
         print("Number of tensors: ", zfs_2nd_derivs.shape)
 
-        # TODO: debugging
-        #plt.plot([item["pert"] for (i, j), item in self.zfs_tensors_2d.items() if i == j])
-        plt.plot(V_0_0_2nd.diagonal(), color="red", label=r"$V_{00}^{(2)}$")
-        plt.plot(V_p_m_2nd.diagonal(), color="blue", label=r"$V_{00}^{(2)}$")
-        plt.xlabel("Mode")
-        plt.ylabel("Perturbation")
-        plt.title("ZFS Perturbations")
-        plt.show()
-        
         return zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd
 
     def _get_symmetry_factor(self, n_modes, nr_zfs_tensors):
