@@ -275,7 +275,7 @@ class ZFSManager:
 
     def _load_zfs_perts(self, search_path, phonon_pert):
         print("Reading ZFS tensors from: ", search_path)
-        outcars = search_path.glob("**/runs/**/OUTCAR")
+        outcars = search_path.glob("runs/**/OUTCAR")
         eigen_rotation_t = self.eigen_rotation.T
 
         total_modes = len(phonon_pert["idx"])
