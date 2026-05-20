@@ -300,7 +300,7 @@ class ZFSManager:
         zfs_tensors = {}
         total_modes = int((len(phonon_pert["idx"])**2) / 2)
         print(f"Expecting up to {total_modes} OUTCAR files for 2D perturbations.")
-        outcars = search_path.glob("**/OUTCAR")
+        outcars = search_path.glob("runs/**/OUTCAR")
         eigen_rotation_t = self.eigen_rotation.T
 
         worker_task = partial(_process_outcar_worker_2d, eigen_rotation=self.eigen_rotation, eigen_rotation_t=eigen_rotation_t)
