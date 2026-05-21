@@ -10,8 +10,8 @@ from beyblade.constants import CONSTANTS
 PHONON_PROCESSES = {
     "abs_em":  (+1, -1),
     "em_abs":  (-1, +1),
-    "abs_abs": (+1, +1),
-    "em_em":   (-1, -1),
+    #"abs_abs": (+1, +1),
+    #"em_em":   (-1, -1),
 }
 
 class Phonons:
@@ -53,6 +53,9 @@ class TransitionRate:
     self.transition_rate: dict[str, dict[str, float]] = {
         "first_order": {}, "second_order": {}, "two_phonon": {}
     }
+    self.total_rate: dict[str, dict[str, float]] = {
+        "first_order": {}, "second_order": {}, "two_phonon": {}
+        }
     self.ms_values = [1, 0, -1]
     self.Fz_elements = {1: 1.0, 0: -2.0, -1: 1.0}
     self.data = None
@@ -90,8 +93,26 @@ class TransitionRate:
     delta = MathUtils.broad_delta(omega, omega_zfs, 1)
 
     f1_factor = (2 * np.pi / (Cn.hbar / CONSTANTS["meV2J"])) * res
-    self.transition_rate["first_order"]["0_to_1"]  = f1_factor * np.sum(J_0_pm[mask] * (2 * n[mask] + 1) * delta[mask]) * 4
-    self.transition_rate["first_order"]["1_to_-1"] = f1_factor * np.sum(J_p_m[mask] * (2 * n[mask] + 1) * delta[mask]) * 2
+    self.transition_rate["first_order"]["0_to_1"]  = f1_factor * np.sum(J_0_pm[mask] * n[mask] * delta[mask])
+    self.transition_rate["first_order"]["0_to_-1"] = self.transition_rate["first_order"]["0_to_1"]
+    self.transition_rate["first_order"]["1_to_0"]  = f1_factor * np.sum(J_0_pm[mask] * (n[mask] + 1) * delta[mask])
+    self.transition_rate["first_order"]["-1_to_0"] = self.transition_rate["first_order"]["1_to_0"]
+
+    self.transition_rate["first_order"]["1_to_-1"] = f1_factor * np.sum(J_p_m[mask] * (n[mask] + 1) * delta[mask])
+    self.transition_rate["first_order"]["-1_to_1"] = f1_factor * np.sum(J_p_m[mask] * n[mask] * delta[mask])
+
+    self.total_rate["first_order"]["0_1"] = (
+      self.transition_rate["first_order"]["0_to_1"] 
+      + self.transition_rate["first_order"]["0_to_-1"]
+      + self.transition_rate["first_order"]["1_to_0"] 
+      + self.transition_rate["first_order"]["-1_to_0"]
+      )
+
+    self.total_rate["first_order"]["1_-1"] = (
+      self.transition_rate["first_order"]["1_to_-1"]
+      + self.transition_rate["first_order"]["-1_to_1"]
+      )
+
 
     f2_factor = 2 * f1_factor
 
@@ -117,13 +138,13 @@ class TransitionRate:
 
         self.transition_rate["second_order"][rate_key] = f2_factor * np.sum(total_integrand)
 
-    self.transition_rate["second_order"]["0_to_1"]  = (
+    self.total_rate["second_order"]["0_1"]  = (
         self.transition_rate["second_order"]["0_to_1"]
       + self.transition_rate["second_order"]["0_to_-1"]
       + self.transition_rate["second_order"]["-1_to_0"]
       + self.transition_rate["second_order"]["1_to_0"]
     )
-    self.transition_rate["second_order"]["1_to_-1"] = (
+    self.total_rate["second_order"]["1_-1"] = (
         self.transition_rate["second_order"]["1_to_-1"]
       + self.transition_rate["second_order"]["-1_to_1"]
     )
@@ -194,13 +215,13 @@ class TransitionRate:
 
         self.transition_rate["two_phonon"][rate_key] = f2ph * total
 
-    self.transition_rate["two_phonon"]["0_to_1"] = (
+    self.total_rate["two_phonon"]["0_1"] = (
         self.transition_rate["two_phonon"].get("0_to_1",  0)
       + self.transition_rate["two_phonon"].get("0_to_-1", 0)
       + self.transition_rate["two_phonon"].get("-1_to_0", 0)
       + self.transition_rate["two_phonon"].get("1_to_0",  0)
     )
-    self.transition_rate["two_phonon"]["1_to_-1"] = (
+    self.total_rate["two_phonon"]["1_-1"] = (
         self.transition_rate["two_phonon"].get("1_to_-1", 0)
       + self.transition_rate["two_phonon"].get("-1_to_1", 0)
     )

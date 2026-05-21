@@ -133,8 +133,8 @@ class ZFSPlotter:
             ax.set_ylabel("Phonon IPR")
         else:
             ax.set_ylabel("Coupling coefficient (MHz)")
-            ax2.yaxis.set_major_locator(ticker.MultipleLocator(10))
-            ax.set_ylim(0, 60)
+            #ax2.yaxis.set_major_locator(ticker.MultipleLocator(50))
+            ax.set_ylim(0)
 
         if args.bar:
             ax.set_xlabel("Mode index")
@@ -144,10 +144,11 @@ class ZFSPlotter:
             ax.set_xlim(0, 200)
             ax.set_xlabel("Vibration frequency (meV)")
             ax2.set_ylabel(r"Spectral function (MHz$^2$/meV)")
-            ax2.yaxis.set_major_locator(ticker.MultipleLocator(50))
-            ax2.set_ylim(0, 400)
+            #ax2.yaxis.set_major_locator(ticker.MultipleLocator(2000))
+            ax2.set_ylim(0)
             legend_pos = "upper left"
 
+        plt.axvline(x=data["zfs"]/CONSTANTS["meV2J"], color="gray", linewidth=1)
         lines1, labels1 = ax.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax.legend(lines1 + lines2, labels1 + labels2, loc=legend_pos, frameon=True)

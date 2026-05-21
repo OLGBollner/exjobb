@@ -87,7 +87,7 @@ def main():
             calculator.compute_transition_rates(T, omega, J_0_pm, J_p_m, J_0_0, zfs)
             if args.two_phonon:
                 calculator.compute_two_phonon_rates(T, omega_x, omega_y, J2_0_pm, J2_p_m, J2_0_0, zfs)
-            rates = calculator.transition_rate
+            rates = calculator.total_rate
             if rates:
                 for k in keys:
                     for order in ["first_order", "second_order", "two_phonon"]:
@@ -149,13 +149,15 @@ def main():
             orders_to_plot.append("second_order")
         if args.second_phonon:
             orders_to_plot.append("two_phonon")
+        if orders_to_plot == []:
+            raise ValueError("No rate specified.")
 
         plt.figure(figsize=(6, 5))
 
         # Set log scales if requested (must be done before plotting)
         if args.log:
             plt.yscale("log")
-            #plt.xscale("log")
+            plt.xscale("log")
         data_files = [np.load(file, allow_pickle=True) for file in args.data_file]
         # Process each data file
         for i, data in enumerate(data_files):
@@ -253,8 +255,10 @@ def main():
         plt.xlabel("Temperature (K)")
         plt.ylabel(r"Transition Rate (s$^{-1}$)")
         plt.title("Spin Transition Rates vs Temperature")
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.ylim(1e-2)
+        #plt.grid(True, linestyle='--', alpha=0.7)
+        plt.axvline(x=125, color="gray", linestyle="-", linewidth=1)
+        plt.ylim(1e-6,1e6)
+        plt.xlim(1e-1)
         plt.tight_layout()
 
         if args.save:
