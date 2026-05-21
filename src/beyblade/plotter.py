@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import ticker
 from pathlib import Path
 
 from beyblade.constants import CONSTANTS
@@ -14,7 +15,7 @@ class ZFSPlotter:
             "axes.labelsize": 16,
             "xtick.labelsize": 12,
             "ytick.labelsize": 12,
-            "legend.fontsize": 10
+            "legend.fontsize": 14
         })
 
     def plot_data(self, data_files, args):
@@ -132,7 +133,8 @@ class ZFSPlotter:
             ax.set_ylabel("Phonon IPR")
         else:
             ax.set_ylabel("Coupling coefficient (MHz)")
-            ax.set_ylim(0,200)
+            ax2.yaxis.set_major_locator(ticker.MultipleLocator(10))
+            ax.set_ylim(0, 60)
 
         if args.bar:
             ax.set_xlabel("Mode index")
@@ -142,7 +144,8 @@ class ZFSPlotter:
             ax.set_xlim(0, 200)
             ax.set_xlabel("Vibration frequency (meV)")
             ax2.set_ylabel(r"Spectral function (MHz$^2$/meV)")
-            ax2.set_ylim(0)
+            ax2.yaxis.set_major_locator(ticker.MultipleLocator(50))
+            ax2.set_ylim(0, 400)
             legend_pos = "upper left"
 
         lines1, labels1 = ax.get_legend_handles_labels()

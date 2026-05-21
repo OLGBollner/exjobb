@@ -243,7 +243,7 @@ class ZFSManager:
 
         save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
 
-        save_name = self.save_data(save_name, zfs_derivs=zfs_derivs, V_0_0=V_0_0, V_p_m=V_p_m,
+        save_name = self.save_data(save_name, zfs=3/2*self.zfs_relaxed[2,2], zfs_derivs=zfs_derivs, V_0_0=V_0_0, V_p_m=V_p_m,
                                     V_0_pm=V_0_pm, freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
 
         results.append(save_name)
@@ -266,7 +266,7 @@ class ZFSManager:
 
         zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd = self._calc_second_order_derivatives(zfs_1d_derivs)
 
-        save_name = self.save_data(save_name, second_order=True, zfs_derivs=zfs_2nd_derivs, V_0_0=V_0_0_2nd, V_p_m=V_p_m_2nd,
+        save_name = self.save_data(save_name, second_order=True, zfs=3/2*self.zfs_relaxed[2,2], zfs_derivs=zfs_2nd_derivs, V_0_0=V_0_0_2nd, V_p_m=V_p_m_2nd,
                                     V_0_pm=V_0_pm_2nd, freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
 
         results.append(save_name)

@@ -40,10 +40,9 @@ class MathUtils:
 
     @staticmethod
     def expand_data_2d(freqs, values, res, sigma):
-        print("Expanding data...")
+        # TODO: debugging
+        # print("Expanding data...")
         freqs = np.array(freqs)
-        print(freqs.shape)
-        print(freqs.max())
 
         values = np.array(values)
 
@@ -52,10 +51,11 @@ class MathUtils:
         f_min = 0
         f_max = np.max(freqs) + 5 * sigma
 
-        x_grid = np.arange(f_min, f_max, res)
-        y_grid = np.arange(f_min, f_max, res)
-        print(x_grid.shape, y_grid.shape)
-        dense_values = np.zeros((len(x_grid), len(y_grid)))
+        x_array = np.arange(f_min, f_max, res)
+        y_array = np.arange(f_min, f_max, res)
+        # print("Grid size:")
+        # print(x_array.shape, y_array.shape)
+        dense_values = np.zeros((len(x_array), len(y_array)))
 
         freq_x, freq_y = np.meshgrid(freqs, freqs)
         freq_x_flat = freq_x.flatten()
@@ -64,17 +64,17 @@ class MathUtils:
         idx_x = np.round(freq_x_flat / res).astype(int)
         idx_y = np.round(freq_y_flat / res).astype(int)
 
-        mask = (idx_x >= 0) & (idx_x < len(x_grid)) & \
-               (idx_y >= 0) & (idx_y < len(y_grid))
+        mask = (idx_x >= 0) & (idx_x < len(x_array)) & \
+               (idx_y >= 0) & (idx_y < len(y_array))
 
         np.add.at(dense_values, (idx_x[mask], idx_y[mask]), values[mask])
 
-        return x_grid, y_grid, dense_values
+        return x_array, y_array, dense_values
 
     @staticmethod
     def get_2d_spectral_density(freqs, values, res, sigma_phys):
 
-        X, Y, dense_values = MathUtils.expand_data_2d(freqs, values, sigma=sigma_phys, res=res)
+        x_array, y_array, dense_values = MathUtils.expand_data_2d(freqs, values, sigma=sigma_phys, res=res)
 
         sigma_pixel = sigma_phys / res
         radius_pixel = int(np.ceil(4 * sigma_pixel))
@@ -84,7 +84,9 @@ class MathUtils:
         kernel = np.exp(-0.5 * (x_kernel**2 + y_kernel**2) / sigma_pixel**2) / (2 * np.pi * sigma_pixel**2)
         kernel /= np.sum(kernel)
 
-        return X, Y, convolve(dense_values**2, kernel) * res**2
+        X, Y = np.meshgrid(x_array, y_array)
+
+        return X, Y, convolve(dense_values, kernel, cval=0, mode="constant")
 
     @staticmethod
     def calc_ipr(phonons: Dict[str, Any]) -> np.ndarray:
