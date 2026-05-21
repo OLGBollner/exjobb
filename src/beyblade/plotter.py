@@ -20,7 +20,7 @@ class ZFSPlotter:
 
     def plot_data(self, data_files, args):
 
-        zfs_data = [np.load(file) for file in data_files]
+        zfs_data = [np.load(file, allow_pickle=True) for file in data_files]
 
         cell_size = zfs_data[0]["cell_size"]
         sim_type = str(zfs_data[0]["sub_folder"])

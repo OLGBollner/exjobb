@@ -91,7 +91,7 @@ def main():
             if rates:
                 for k in keys:
                     for order in ["first_order", "second_order", "two_phonon"]:
-                        transition = "0_to_1" if k == "V_0_pm" else "1_to_-1"
+                        transition = "0_1" if k == "V_0_pm" else "1_-1"
                         results[k][order].append(rates[order].get(transition, 0))
                 valid_temps.append(T)
 
