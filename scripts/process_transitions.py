@@ -62,16 +62,25 @@ def main():
             print(f"Error loading data file: {e}")
             return
 
-        # Prepare temperature range
         t_start = max(0.0, args.t_start)
         low_range = np.arange(0, 1, args.t_step/100)
         high_range = np.arange(1 + args.t_step, args.t_end + args.t_step, args.t_step)
         temperatures = np.concatenate([low_range, high_range])
         
-        # Store results
-        # Keys match those in TransitionRate.compute_transition_rate
-        keys = ["V_0_pm", "V_p_m"]
-        results = {k: {"first_order": [], "second_order": [], "two_phonon": []} for k in keys}
+        results = {
+            "first_order": {
+              "0_1": [],
+              "1_-1": [],
+              },
+            "second_order": {
+              "0_1": [],
+              "1_-1": [],
+              },
+            "two_phonon": {
+              "0_1": [],
+              "1_-1": [],
+              },
+            }
         valid_temps = []
 
         print(f"Computing transition rates for {len(temperatures)} temperature points...")
@@ -87,12 +96,11 @@ def main():
             calculator.compute_transition_rates(T, omega, J_0_pm, J_p_m, J_0_0, zfs)
             if args.two_phonon:
                 calculator.compute_two_phonon_rates(T, omega_x, omega_y, J2_0_pm, J2_p_m, J2_0_0, zfs)
-            rates = calculator.total_rate
+            rates = calculator.get_total_rates()
             if rates:
-                for k in keys:
-                    for order in ["first_order", "second_order", "two_phonon"]:
-                        transition = "0_1" if k == "V_0_pm" else "1_-1"
-                        results[k][order].append(rates[order].get(transition, 0))
+                for order in ["first_order", "second_order", "two_phonon"]:
+                    for transition, rate in rates[order].items():
+                        results[order][transition].append(rate)
                 valid_temps.append(T)
 
         meta_data = {
@@ -124,22 +132,22 @@ def main():
         first_file = True
 
         labels = {
-            "V_0_pm": {
-                "first_order": r"$\Gamma_{1, 0\pm}^{(1)}$",
-                "second_order": r"$\Gamma_{2, 0\pm}^{(1)}$",
-                "two_phonon": r"$\Gamma_{1, 0\pm}^{(2)}$",
-            },
-            "V_p_m": {
-                "first_order": r"$\Gamma_{1, +-}^{(1)}$",
-                "second_order": r"$\Gamma_{2, +-}^{(1)}$",
-                "two_phonon": r"$\Gamma_{1, +-}^{(2)}$"
-            },
-            "V_0_0": {
-                "first_order": r"$\Gamma_{1, 00}^{(1)}$",
-                "second_order": r"$\Gamma_{2, 00}^{(1)}$",
-                "two_phonon": r"$\Gamma_{1, 00}^{(2)}$"
+            "first_order": {
+              "0_1": r"$\Gamma_{1, 0\pm}^{(1)}$",
+              "1_-1": r"$\Gamma_{1, +-}^{(1)}$",
+              "0_0": r"$\Gamma_{1, 00}^{(1)}$",
+              },
+            "second_order": {
+              "0_1": r"$\Gamma_{2, 0\pm}^{(1)}$",
+              "1_-1": r"$\Gamma_{2, +-}^{(1)}$",
+              "0_0": r"$\Gamma_{2, 00}^{(1)}$",
+              },
+            "two_phonon": {
+              "0_1": r"$\Gamma_{1, 0\pm}^{(2)}$",
+              "1_-1": r"$\Gamma_{1, +-}^{(2)}$",
+              "0_0": r"$\Gamma_{1, 00}^{(2)}$",
+              }
             }
-        }
 
         # Determine which orders to plot based on arguments
         orders_to_plot = []
@@ -167,39 +175,41 @@ def main():
             # The original results were saved as a dict of dicts: data[key] is a 0‑d array of object
             # keys = [k for k in data.files if k != "valid_temps"]   # all transition keys
 
-            results = {k: item[()] for k, item in data.items() if k != "valid_temps" and (isinstance(item[()], np.ndarray) or isinstance(item[()], dict)) }
+            results = {k: item[()] for k, item in data.items() if "order" in k or "phonon" in k}
 
             # Replace zeros with a tiny number for log scale
             if args.log:
                 for k, item in results.items():
-                    for order in orders_to_plot:
-                        arr = np.array(item[order])
+                    if k not in orders_to_plot:
+                        continue
+                    for transition, rate in item.items():
+                        arr = np.array(rate)
                         arr[arr == 0] = 1e-12
-                        item[order] = arr
+                        item[transition] = arr
 
             # Plot each transition from this file
-            for k in results.keys():
-                for order in orders_to_plot:
-                    if k not in results or order not in results[k]:
-                        continue
+            for k, item in results.items():
+                if k not in orders_to_plot:
+                    continue
+                for transition, rate in item.items():
                     # Build label: transition label only for the first file
                     label = None
                     if first_file:
-                        label = labels.get(k, {}).get(order,
-                                  f"{k} {order}")   # fallback if key/order not in 'labels'
+                        label = labels.get(k, {}).get(transition,
+                                  f"{k} {transition}")   # fallback if key/order not in 'labels'
 
                     # Line style based on file index
                     ls = linestyles[i % len(linestyles)]
 
                     # Get consistent colour for this (k, order) pair
-                    pair = (k, order)
+                    pair = (k, transition)
                     if pair in color_for_pair:
                         # Reuse colour from the first file
-                        plt.plot(valid_temps, results[k][order],
+                        plt.plot(valid_temps, rate,
                                  color=color_for_pair[pair], linestyle=ls,
                                  linewidth=2, label=label)
                     else:
-                        line, = plt.plot(valid_temps, results[k][order],
+                        line, = plt.plot(valid_temps, rate,
                                          linestyle=ls, linewidth=2, label=label)
                         color_for_pair[pair] = line.get_color()
 
@@ -257,8 +267,8 @@ def main():
         plt.title("Spin Transition Rates vs Temperature")
         #plt.grid(True, linestyle='--', alpha=0.7)
         plt.axvline(x=125, color="gray", linestyle="-", linewidth=1)
-        plt.ylim(1e-6,1e6)
-        plt.xlim(1e-1)
+        #plt.ylim(1e-6,1e6)
+        #plt.xlim(1e-1)
         plt.tight_layout()
 
         if args.save:

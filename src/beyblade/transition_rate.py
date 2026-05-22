@@ -10,8 +10,8 @@ from beyblade.constants import CONSTANTS
 PHONON_PROCESSES = {
     "abs_em":  (+1, -1),
     "em_abs":  (-1, +1),
-    #"abs_abs": (+1, +1),
-    #"em_em":   (-1, -1),
+    "abs_abs": (+1, +1),
+    "em_em":   (-1, -1),
 }
 
 class Phonons:
@@ -53,9 +53,6 @@ class TransitionRate:
     self.transition_rate: dict[str, dict[str, float]] = {
         "first_order": {}, "second_order": {}, "two_phonon": {}
     }
-    self.total_rate: dict[str, dict[str, float]] = {
-        "first_order": {}, "second_order": {}, "two_phonon": {}
-        }
     self.ms_values = [1, 0, -1]
     self.Fz_elements = {1: 1.0, 0: -2.0, -1: 1.0}
     self.data = None
@@ -101,19 +98,6 @@ class TransitionRate:
     self.transition_rate["first_order"]["1_to_-1"] = f1_factor * np.sum(J_p_m[mask] * (n[mask] + 1) * delta[mask])
     self.transition_rate["first_order"]["-1_to_1"] = f1_factor * np.sum(J_p_m[mask] * n[mask] * delta[mask])
 
-    self.total_rate["first_order"]["0_1"] = (
-      self.transition_rate["first_order"]["0_to_1"] 
-      + self.transition_rate["first_order"]["0_to_-1"]
-      + self.transition_rate["first_order"]["1_to_0"] 
-      + self.transition_rate["first_order"]["-1_to_0"]
-      )
-
-    self.total_rate["first_order"]["1_-1"] = (
-      self.transition_rate["first_order"]["1_to_-1"]
-      + self.transition_rate["first_order"]["-1_to_1"]
-      )
-
-
     f2_factor = 2 * f1_factor
 
     def get_J_path(m1, m2):
@@ -137,19 +121,6 @@ class TransitionRate:
           total_integrand += (J_a * J_b / E_sq) * n[mask] * (n[mask] + 1)
 
         self.transition_rate["second_order"][rate_key] = f2_factor * np.sum(total_integrand)
-
-    self.total_rate["second_order"]["0_1"]  = (
-        self.transition_rate["second_order"]["0_to_1"]
-      + self.transition_rate["second_order"]["0_to_-1"]
-      + self.transition_rate["second_order"]["-1_to_0"]
-      + self.transition_rate["second_order"]["1_to_0"]
-    )
-    self.total_rate["second_order"]["1_-1"] = (
-        self.transition_rate["second_order"]["1_to_-1"]
-      + self.transition_rate["second_order"]["-1_to_1"]
-    )
-
-    return self.transition_rate
 
 # Two phonon stuff
   def get_2ph_coupling(self, V_key: str) -> np.ndarray:
@@ -215,13 +186,55 @@ class TransitionRate:
 
         self.transition_rate["two_phonon"][rate_key] = f2ph * total
 
-    self.total_rate["two_phonon"]["0_1"] = (
+
+  def get_total_rates(self):
+    total_rate = {
+        "first_order": {
+          "0_1": 0.0,
+          "1_-1": 0.0,
+          },
+        "second_order": {
+          "0_1": 0.0,
+          "1_-1": 0.0,
+          },
+        "two_phonon": {
+          "0_1": 0.0,
+          "1_-1": 0.0,
+          },
+        }
+
+    total_rate["first_order"]["0_1"] = (
+      self.transition_rate["first_order"]["0_to_1"] 
+      + self.transition_rate["first_order"]["0_to_-1"]
+      + self.transition_rate["first_order"]["1_to_0"] 
+      + self.transition_rate["first_order"]["-1_to_0"]
+      )
+
+    total_rate["first_order"]["1_-1"] = (
+      self.transition_rate["first_order"]["1_to_-1"]
+      + self.transition_rate["first_order"]["-1_to_1"]
+      )
+
+    total_rate["second_order"]["0_1"]  = (
+        self.transition_rate["second_order"]["0_to_1"]
+      + self.transition_rate["second_order"]["0_to_-1"]
+      + self.transition_rate["second_order"]["-1_to_0"]
+      + self.transition_rate["second_order"]["1_to_0"]
+    )
+    total_rate["second_order"]["1_-1"] = (
+        self.transition_rate["second_order"]["1_to_-1"]
+      + self.transition_rate["second_order"]["-1_to_1"]
+    )
+
+    total_rate["two_phonon"]["0_1"] = (
         self.transition_rate["two_phonon"].get("0_to_1",  0)
       + self.transition_rate["two_phonon"].get("0_to_-1", 0)
       + self.transition_rate["two_phonon"].get("-1_to_0", 0)
       + self.transition_rate["two_phonon"].get("1_to_0",  0)
     )
-    self.total_rate["two_phonon"]["1_-1"] = (
+    total_rate["two_phonon"]["1_-1"] = (
         self.transition_rate["two_phonon"].get("1_to_-1", 0)
       + self.transition_rate["two_phonon"].get("-1_to_1", 0)
     )
+
+    return total_rate
