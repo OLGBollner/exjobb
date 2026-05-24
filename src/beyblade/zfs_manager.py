@@ -287,7 +287,7 @@ class ZFSManager:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["eigs"][r[0]] } for r in results if r is not None}
+        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": phonon_pert["sym"][r[0]], "pert": phonon_pert["eigs"][r[0]], "ipr": phonon_pert["ipr"][r[0]] } for r in results if r is not None}
 
         print("Number of tensors: ", len(zfs_tensors.keys()))
         return zfs_tensors
@@ -309,7 +309,7 @@ class ZFSManager:
             results = list(tqdm(executor.map(worker_task, outcars), total=total_modes, desc="Processing OUTCAR files"))
 
         # Filter out any None results
-        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["eigs"][r[0][0]], phonon_pert["eigs"][r[0][1]]) } for r in results if r is not None}
+        zfs_tensors = {r[0]: {"tensor": r[1]*CONSTANTS["MHz2J"], "symmetry": (phonon_pert["sym"][r[0][0]], phonon_pert["sym"][r[0][1]]), "pert": (phonon_pert["eigs"][r[0][0]], phonon_pert["eigs"][r[0][1]]), "ipr": (phonon_pert["ipr"][r[0][0]], phonon_pert["ipr"][r[0][1]]) } for r in results if r is not None}
 
         num_entries = len(zfs_tensors.keys())
 
@@ -358,7 +358,7 @@ class ZFSManager:
         print(f"{double_line}\n")
 
 
-    def _calc_derivative(self):
+    def _calc_derivative(self, ipr_thresh=None):
         print("Calculating derivatives...")
         n_modes = self.phonon_manager.nmodes
         symmetry_factor = self._get_symmetry_factor(n_modes, len(self.zfs_tensors.keys()))
@@ -441,7 +441,7 @@ class ZFSManager:
                 print(d_tensor)
 
 
-    def _calc_second_order_derivatives(self, zfs_1d_derivs):
+    def _calc_second_order_derivatives(self, zfs_1d_derivs, ipr_thresh=None):
         print("Calculating derivatives...")
         n_modes = self.phonon_manager.nmodes
         symmetry_factor = 1 # self._get_symmetry_factor(n_modes, len(self.zfs_tensors_2d.keys()))
