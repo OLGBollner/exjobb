@@ -265,10 +265,10 @@ def main():
         plt.xlabel("Temperature (K)")
         plt.ylabel(r"Transition Rate (s$^{-1}$)")
         plt.title("Spin Transition Rates vs Temperature")
-        #plt.grid(True, linestyle='--', alpha=0.7)
-        plt.axvline(x=125, color="gray", linestyle="-", linewidth=1)
-        #plt.ylim(1e-6,1e6)
-        #plt.xlim(1e-1)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        #plt.axvline(x=125, color="gray", linestyle="-", linewidth=1)
+        plt.ylim(1e-8, 1e5)
+        plt.xlim(5e0)
         plt.tight_layout()
 
         if args.save:

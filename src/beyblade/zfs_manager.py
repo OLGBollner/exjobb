@@ -369,6 +369,11 @@ class ZFSManager:
         V_p_m = np.zeros(shape=n_modes)
 
         for i, item in self.zfs_tensors.items():
+            if ipr_thresh is not None:
+                ipr = item["ipr"]
+                if ipr < ipr_thresh:
+                    continue
+
             D_i = item["tensor"]
             q = item["pert"]
             if q is None:
@@ -452,6 +457,11 @@ class ZFSManager:
         V_0_pm_2nd = np.zeros((n_modes, n_modes))
 
         for (i, j), item in self.zfs_tensors_2d.items():
+            if ipr_thresh is not None:
+                ipr_i, ipr_j = item["ipr"]
+                if ipr_i < ipr_thresh and ipr_j < ipr_thresh:
+                    continue
+
             (q_i, q_j) = item["pert"]
 
             if q_i is None or q_j is None:
