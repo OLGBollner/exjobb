@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import constants as Cn
 from pathlib import Path
 
@@ -22,7 +21,7 @@ class Phonons:
     kB = Cn.k / Cn.e * 1000
     x = omega / (kB * T)
     n = np.zeros_like(omega)
-    mask = x > 1e-5
+    mask = (x > 1e-5) & (x < 40)
     n[mask] = 1.0 / (np.exp(x[mask]) - 1.0)
     return n
 
@@ -186,6 +185,20 @@ class TransitionRate:
 
         self.transition_rate["two_phonon"][rate_key] = f2ph * total
 
+  def get_directional_rates(self):
+    directional_rates = {
+        "0_to_1": 0.0,
+        "0_to_-1": 0.0,
+        "1_to_0": 0.0,
+        "-1_to_0": 0.0,
+        "1_to_-1": 0.0,
+        "-1_to_1": 0.0,
+        }
+    for direction_dict in self.transition_rate.values():
+      for direction, rate in direction_dict.items():
+        directional_rates[direction] += rate
+
+    return directional_rates
 
   def get_total_rates(self):
     total_rate = {
@@ -221,6 +234,7 @@ class TransitionRate:
       + self.transition_rate["second_order"]["-1_to_0"]
       + self.transition_rate["second_order"]["1_to_0"]
     )
+
     total_rate["second_order"]["1_-1"] = (
         self.transition_rate["second_order"]["1_to_-1"]
       + self.transition_rate["second_order"]["-1_to_1"]
@@ -232,6 +246,7 @@ class TransitionRate:
       + self.transition_rate["two_phonon"].get("-1_to_0", 0)
       + self.transition_rate["two_phonon"].get("1_to_0",  0)
     )
+    
     total_rate["two_phonon"]["1_-1"] = (
         self.transition_rate["two_phonon"].get("1_to_-1", 0)
       + self.transition_rate["two_phonon"].get("-1_to_1", 0)

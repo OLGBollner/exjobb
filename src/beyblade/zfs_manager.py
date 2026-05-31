@@ -125,7 +125,7 @@ class ZFSManager:
         self.cell_size: int =            None
 
         # Simulation metadata
-        self.perturbation_scale: float = None
+        self.pert_scale: float = None
         self.sub_folder: str =           None
 
         # ZFS Data
@@ -133,6 +133,8 @@ class ZFSManager:
         self.zfs_tensors: np.ndarray =    None
         self.zfs_tensors_2d: np.ndarray = None
         self.eigen_rotation: np.ndarray = None
+
+        self.treated_modes = None
 
         # Other flags
         self.debug: bool = debug
@@ -152,14 +154,14 @@ class ZFSManager:
             self.defect =    sim_folder.parent.parent.name.split("_")[0]
             self.cell_size = int(sim_folder.parent.parent.name.split("_")[-1])
 
-            self.perturbation_scale = float(sim_folder.name.split("_")[1])
+            self.pert_scale = float(sim_folder.name.split("_")[1])
             self.sub_folder =                kwargs["sub_folder"]
 
-            print(f"Initialized ZFSManager with perturbation scale: {self.perturbation_scale}, cell size: {self.cell_size}")
+            print(f"Initialized ZFSManager with perturbation scale: {self.pert_scale}, cell size: {self.cell_size}")
 
             self._get_zfs_data(sim_folder, zfs_folder)
 
-            pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
+            pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
             phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
 
             search_path = sim_folder / self.sub_folder
@@ -187,27 +189,40 @@ class ZFSManager:
                         self.zfs_tensors_2d[key]["tensor"] *= 3/2
 
             print("Succesfully loaded ZFS data from OUTCARs")
+
+            self.treated_modes = self._get_symmetry_factor()
             return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation
 
         elif kwargs.get("raw_data_path", None) is not None:
-            raw_data = np.load(kwargs["raw_data_path"], allow_pickle=True)
+            if isinstance(kwargs["raw_data_path"], list) or len(kwargs["raw_data_path"]) != 2:
+                raw_data = [np.load(file, allow_pickle=True) for file in kwargs["raw_data_path"]]
+            else:
+                raise ValueError("Needs two raw data files.")
 
-            self.sub_folder = raw_data["sub_folder"]
-            self.perturbation_scale = raw_data["pert_scale"]
-            self.defect = raw_data["defect"]
-            self.cell_size = raw_data["cell_size"]
+            meta_data = [
+                "sub_folder",
+                "pert_scale",
+                "defect",
+                "cell_size",
+                ]
 
-            self.zfs_relaxed = raw_data["zfs_relaxed"]
-            self.eigen_rotation = raw_data["eigen_rotation"]
+            for key in meta_data:
+                if raw_data[0][key] != raw_data[1][key]:
+                    raise ValueError(f"Data mismatch between files: {raw_data[0][key]} and {raw_data[1][key]}")
+                setattr(self, key, raw_data[0][key])
 
-            self.zfs_tensors = raw_data["zfs_tensors"][()]
-            self.zfs_tensors_2d = raw_data["zfs_tensors_2d"][()]
+            self.zfs_relaxed =    raw_data[0]["zfs_relaxed"]
+            self.eigen_rotation = raw_data[0]["eigen_rotation"]
+
+            self.zfs_tensors =    raw_data[0]["zfs_tensors"][()]
+            self.zfs_tensors_2d = raw_data[1]["zfs_tensors_2d"][()]
+
+            self.treated_modes = self._get_symmetry_factor()
 
             print("\nRelaxed ZFS tensor:")
             print(self.zfs_relaxed,"\n")
 
             print("Succesfully loaded ZFS data from .npz file")
-
         else:
             print("Initialized empty phonon_manager, no data was given.")
 
@@ -221,7 +236,7 @@ class ZFSManager:
             "defect": self.defect,
             "cell_size": self.cell_size,
             "sub_folder": self.sub_folder,
-            "pert_scale": self.perturbation_scale
+            "pert_scale": self.pert_scale
         }
 
         print(f"Saved ZFS data to: {save_name}")
@@ -236,12 +251,12 @@ class ZFSManager:
             raise ValueError("First order ZFS data not available. Make sure to load the data first with load_outcar_zfs_data()")
         results = []
 
-        pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
+        pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
         phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
 
         zfs_derivs, V_0_0, V_p_m, V_0_pm = self._calc_derivative()
 
-        save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
+        save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.sub_folder}_{self.pert_scale}_.npz"
 
         save_name = self.save_data(save_name, zfs=3/2*self.zfs_relaxed[2,2], zfs_derivs=zfs_derivs, V_0_0=V_0_0, V_p_m=V_p_m,
                                     V_0_pm=V_0_pm, freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
@@ -250,22 +265,24 @@ class ZFSManager:
         return results
 
 
-    def process_second_order_perturbations(self, zfs_1d_derivs_file, output_filename=None):
+    def process_second_order_perturbations(self, zfs_1d_derivs_file=None, output_filename=None):
         results = []
         if None in self.zfs_tensors_2d:
            raise ValueError("Second order ZFS data not available. Make sure to load the data first with load_outcar_zfs_data()")
-
-        save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_{self.sub_folder}_{self.perturbation_scale}_.npz"
-
-        # Load the pre-calculated first order derivatives to optimize compute
-        first_order_data = np.load(zfs_1d_derivs_file)
-        zfs_1d_derivs = first_order_data["zfs_derivs"]
-
-        pert_SI = self.perturbation_scale * CONSTANTS["ang_amu2SI"]
-        phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
+        if None in self.zfs_tensors and zfs_1d_derivs_file:
+            first_order_data = np.load(zfs_1d_derivs_file)
+            zfs_1d_derivs = first_order_data["zfs_derivs"]
+        else:
+            first_order_file = self.process_first_order_perturbations(output_filename=output_filename)[0]
+            results.append(first_order_file)
+            zfs_1d_derivs = np.load(first_order_file, allow_pickle=True)["zfs_derivs"]
 
         zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd = self._calc_second_order_derivatives(zfs_1d_derivs)
 
+        pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
+        phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
+
+        save_name = f"{output_filename}.npz" if output_filename else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_{self.sub_folder}_{self.pert_scale}_.npz"
         save_name = self.save_data(save_name, second_order=True, zfs=3/2*self.zfs_relaxed[2,2], zfs_derivs=zfs_2nd_derivs, V_0_0=V_0_0_2nd, V_p_m=V_p_m_2nd,
                                     V_0_pm=V_0_pm_2nd, freqs=phonon_pert["freqs"], sym=phonon_pert["sym"], ipr=phonon_pert["ipr"])
 
@@ -359,16 +376,18 @@ class ZFSManager:
 
 
     def _calc_derivative(self, ipr_thresh=None):
-        print("Calculating derivatives...")
+        print("Calculating first-order derivatives...")
         n_modes = self.phonon_manager.nmodes
-        symmetry_factor = self._get_symmetry_factor(n_modes, len(self.zfs_tensors.keys()))
 
         zfs_deriv = np.zeros(shape=(n_modes, 3, 3))
         V_0_0 = np.zeros(shape=n_modes)
         V_0_pm = np.zeros(shape=n_modes)
         V_p_m = np.zeros(shape=n_modes)
 
-        for i, item in self.zfs_tensors.items():
+        for i, item in sorted(self.zfs_tensors.items()):
+            if i not in self.treated_modes:
+                continue
+
             if ipr_thresh is not None:
                 ipr = item["ipr"]
                 if ipr < ipr_thresh:
@@ -384,18 +403,15 @@ class ZFSManager:
             
             self._check_symmetry(dD, sym, i)
 
-            zfs_deriv[i] = dD / q
-
-
-            trace_in_plane = dD[0, 0] + dD[1, 1]
-            diff_in_plane = dD[0, 0] - dD[1, 1]
-            off_diag_in_plane = dD[0, 1]
+            dD_dq = dD / q
+            zfs_deriv[i] = dD_dq
 
             if sym == "A1":
-                V_0_0[i] = (np.abs(dD[2, 2] - 0.5 * trace_in_plane) / q) / 3
+                V_0_0[i] = np.abs(dD_dq[2,2] + 0.5 * (dD_dq[0,0] + dD_dq[1,1]))
+
             elif sym in ["Ex", "Ey"]:
-                V_p_m[i] = symmetry_factor*(0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2) / q)
-                V_0_pm[i] = symmetry_factor*(np.sqrt(dD[0, 2]**2 + dD[1, 2]**2) / q) / np.sqrt(2)
+                V_p_m[i] = (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2) / q)
+                V_0_pm[i] = (np.sqrt(dD[0, 2]**2 + dD[1, 2]**2) / q) / np.sqrt(2)
 
             if self.debug:
                 self._debug_derivs(dD/CONSTANTS["MHz2J"],
@@ -447,16 +463,18 @@ class ZFSManager:
 
 
     def _calc_second_order_derivatives(self, zfs_1d_derivs, ipr_thresh=None):
-        print("Calculating derivatives...")
+        print("Calculating second-order derivatives...")
         n_modes = self.phonon_manager.nmodes
-        symmetry_factor = 1 # self._get_symmetry_factor(n_modes, len(self.zfs_tensors_2d.keys()))
 
         zfs_2nd_derivs = np.zeros((n_modes, n_modes, 3, 3))
         V_0_0_2nd = np.zeros((n_modes, n_modes))
         V_p_m_2nd = np.zeros((n_modes, n_modes))
         V_0_pm_2nd = np.zeros((n_modes, n_modes))
 
-        for (i, j), item in self.zfs_tensors_2d.items():
+        for (i, j), item in sorted(self.zfs_tensors_2d.items()):
+            if i not in self.treated_modes and j not in self.treated_modes:
+                continue
+
             if ipr_thresh is not None:
                 ipr_i, ipr_j = item["ipr"]
                 if ipr_i < ipr_thresh and ipr_j < ipr_thresh:
@@ -491,15 +509,12 @@ class ZFSManager:
             diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
             off_diag_in_plane = d2D_dqidqj[0, 1]
 
-
             if "A1" in sym:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3
-                if "E" in sym:
-                    V_0_0_2nd[i, j] *= symmetry_factor
 
             if "E" in sym:
-                V_p_m_2nd[i, j] = symmetry_factor * (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
-                V_0_pm_2nd[i, j] = symmetry_factor * (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2)) / np.sqrt(2)
+                V_p_m_2nd[i, j] = (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
+                V_0_pm_2nd[i, j] = (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2)) / np.sqrt(2)
 
             V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
             V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
@@ -514,7 +529,6 @@ class ZFSManager:
                                 V_0_pm_2nd[i, j]/CONSTANTS["MHz2J"],
                                 V_p_m_2nd[i, j]/CONSTANTS["MHz2J"])
 
-
         print("Symmetry adjusted coefficients: ")
         print("V_00: ", np.sum(V_0_0_2nd > 0))
         print("V_pm: ", np.sum(V_p_m_2nd > 0))
@@ -523,14 +537,13 @@ class ZFSManager:
 
         return zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd
 
-    def _get_symmetry_factor(self, n_modes, nr_zfs_tensors):
-        total_modes = n_modes
-        print("Tensor data size: ", nr_zfs_tensors, " out of ", total_modes, " total modes")
-        if nr_zfs_tensors == total_modes:
-            print("Using all phonon modes")
-            symmetry_factor = 1
-        else:
-            print("Excluding degenerate E modes")
-            symmetry_factor = 2
+    def _get_symmetry_factor(self):
+        total_modes = self.phonon_manager.nmodes
+        n_data_1d = len(self.zfs_tensors.keys())
+        n_data_2d = len(self.zfs_tensors_2d.keys())
+        print("Tensor data size: ", n_data_1d, " and ", n_data_2d, " out of ", total_modes, " total modes")
 
-        return symmetry_factor
+        treated_modes = self.zfs_tensors.keys() if n_data_1d < n_data_2d else self.zfs_tensors_2d.keys()
+        mode_set = {x for item in treated_modes for x in (item if isinstance(item, tuple) else (item,))}
+        print("Total modes: ", len(mode_set))
+        return mode_set

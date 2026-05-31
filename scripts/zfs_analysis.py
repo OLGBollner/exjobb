@@ -14,7 +14,7 @@ def main():
     parser.add_argument("-d", "--debug", action="store_true", help="Print debug information for derivatives.")
 
     # Commands for ZFS management
-    parser.add_argument("--raw_zfs_file", type=str, help="Path to raw ZFS data in .npz file")
+    parser.add_argument("--raw_zfs_file", type=str, nargs="+", help="Path to raw ZFS data in .npz file")
     parser.add_argument("-ph", "--phonon_file", type=str, help="Phonon data file to use.")
     parser.add_argument("--all", action="store_true", help="Use results from all_bands (for calculation).")
     parser.add_argument("--approx", action="store_true", help="Use results from defect_band_approx (for calculation).")
@@ -87,7 +87,9 @@ def main():
 
     if args.calc:
         print("Starting calculation of ZFS derivatives...")
-        if args.order == 1:
+        if args.order == 3:
+            generated_files = zfs_manager.process_second_order_perturbations(args.output)
+        elif args.order == 1:
             print("Processing first-order perturbations...")
             generated_files = zfs_manager.process_first_order_perturbations(args.output)
         elif args.order == 2:

@@ -22,38 +22,39 @@ class ZFSPlotter:
 
         zfs_data = [np.load(file, allow_pickle=True) for file in data_files]
 
-        cell_size = zfs_data[0]["cell_size"]
-        sim_type = str(zfs_data[0]["sub_folder"])
-        defect = zfs_data[0]["defect"]
-        pert_scale = zfs_data[0]["pert_scale"]
+        for data in zfs_data:
+            cell_size = data["cell_size"]
+            sim_type = str(data["sub_folder"])
+            defect = data["defect"]
+            pert_scale = data["pert_scale"]
 
-        if zfs_data[0].get("second_order"):
-            #fig_2d, _ = self._process_2d_plots(zfs_data, args)
-            diag_data = {key: value for key, value in zfs_data[0].items() if key not in ["zfs_derivs", "V_p_m", "V_0_pm", "V_0_0"]}
+            if data.get("second_order"):
+                #fig_2d, _ = self._process_2d_plots(zfs_data, args)
+                diag_data = {key: value for key, value in data.items() if key not in ["zfs_derivs", "V_p_m", "V_0_pm", "V_0_0"]}
 
-            print("Extracting diagonal elements...")
-            diag_data["zfs_derivs"] = np.zeros(zfs_data[0]["zfs_derivs"].shape[0]) # Dummy data
-            diag_data["V_p_m"] = zfs_data[0]["V_p_m"].diagonal()
-            diag_data["V_0_pm"] = zfs_data[0]["V_0_pm"].diagonal()
-            diag_data["V_0_0"] = zfs_data[0]["V_0_0"].diagonal()
-            print("Done!")
+                print("Extracting diagonal elements...")
+                diag_data["zfs_derivs"] = np.zeros(data["zfs_derivs"].shape[0]) # Dummy data
+                diag_data["V_p_m"] = data["V_p_m"].diagonal()
+                diag_data["V_0_pm"] = data["V_0_pm"].diagonal()
+                diag_data["V_0_0"] = data["V_0_0"].diagonal()
+                print("Done!")
 
-            fig, _ = self._process_1d_plots([diag_data], args)
-            sim_type += "_2ph"
-        else:
-            fig, _ = self._process_1d_plots(zfs_data, args)
+                fig, _ = self._process_1d_plots(diag_data, args)
+                sim_type += "_2ph"
+            else:
+                fig, _ = self._process_1d_plots(data, args)
 
-        plt.tight_layout()
-        if args.plot:
-            plt.show()
-        else:
-            out_file = f"{args.output}{args.format}" if args.output else f"{defect}_{cell_size}_zfs_plot_{sim_type}_{pert_scale}.png"
-            Path("figures").mkdir(exist_ok=True)
-            fig.savefig(f"figures/{out_file}")
-            print(f"Saved figure in figures/{out_file}")
-            if zfs_data[0].get("second_order"):
-                fig_2d.savefig(f"figures/{out_file.replace('.png', '_heatmap.png')}")
-                print(f"Saved heatmap in figures/{out_file.replace('.png', '_heatmap.png')}")
+            plt.tight_layout()
+            if args.plot:
+                plt.show()
+            else:
+                out_file = f"{args.output}{args.format}" if args.output else f"{defect}_{cell_size}_zfs_plot_{sim_type}_{pert_scale}.png"
+                Path("figures").mkdir(exist_ok=True)
+                fig.savefig(f"figures/{out_file}")
+                print(f"Saved figure in figures/{out_file}")
+                if data.get("second_order"):
+                    fig_2d.savefig(f"figures/{out_file.replace('.png', '_heatmap.png')}")
+                    print(f"Saved heatmap in figures/{out_file.replace('.png', '_heatmap.png')}")
 
     def _process_1d_plots(self, zfs_data, args):
         fig, ax = plt.subplots(figsize=(6, 5))
@@ -70,8 +71,7 @@ class ZFSPlotter:
             zfs_data = [diff_data]
             plot_name = r"$\Delta$"
 
-        for i, data in enumerate(zfs_data):
-            self._render_single_dataset(ax, ax2, data, args, plot_name, colors)
+        self._render_single_dataset(ax, ax2, zfs_data, args, plot_name, colors)
         
         return fig, ax
 

@@ -48,32 +48,31 @@ if __name__ == "__main__":
 
     # Colour mapping: spin-phonon coupling strength
     cmap = plt.cm.plasma
-    vmin = min(V_0_0.min(), V_0_pm.min(), V_p_m.min())
-    vmax = max(V_0_0.max(), V_0_pm.max(), V_p_m.max())
-    norm = Normalize(vmin=vmin, vmax=vmax)
+    fmin = freqs_mev.min()
+    fmax = freqs_mev.max()
+    norm = Normalize(vmin=fmin, vmax=fmax)
 
 
     size = 100
 
     # Three different marker shapes plotted against the converted meV frequencies
-    sc00 = ax.scatter(freqs_mev, ipr,
-                      c=V_0_0, cmap=cmap, norm=norm,
-                      marker='o', s=size, alpha=norm(V_0_0))
-    sc0pm = ax.scatter(freqs_mev, ipr,
-                       c=V_0_pm, cmap=cmap, norm=norm,
-                       marker='s', s=size, alpha=norm(V_0_pm))
-    scpm = ax.scatter(freqs_mev, ipr,
-                      c=V_p_m, cmap=cmap, norm=norm,
-                      marker='^', s=size, alpha=norm(V_p_m))
+    sc00 = ax.scatter(ipr, V_0_0,
+                      c=freqs_mev, cmap=cmap, norm=norm,
+                      marker='o', s=size, alpha=0.6)
+    sc0pm = ax.scatter(ipr, V_0_pm,
+                       c=freqs_mev, cmap=cmap, norm=norm,
+                       marker='s', s=size, alpha=0.6)
+    scpm = ax.scatter(ipr, V_p_m,
+                      c=freqs_mev, cmap=cmap, norm=norm,
+                      marker='^', s=size, alpha=0.6)
 
     # Colour bar based on the first scatter (all share the same norm/cmap)
-    cbar = fig.colorbar(scpm, ax=ax, label='Spin-phonon coupling')
+    cbar = fig.colorbar(scpm, ax=ax, label='Phonon energy (meV)')
 
-    ax.set_xlabel('Phonon energy (meV)')
-    ax.set_ylabel('IPR')
-    ax.set_title('IPR and coupling vs phonon energy')
+    ax.set_ylabel('Spin-phonon coupling (MHz)')
+    ax.set_xlabel('IPR')
+    #ax.set_title('IPR and coupling vs phonon energy')
     ax.grid(True, which='both', linestyle='--', alpha=0.5)
-    ax.set_xlim(0, 200)
 
     # Legend: only coupling types, symmetry information removed
     legend_elements = [
@@ -88,7 +87,6 @@ if __name__ == "__main__":
                markersize=8, label=r"$V_{+-}^l$")
     ]
     ax.legend(handles=legend_elements, loc='upper right')
-    ax.xaxis.set_major_locator(ticker.MultipleLocator(50))
 
     plt.tight_layout()
 

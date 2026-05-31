@@ -81,6 +81,14 @@ def main():
               "1_-1": [],
               },
             }
+        directional_rates_result = {
+            "0_to_1":  [],
+            "0_to_-1": [],
+            "1_to_0":  [],
+            "-1_to_0": [],
+            "1_to_-1": [],
+            "-1_to_1": [],
+            }
         valid_temps = []
 
         print(f"Computing transition rates for {len(temperatures)} temperature points...")
@@ -96,11 +104,16 @@ def main():
             calculator.compute_transition_rates(T, omega, J_0_pm, J_p_m, J_0_0, zfs)
             if args.two_phonon:
                 calculator.compute_two_phonon_rates(T, omega_x, omega_y, J2_0_pm, J2_p_m, J2_0_0, zfs)
-            rates = calculator.get_total_rates()
-            if rates:
+            total_rates = calculator.get_total_rates()
+            directional_rates = calculator.get_directional_rates()
+            if total_rates and directional_rates:
+                for direction, rate in directional_rates.items():
+                    directional_rates_result[direction].append(rate)
+
                 for order in ["first_order", "second_order", "two_phonon"]:
-                    for transition, rate in rates[order].items():
+                    for transition, rate in total_rates[order].items():
                         results[order][transition].append(rate)
+
                 valid_temps.append(T)
 
         meta_data = {
@@ -116,7 +129,10 @@ def main():
         save_name = str(Path("rates") / save_name)
 
         print(f"Saving transition rates in file: {save_name}.npz")
-        np.savez(save_name, **meta_data, **results, valid_temps=valid_temps)
+        np.savez(save_name, **meta_data, **results, temperatures=valid_temps)
+        save_name = save_name.replace("_rates_","_directional_rates_")
+        print(f"Saving directional rates in file: {save_name}.npz")
+        np.savez(save_name, **meta_data, **directional_rates_result, temperatures=valid_temps)
 
     if args.plot:
         plt.rcParams.update({
@@ -171,7 +187,7 @@ def main():
         for i, data in enumerate(data_files):
 
             # Extract temperatures and rates
-            valid_temps = data["valid_temps"]
+            valid_temps = data["temperatures"]
             # The original results were saved as a dict of dicts: data[key] is a 0‑d array of object
             # keys = [k for k in data.files if k != "valid_temps"]   # all transition keys
 
@@ -264,10 +280,10 @@ def main():
 
         plt.xlabel("Temperature (K)")
         plt.ylabel(r"Transition Rate (s$^{-1}$)")
-        plt.title("Spin Transition Rates vs Temperature")
+        #plt.title("Spin Transition Rates vs Temperature")
         plt.grid(True, linestyle='--', alpha=0.7)
         #plt.axvline(x=125, color="gray", linestyle="-", linewidth=1)
-        plt.ylim(1e-8, 1e5)
+        plt.ylim(1e-8, 1e3)
         plt.xlim(5e0)
         plt.tight_layout()
 
@@ -280,8 +296,8 @@ def main():
                 defect = data["defect"]
                 sub_folder = data["sub_folder"]
                 pert_scale = data["pert_scale"]
-                t_start = np.min(data["valid_temps"])
-                t_end = np.max(data["valid_temps"])
+                t_start = np.min(data["temperatures"])
+                t_end = np.max(data["temperatures"])
 
                 scale_str = "_log" if args.log else ""
                 filename = f"{defect}_{'_'.join(orders_to_plot)}_rates_{sub_folder}_{int(t_start)}-{int(t_end)}K{scale_str}_{pert_scale}.png"
