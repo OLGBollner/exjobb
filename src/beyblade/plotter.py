@@ -117,7 +117,8 @@ class ZFSPlotter:
                     ax, freqs, y_data,
                     sort_metric="mean",            # you can also use "mean" or "median"
                     colors=["red", "blue", "black"],
-                    alpha=0.6
+                    alpha=0.6,
+                    linewidth=1
                     )
 
             for V, col, lbl in [(V_p_m, "red", "+-"), (V_0_pm, "blue", r"0\pm"), (V_0_0, "black", "00")]:

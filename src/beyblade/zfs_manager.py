@@ -359,9 +359,15 @@ class ZFSManager:
         total_width = (col_width * 3) + 10
         double_line = "=" * total_width
 
+        if isinstance(idx, tuple):
+            energy = (self.phonon_manager.symmetry_data['freqs'][idx[0]-1], self.phonon_manager.symmetry_data['freqs'][idx[1]-1])
+        else:
+            energy = self.phonon_manager.symmetry_data['freqs'][idx-1]
+
         print(f"\n{double_line}\n DEBUG DERIVATIVES\n{'-' * total_width}")
         print((f" Mode: {idx}\n"
                f" Symmetry: {symmetry}\n"
+               f" Energy: {energy}\n"
                f" Perturbation: {MathUtils.fmt(q)}\n"
                f"{double_line}\n"
                f" Max Value: {max_val:<10.6f}\n"
@@ -379,6 +385,7 @@ class ZFSManager:
         print("Calculating first-order derivatives...")
         n_modes = self.phonon_manager.nmodes
 
+        phonon_energies = self.phonon_manager.get_freqs()
         zfs_deriv = np.zeros(shape=(n_modes, 3, 3))
         V_0_0 = np.zeros(shape=n_modes)
         V_0_pm = np.zeros(shape=n_modes)
@@ -406,15 +413,39 @@ class ZFSManager:
             dD_dq = dD / q
             zfs_deriv[i] = dD_dq
 
+            if self.defect == "NV" and self.cell_size == 512:
+                sym_x = "Ey"
+                sym_y = "Ex"
+            elif self.defect == "NV" and self.cell_size == 64:
+                sym_x = "Ex"
+                sym_y = "Ey"
+            elif self.defect == "ClV":
+                sym_x = "Ex"
+                sym_y = "Ey"
+            else:
+                raise NotImplementedError(f"Defect {self.defect} not implemented")
+            
             if sym == "A1":
-                V_0_0[i] = np.abs(dD_dq[2,2] + 0.5 * (dD_dq[0,0] + dD_dq[1,1]))
+                V_0_0[i] = np.abs(dD_dq[2,2]) / 6
+            elif sym == sym_y:
+                V_p_m[i] = np.abs(np.mean([dD_dq[0,1], dD_dq[1,0]]))
+                V_0_pm[i] = np.abs(np.mean( [dD_dq[1,2], dD_dq[2,1]] )) / np.sqrt(2)
+            elif sym == sym_x:
+                V_p_m[i] = np.abs(0.5 * (dD_dq[1,1] - dD_dq[0,0]))
+                V_0_pm[i] = np.abs(np.mean( [dD_dq[2,0], dD_dq[0,2]] )) / np.sqrt(2)
 
-            elif sym in ["Ex", "Ey"]:
-                V_p_m[i] = (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2) / q)
-                V_0_pm[i] = (np.sqrt(dD[0, 2]**2 + dD[1, 2]**2) / q) / np.sqrt(2)
+
+            if len(self.treated_modes) < n_modes:
+                if i+1 < n_modes and np.isclose(phonon_energies[i], phonon_energies[i+1]):
+                    V_0_pm[i+1] = V_0_pm[i]
+                    V_p_m[i+1] = V_p_m[i]
+                elif np.isclose(phonon_energies[i], phonon_energies[i-1]):
+                    V_0_pm[i-1] = V_0_pm[i]
+                    V_p_m[i-1] = V_p_m[i]
+                
 
             if self.debug:
-                self._debug_derivs(dD/CONSTANTS["MHz2J"],
+                self._debug_derivs(dD_dq/CONSTANTS["MHz2J"],
                                    q,
                                    sym,
                                    i+1,
@@ -461,10 +492,10 @@ class ZFSManager:
                 print(f"Threshold: {dyn_tol:.2e} | Scale: {tensor_scale:.2f}")
                 print(d_tensor)
 
-
     def _calc_second_order_derivatives(self, zfs_1d_derivs, ipr_thresh=None):
         print("Calculating second-order derivatives...")
         n_modes = self.phonon_manager.nmodes
+        phonon_energies = self.phonon_manager.get_freqs()
 
         zfs_2nd_derivs = np.zeros((n_modes, n_modes, 3, 3))
         V_0_0_2nd = np.zeros((n_modes, n_modes))
@@ -505,16 +536,34 @@ class ZFSManager:
             zfs_2nd_derivs[i, j] = d2D_dqidqj
             zfs_2nd_derivs[j, i] = d2D_dqidqj
 
-            trace_in_plane = d2D_dqidqj[0, 0] + d2D_dqidqj[1, 1]
-            diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
-            off_diag_in_plane = d2D_dqidqj[0, 1]
-
-            if "A1" in sym:
-                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3
-
-            if "E" in sym:
-                V_p_m_2nd[i, j] = (0.5 * np.sqrt(diff_in_plane**2 + 2 * off_diag_in_plane**2))
-                V_0_pm_2nd[i, j] = (np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2)) / np.sqrt(2)
+            if sym == ["A1"]:
+                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2,2]) / 4
+            elif {sym_i,sym_j} == {"Ex"}:
+                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2,2]) / 4
+                V_0_pm_2nd[i, j] = 0.5 * np.abs(np.mean( [d2D_dqidqj[2,0], d2D_dqidqj[0,2]] )) / np.sqrt(2)
+                V_p_m_2nd[i, j] = 0.25 * np.abs(d2D_dqidqj[0,0] - d2D_dqidqj[1,1])
+            elif {sym_i,sym_j} == {"Ey"}:
+                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2,2]) / 4
+                V_0_pm_2nd[i, j] = 0.5 * np.abs(np.mean( [d2D_dqidqj[2,0], d2D_dqidqj[0,2]] )) / np.sqrt(2)
+                V_p_m_2nd[i, j] = 0.25 * np.abs(d2D_dqidqj[1,1] - d2D_dqidqj[0,0])
+            elif {sym_i,sym_j} == {"Ex","Ey"}:
+                V_0_pm_2nd[i, j] = 0.5 * np.abs(np.mean( [d2D_dqidqj[1,2], d2D_dqidqj[2,1]] )) / np.sqrt(2)
+                V_p_m_2nd[i, j] = 0.5 * np.abs(np.mean( [d2D_dqidqj[1,0], d2D_dqidqj[0,1]] ))
+                
+            if len(self.treated_modes) < n_modes:
+                print("HEJ")
+                if i+1 < n_modes and i == j:
+                    freq_i = phonon_energies[i]
+                    freq_in = phonon_energies[i+1]
+                    freq_ip = phonon_energies[i-1]
+                    if np.isclose(freq_i,freq_in):
+                        V_0_0_2nd[i+1, j+1] = V_0_0_2nd[i, j]
+                        V_0_pm_2nd[i+1, j+1] = V_0_pm_2nd[i, j]
+                        V_p_m_2nd[i+1, j+1] = V_p_m_2nd[i, j]
+                    elif np.isclose(freq_i, freq_ip):
+                        V_0_0_2nd[i-1, j-1] = V_0_0_2nd[i, j]
+                        V_0_pm_2nd[i-1, j-1] = V_0_pm_2nd[i, j]
+                        V_p_m_2nd[i-1, j-1] = V_p_m_2nd[i, j]
 
             V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
             V_p_m_2nd[j, i] = V_p_m_2nd[i, j]
