@@ -14,7 +14,14 @@ plt.rcParams.update({
 file_path = sys.argv[1:]
 show_plot = False
 
-initial_population = np.array([0.0, 1.0, 0.0])
+ms_states = {
+    "ms_1": [1.0, 0.0, 0.0],
+    "ms_0": [0.0, 1.0, 0.0],
+    "ms_-1": [0.0, 0.0, 1.0]
+    }
+
+init_state = "ms_-1"
+
 plt.figure(figsize=(10, 6))
 
 if file_path[0] == "--plot":
@@ -24,7 +31,7 @@ if file_path[0] == "--plot":
 for file in file_path:
 
   print("processing file: ", file)
-  simulator = RelaxationDynamics(init_state=initial_population, rates_data=file)
+  simulator = RelaxationDynamics(init_state=ms_states[init_state], rates_data=file)
   T1_times = simulator.compute_T1_range()
   T1_room_temp = simulator.get_T1_fit(T=300)
   T1_low_temp = simulator.get_T1_fit(T=1e-3)
@@ -45,6 +52,6 @@ plt.tight_layout()
 if show_plot:
   plt.show()
 else:
-  save_name = f"figures/{simulator.defect}_T1_time"
+  save_name = f"figures/{simulator.defect}_T1_time_{init_state}"
   print("Saving figure in: ", save_name+".png")
   plt.savefig(save_name)

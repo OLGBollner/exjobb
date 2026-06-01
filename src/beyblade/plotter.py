@@ -52,9 +52,9 @@ class ZFSPlotter:
                 Path("figures").mkdir(exist_ok=True)
                 fig.savefig(f"figures/{out_file}")
                 print(f"Saved figure in figures/{out_file}")
-                if data.get("second_order"):
-                    fig_2d.savefig(f"figures/{out_file.replace('.png', '_heatmap.png')}")
-                    print(f"Saved heatmap in figures/{out_file.replace('.png', '_heatmap.png')}")
+                # if data.get("second_order"):
+                #     fig_2d.savefig(f"figures/{out_file.replace('.png', '_heatmap.png')}")
+                #     print(f"Saved heatmap in figures/{out_file.replace('.png', '_heatmap.png')}")
 
     def _process_1d_plots(self, zfs_data, args):
         fig, ax = plt.subplots(figsize=(6, 5))
@@ -134,8 +134,8 @@ class ZFSPlotter:
             ax.set_ylabel("Phonon IPR")
         else:
             ax.set_ylabel("Coupling coefficient (MHz)")
-            #ax2.yaxis.set_major_locator(ticker.MultipleLocator(50))
-            ax.set_ylim(0)
+            ax.yaxis.set_major_locator(ticker.MultipleLocator(25))
+            ax.set_ylim(0, 125)
 
         if args.bar:
             ax.set_xlabel("Mode index")
@@ -145,9 +145,9 @@ class ZFSPlotter:
             ax.set_xlim(0, 200)
             ax.set_xlabel("Vibration frequency (meV)")
             ax2.set_ylabel(r"Spectral function (MHz$^2$/meV)")
-            #ax2.yaxis.set_major_locator(ticker.MultipleLocator(2000))
-            ax2.set_ylim(0)
-            legend_pos = "upper left"
+            ax2.yaxis.set_major_locator(ticker.MultipleLocator(500))
+            ax2.set_ylim(0, 3000)
+            legend_pos = "upper right"
 
         plt.axvline(x=data["zfs"]/CONSTANTS["meV2J"], color="gray", linewidth=1)
         lines1, labels1 = ax.get_legend_handles_labels()

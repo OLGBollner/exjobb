@@ -426,7 +426,7 @@ class ZFSManager:
                 raise NotImplementedError(f"Defect {self.defect} not implemented")
             
             if sym == "A1":
-                V_0_0[i] = np.abs(dD_dq[2,2]) / 6
+                V_0_0[i] = np.abs(dD_dq[2,2]) / 2
             elif sym == sym_y:
                 V_p_m[i] = np.abs(np.mean([dD_dq[0,1], dD_dq[1,0]]))
                 V_0_pm[i] = np.abs(np.mean( [dD_dq[1,2], dD_dq[2,1]] )) / np.sqrt(2)
@@ -551,7 +551,6 @@ class ZFSManager:
                 V_p_m_2nd[i, j] = 0.5 * np.abs(np.mean( [d2D_dqidqj[1,0], d2D_dqidqj[0,1]] ))
                 
             if len(self.treated_modes) < n_modes:
-                print("HEJ")
                 if i+1 < n_modes and i == j:
                     freq_i = phonon_energies[i]
                     freq_in = phonon_energies[i+1]
