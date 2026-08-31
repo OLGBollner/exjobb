@@ -30,6 +30,6 @@ for base in "${BASES[@]}"; do
             --two-phonon "$two_phonon" \
             --calc \
             --t-end "$T_END" \
-            --t-step "$T_STEP"
+            --t-step "$T_STEP" 
     done
 done

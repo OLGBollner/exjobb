@@ -53,7 +53,7 @@ if __name__ == "__main__":
     norm = Normalize(vmin=fmin, vmax=fmax)
 
 
-    size = 100
+    size = 50
 
     # Three different marker shapes plotted against the converted meV frequencies
     sc00 = ax.scatter(ipr, V_0_0,
@@ -87,6 +87,9 @@ if __name__ == "__main__":
                markersize=8, label=r"$V_{+-}^l$")
     ]
     ax.legend(handles=legend_elements, loc='upper right')
+
+    ax.set_ylim(0,50)
+    ax.set_xlim(0)
 
     plt.tight_layout()
 

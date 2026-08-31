@@ -1,6 +1,9 @@
 import numpy as np
 from scipy.integrate import odeint
 from scipy.optimize import curve_fit
+import scipy.constants as Cn
+
+from beyblade.constants import CONSTANTS
 
 class RelaxationDynamics:
   def __init__(self, init_state, rates_data):
@@ -52,8 +55,6 @@ class RelaxationDynamics:
     initial_guess = [T1_eigenval, steady_state]
 
     popt, _, info_dict, _, _ = curve_fit(exp_func, time_points, population, p0=initial_guess, full_output=True)
-    # print("steady_state: ", steady_state)
-    # print("c: ", popt[1])
     error = np.mean(info_dict["fvec"])
     if error > 1e-9:
       print("Error: ", error)
@@ -113,17 +114,163 @@ class RelaxationDynamics:
 
     return T1_range
 
+  def get_time_estimate(self, T=None, temp_index=None):
+    T1_eigenval, _, _ = self.get_T1_eigenval(T=T, temp_index=temp_index)
+    T = T if T else self.temperatures[temp_index]
+    if not np.isfinite(1/T):
+      return None
+
+    t_end = 10*T1_eigenval + 1/T
+
+    time_points = np.linspace(0, t_end, 10000)
+
+    return time_points
+
   def get_T1_fit(self, T=None, temp_index=None):
     T1_eigenval, _, _ = self.get_T1_eigenval(T=T, temp_index=temp_index)
     steady_state = self.get_steady_state(T=T, temp_index=temp_index)[self.population.argmax()]
 
     if T1_eigenval > 1e9:
       return T1_eigenval
-
-    time_points = np.linspace(0, 10 * T1_eigenval, 10000)
+    
+    time_points = self.get_time_estimate(T, temp_index)
+    if time_points is None:
+      return np.nan
 
     population = self.simulate_relaxation(time_points, T=T, temp_index=temp_index)[:, self.population.argmax()]
 
     T1_fit = self.fit_T1_exp(population, time_points, steady_state, T1_eigenval)
 
     return T1_fit
+
+  def fit_rate_scaling(self, low_T, high_T, file=None):
+      k_B = Cn.Boltzmann / Cn.e        # eV·K⁻¹
+      hbar_eVs = Cn.hbar / Cn.e         # eV·s
+
+      # ── 1. Obtain T₁ values ──────────────────────────────────────────────
+      if file is not None:
+          data         = np.load(file, allow_pickle=True)
+          T1_range     = np.array(data["T1_range"],     dtype=float)
+          temperatures = np.array(data["temperatures"], dtype=float)
+      else:
+          T1_range     = np.array(self.compute_T1_range(), dtype=float)
+          temperatures = self.temperatures.astype(float)
+
+      # Replace non-finite T₁ with NaN (they will be excluded by masks)
+      T1_range = np.where(np.isfinite(T1_range) & (T1_range > 0), T1_range, np.nan)
+      rate     = 1.0 / T1_range   # 1/T₁ [s⁻¹]
+
+      # ── 2. Temperature‑region masks ──────────────────────────────────────
+      mask_low  = temperatures <= low_T
+      mask_mid  = (temperatures > low_T)  & (temperatures <= high_T)
+      mask_high = temperatures > high_T
+
+      results = {"temperatures": temperatures, "rate": rate}
+
+      # ── 3. Helper: power‑law fit in log‑log space ─────────────────────────
+      def _power_law_fit(T_region, rate_region, label):
+          valid = np.isfinite(T_region) & (T_region > 0) & np.isfinite(rate_region) & (rate_region > 0)
+          if valid.sum() < 2:
+              print(f"{label}: not enough valid data points – skipping.")
+              return None, None
+
+          log_T    = np.log(T_region[valid])
+          log_rate = np.log(rate_region[valid])
+
+          # Degree‑1 polyfit → log(rate) = n·log(T) + log(c)
+          n, log_c = np.polyfit(log_T, log_rate, 1)
+          c        = np.exp(log_c)
+
+          print(f"{label}  |  power‑law exponent n = {n:+.4f}   "
+                f"(1/T₁ ∝ T^{n:.4f},  prefactor c = {c:.4e} s⁻¹)")
+          return n, c
+
+      # ── 4. Power‑law fit – Low T (0–50 K) ────────────────────────────────
+      print("\n── Low‑T region (0–50 K) ─────────────────────────────────────")
+      n_low, c_low = _power_law_fit(
+          temperatures[mask_low], rate[mask_low], "Low T  (0–50 K) "
+      )
+
+      # ── 5. Bose‑factor fit – Mid T (50–200 K) ────────────────────────────
+      print("\n── Mid‑T region (50–200 K) ───────────────────────────────────")
+      T_mid    = temperatures[mask_mid]
+      rate_mid = rate[mask_mid]
+      valid_m  = np.isfinite(T_mid) & (T_mid > 0) & np.isfinite(rate_mid) & (rate_mid > 0)
+
+      A_fit = omega_fit = None
+
+      if valid_m.sum() >= 2:
+          from scipy.optimize import curve_fit
+
+          def mid_model(T, A, omega):
+              exponent = hbar_eVs * omega / (k_B * T)
+              return A * 1 / (np.exp(np.clip(exponent, -np.inf, 700)) - 1.0)
+
+          # Initial guess – adjust if needed
+          A0 = 1e-20
+          omega0 = 1e12
+
+          try:
+              popt, pcov = curve_fit(
+                  mid_model,
+                  T_mid[valid_m],
+                  rate_mid[valid_m],
+                  p0=[A0, omega0],
+                  bounds=([1e-30, 1e6], [1e-10, 1e15])
+              )
+              A_fit, omega_fit = popt
+              E_fit = hbar_eVs * omega_fit   # ħω in eV
+
+              print("Mid T  (50–200 K)  |  Fit: rate = A ω³/(exp(ħω/kT)-1)")
+              print(f"  A = {A_fit:.4e} s⁻¹,  ω = {omega_fit:.4e} s⁻¹  (ħω = {E_fit:.4f} eV)")
+          except Exception as e:
+              print(f"Mid T (50–200 K): curve_fit failed – {e}")
+      else:
+          print("Mid T (50–200 K): not enough valid data points – skipping.")
+
+      # ── 6. Power‑law fit – High T (> 200 K) ──────────────────────────────
+      print("\n── High‑T region (>200 K) ────────────────────────────────────")
+      n_high, c_high = _power_law_fit(
+          temperatures[mask_high], rate[mask_high], "High T (>200 K)"
+      )
+
+      # ── 7. Build callable fit functions ──────────────────────────────────
+      def _make_power_law(n, c):
+          if n is None or c is None:
+              return None
+          return lambda T: c * T**n
+
+      func_low  = _make_power_law(n_low, c_low)
+      func_high = _make_power_law(n_high, c_high)
+
+      if A_fit is not None and omega_fit is not None:
+          # Capture the fitted parameters and constants in a closure
+          _A, _omega = A_fit, omega_fit
+          def func_mid(T):
+              exponent = hbar_eVs * _omega / (k_B * T)
+              return _A * 1/ (np.exp(np.clip(exponent, -np.inf, 700)) - 1.0)
+      else:
+          func_mid = None
+
+      # ── 8. Assemble result dictionary ────────────────────────────────────
+      results.update({
+          # power‑law parameters (existing keys)
+          "n_low":   n_low,
+          "c_low":   c_low,
+          "n_high":  n_high,
+          "c_high":  c_high,
+
+          # mid‑T Bose‑factor parameters (new keys for the plotting script)
+          "omega":   omega_fit,
+          "A_mid":   A_fit,
+
+          # keep the old Arrhenius‑named keys for backward compatibility
+          "E_a":     None if omega_fit is None else hbar_eVs * omega_fit,
+          "A":       A_fit,
+
+          # callable functions
+          "func_low":  func_low,
+          "func_mid":  func_mid,
+          "func_high": func_high,
+      })
+      return results

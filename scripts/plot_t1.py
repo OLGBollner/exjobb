@@ -1,5 +1,6 @@
 import sys
 from beyblade.relaxation_dynamics import RelaxationDynamics
+from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -20,7 +21,7 @@ ms_states = {
     "ms_-1": [0.0, 0.0, 1.0]
     }
 
-init_state = "ms_-1"
+init_state = "ms_0"
 
 plt.figure(figsize=(10, 6))
 
@@ -34,11 +35,22 @@ for file in file_path:
   simulator = RelaxationDynamics(init_state=ms_states[init_state], rates_data=file)
   T1_times = simulator.compute_T1_range()
   T1_room_temp = simulator.get_T1_fit(T=300)
-  T1_low_temp = simulator.get_T1_fit(T=1e-3)
+  low_T = simulator.temperatures[1]
+  T1_low_temp = simulator.get_T1_fit(T=low_T)
+  print(10*"=")
   print("T1 in room temp: ", T1_room_temp)
-  print("Low temp limit: ", T1_low_temp)
+  print(f"Low temp (T={low_T}) limit: {T1_low_temp}")
+  print(10*"=")
 
-  plt.plot(simulator.temperatures, T1_times, linewidth=2, label=f"{simulator.defect} {simulator.cell_size} {simulator.sim_type}")
+  
+  Path("T1_data").mkdir(exist_ok=True)
+  filename = f"{simulator.defect}_T1_time_{init_state}"
+  save_name = str(Path("T1_data") / filename)
+  print("Saving T1 data in: ", save_name)
+  np.savez(save_name)
+
+  linestyle = "--" if "spin" in simulator.sim_type else "-"
+  plt.plot(simulator.temperatures, T1_times, linewidth=2, linestyle=linestyle, label=f"{simulator.defect} {simulator.cell_size} {simulator.sim_type}")
 
 #plt.title(r"$T_1$ relaxation time")
 plt.xlabel("Temperature (K)")
