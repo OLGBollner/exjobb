@@ -94,7 +94,7 @@ def main():
             generated_files = zfs_manager.process_first_order_perturbations(args.output)
         elif args.order == 2:
             print("Processing second-order perturbations...")
-            generated_files = zfs_manager.process_second_order_perturbations(args.data_files[0], args.output)
+            generated_files = zfs_manager.process_second_order_perturbations(args.output)
 
     if args.data_files and zfs_manager is None:
         files_to_plot = args.data_files

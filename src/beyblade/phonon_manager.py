@@ -266,6 +266,40 @@ class PhononManager:
             print(f"Saving file in: {filename}")
 
             np.savez(filename, **phonons, sym=phonon_symmetries["sym"], ipr=MathUtils.calc_ipr(phonons), idx=phonon_symmetries["idx"])
+    # TODO: Fix IPR getters everywhere.
+    def calc_ipr(self) -> np.ndarray:
+        mode_eigs = self.data["eigs"]
+        freqs = self.data["freqs"]
+        nphonon = freqs.shape[0]
+        lattice_points = self.data["atoms"]
+        lattice_vecs = self.data["lattice"]
+        cartesian_points = np.zeros(lattice_points.shape)
+
+        for i, point in enumerate(lattice_points):
+            cartesian_point = np.zeros((1, 3))
+            for x, vector in zip(point, np.split(lattice_vecs, 3, axis=0)):
+                if x > 0.5:
+                    x -= 1
+                cartesian_point += x * np.reshape(vector, (1, 3))
+            cartesian_points[i] = cartesian_point
+
+        defect_pos = [0,0,0]
+        mode_iprs = np.zeros(nphonon)
+        lw_vals = np.zeros(nphonon)
+        for i in range(nphonon):
+            disp_4 = 0
+            locality_disp = 0
+            disp_total = 0
+            for mode in mode_eigs[i]:
+                disp = np.dot(mode, mode)
+                disp_4 += disp**2
+                disp_total += disp
+                if np.linalg.norm(lattice_points[j,:] - defect_pos) < args.locality_weight_limit:
+                    locality_disp += disp
+            mode_iprs[i] = disp_4 / (disp_total**2)
+            lw_vals[i] = locality_disp/disp_total
+
+        return mode_iprs
 
     def get_phonon_pert(self, perturbation_scale):
         phonon_pert = {}
@@ -353,3 +387,4 @@ class PhononManager:
         # Store the shift for possible reversal
         self._defect_shift = defect_frac.copy()
         return shifted_frac, defect_frac
+

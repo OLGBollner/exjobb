@@ -221,35 +221,35 @@ class TransitionRate:
       + self.transition_rate["first_order"]["0_to_-1"]
       + self.transition_rate["first_order"]["1_to_0"] 
       + self.transition_rate["first_order"]["-1_to_0"]
-      )
+      ) /4 
 
     total_rate["first_order"]["1_-1"] = (
       self.transition_rate["first_order"]["1_to_-1"]
       + self.transition_rate["first_order"]["-1_to_1"]
-      )
+      ) /2
 
     total_rate["second_order"]["0_1"]  = (
         self.transition_rate["second_order"]["0_to_1"]
       + self.transition_rate["second_order"]["0_to_-1"]
       + self.transition_rate["second_order"]["-1_to_0"]
       + self.transition_rate["second_order"]["1_to_0"]
-    )
+    ) /4
 
     total_rate["second_order"]["1_-1"] = (
         self.transition_rate["second_order"]["1_to_-1"]
       + self.transition_rate["second_order"]["-1_to_1"]
-    )
+    ) /2
 
     total_rate["two_phonon"]["0_1"] = (
         self.transition_rate["two_phonon"].get("0_to_1",  0)
       + self.transition_rate["two_phonon"].get("0_to_-1", 0)
       + self.transition_rate["two_phonon"].get("-1_to_0", 0)
       + self.transition_rate["two_phonon"].get("1_to_0",  0)
-    )
+    ) /4
     
     total_rate["two_phonon"]["1_-1"] = (
         self.transition_rate["two_phonon"].get("1_to_-1", 0)
       + self.transition_rate["two_phonon"].get("-1_to_1", 0)
-    )
+    ) /2
 
     return total_rate

@@ -89,35 +89,6 @@ class MathUtils:
         return X, Y, convolve(dense_values, kernel, cval=0, mode="constant")
 
     @staticmethod
-    def calc_ipr(phonons: Dict[str, Any]) -> np.ndarray:
-        phonon_modes = phonons["eigs"]
-        freqs = phonons["freqs"]
-        nphonon = freqs.shape[0]
-        lattice_points = phonons["atoms"]
-        lattice_vecs = phonons["lattice"]
-        cartesian_points = np.zeros(lattice_points.shape)
-
-        for i, point in enumerate(lattice_points):
-            cartesian_point = np.zeros((1, 3))
-            for x, vector in zip(point, np.split(lattice_vecs, 3, axis=0)):
-                if x > 0.5:
-                    x -= 1
-                cartesian_point += x * np.reshape(vector, (1, 3))
-            cartesian_points[i] = cartesian_point
-
-        mode_iprs = np.zeros(nphonon)
-        for i in range(nphonon):
-            disp_4 = 0
-            disp_total = 0
-            for mode in phonon_modes[i]:
-                disp = np.dot(mode, mode)
-                disp_4 += disp**2
-                disp_total += disp
-            mode_iprs[i] = disp_4 / (disp_total**2)
-
-        return mode_iprs
-
-    @staticmethod
     def rotation_matrix_around_axis(axis, angle):
         """
         Compute the 3x3 rotation matrix for a rotation by `angle` (in radians)

@@ -2,7 +2,7 @@
 # Script to update all IPR plots by running plot_ipr.py for every coefficients*.npz file
 # Assumes you run it from the project root (where plot_ipr.py lives).
 
-BASES=("NV_64" "NV_512" "ClV_128")
+BASES=("ClV_128") # "NV_64" "NV_512"
 
 for base in "${BASES[@]}"; do
     # Look for all matching coefficient files in the derivatives/ folder
