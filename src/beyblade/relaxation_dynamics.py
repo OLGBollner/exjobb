@@ -19,7 +19,7 @@ class RelaxationDynamics:
     data = np.load(data_file, allow_pickle=True)
     self.defect = data.get("defect")
     self.cell_size = data.get("cell_size")
-    self.sim_type = "(spin corrected)" if data.get("sub_folder") == "defect_band_approx" else ""
+    self.sim_type = "(spin corrected)" if data.get("calc_method") == "defect_band_approx" else ""
 
     rate_matrices = []
 
