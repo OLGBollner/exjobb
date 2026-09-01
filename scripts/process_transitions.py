@@ -225,7 +225,7 @@ def compute_rates(data_path, two_phonon_path, t_start, t_end, t_step):
     meta_data = {
         "cell_size":   calculator.data["cell_size"],
         "defect":      calculator.data["defect"],
-        "sub_folder":  calculator.data["sub_folder"],
+        "calc_method":  calculator.data["calc_method"],
         "pert_scale":  calculator.data["pert_scale"],
     }
 
@@ -239,7 +239,7 @@ def save_rates(results, directional_results, valid_temps, meta_data):
 
     base_name = (
         f"{meta_data['defect']}_{meta_data['cell_size']}"
-        f"_rates_{meta_data['sub_folder']}_{meta_data['pert_scale']}"
+        f"_rates_{meta_data['calc_method']}_{meta_data['pert_scale']}"
     )
     total_path = save_dir / base_name
     np.savez(total_path.with_suffix(".npz"),
@@ -308,7 +308,7 @@ def plot_line_rates(data_files, orders_to_plot, log_scale, output_arg, show):
 
     all_defects    = [str(d["defect"])    for d in data_arrays]
     all_sizes      = [int(d["cell_size"]) for d in data_arrays]
-    all_formalisms = [str(d["sub_folder"]) for d in data_arrays]
+    all_formalisms = [str(d["calc_method"]) for d in data_arrays]
 
     show_defect    = len(set(all_defects)) > 1
     show_size      = len(set(all_sizes)) > 1
@@ -322,11 +322,11 @@ def plot_line_rates(data_files, orders_to_plot, log_scale, output_arg, show):
         if show_size:
             parts.append(str(data["cell_size"]))
         if show_formalism:
-            fm = str(data["sub_folder"])
+            fm = str(data["calc_method"])
             parts.append(f"({SPIN_FORMALISM_LABELS.get(fm, fm)})")
 
         if not parts:  # fallback when all sources are identical
-            fm = str(data["sub_folder"])
+            fm = str(data["calc_method"])
             parts.append(f"{data['defect']} {data['cell_size']} "
                          f"({SPIN_FORMALISM_LABELS.get(fm, fm)})")
         label = " ".join(parts)
@@ -366,14 +366,14 @@ def build_plot_filename(data, orders_to_plot, log_scale, output_arg):
         return output_arg
 
     defect     = data["defect"]
-    sub_folder = data["sub_folder"]
+    calc_method = data["calc_method"]
     pert_scale = data["pert_scale"]
     t_min = int(np.min(data["temperatures"]))
     t_max = int(np.max(data["temperatures"]))
     scale_str = "_log" if log_scale else ""
 
     filename = (f"{defect}_{'_'.join(orders_to_plot)}_rates_"
-                f"{sub_folder}_{t_min}-{t_max}K{scale_str}_{pert_scale}.png")
+                f"{calc_method}_{t_min}-{t_max}K{scale_str}_{pert_scale}.png")
     return filename
 
 
@@ -422,13 +422,13 @@ def plot_stacked_area_from_file(data_file, output_base, show, log_scale):
     # Construct base filename for saving
     if output_base is None:
         defect     = str(data["defect"])
-        sub_folder = str(data["sub_folder"])
+        calc_method = str(data["calc_method"])
         pert_scale = str(data["pert_scale"])
         cell_size = str(data["cell_size"])
         t_min = int(np.min(T))
         t_max = int(np.max(T))
         output_base = (f"{defect}_{cell_size}_stacked_rates_"
-                       f"{sub_folder}_{t_min}-{t_max}K_{pert_scale}")
+                       f"{calc_method}_{t_min}-{t_max}K_{pert_scale}")
     else:
         output_base = Path(output_base).stem  # strip extension if given
 
