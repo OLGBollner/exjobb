@@ -196,6 +196,23 @@ class PhononSpectrum:
             return np.array([], dtype=int)
         return np.array([i for i, sym in enumerate(self.symmetries) if sym == symmetry_label], dtype=int)
 
+    def get_phonon_pert(self, perturbation_scale_si: float = 1.0) -> dict[str, Any]:
+        """
+        Computes perturbation displacements (mass-weighted norms), frequencies (J), symmetries, and IPRs.
+        """
+        # Mass-weighted eigenvector norms in SI units
+        eigs_norm = np.linalg.norm(self.eigenvectors.reshape(self.n_modes, -1), axis=1) * perturbation_scale_si
+        freqs_j = self.frequencies_mev * CONSTANTS["meV2J"]
+        iprs = self.iprs if self.iprs is not None else np.zeros(self.n_modes)
+        syms = self.symmetries if self.symmetries is not None else ["A1"] * self.n_modes
+
+        return {
+            "eigs": eigs_norm,
+            "freqs": freqs_j,
+            "sym": syms,
+            "ipr": iprs,
+        }
+
 
 @dataclass
 class PerturbationEntry:

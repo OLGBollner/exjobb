@@ -18,17 +18,25 @@ class ZFSManager:
     """
     Manages Zero-Field Splitting (ZFS) tensor calculations, coordinate transformations,
     finite-difference derivatives (1st and 2nd order), and spin-phonon coupling coefficients (V-tensors).
+    Operates directly on the PhononSpectrum dataclass.
     """
 
     def __init__(
         self,
-        phonon_manager: Optional[PhononManager] = None,
         spectrum: Optional[PhononSpectrum] = None,
         raw_data: Optional[RawZFSData] = None,
+        phonon_manager: Optional[Any] = None,
         debug: bool = False,
     ):
+        # spectrum is the primary dataclass; phonon_manager is accepted for legacy compatibility
+        if spectrum is not None:
+            self.spectrum = spectrum
+        elif phonon_manager is not None:
+            self.spectrum = getattr(phonon_manager, "spectrum", None)
+        else:
+            self.spectrum = None
+
         self.phonon_manager = phonon_manager
-        self.spectrum = spectrum
         self.raw_data = raw_data
 
         # Defect metadata
@@ -64,6 +72,13 @@ class ZFSManager:
             return self.phonon_manager.get_freqs()
         return np.array([])
 
+    def get_phonon_pert(self, pert_scale_si: float) -> Optional[dict[str, Any]]:
+        if self.spectrum is not None:
+            return self.spectrum.get_phonon_pert(pert_scale_si)
+        if self.phonon_manager is not None:
+            return self.phonon_manager.get_phonon_pert(pert_scale_si)
+        return None
+
     def _ingest_raw_data(self, raw: RawZFSData):
         """Populates internal arrays and applies principal frame rotation from RawZFSData."""
         self.defect = raw.defect
@@ -79,7 +94,7 @@ class ZFSManager:
                 self.zfs_relaxed *= 1.5
 
         pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
-        phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI) if self.phonon_manager else None
+        phonon_pert = self.get_phonon_pert(pert_SI)
         eigen_rot_t = self.eigen_rotation.T if self.eigen_rotation is not None else np.eye(3)
 
         if raw.first_order:
@@ -322,7 +337,7 @@ class ZFSManager:
             raise ValueError("First order ZFS data not loaded.")
 
         pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
-        phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
+        phonon_pert = self.get_phonon_pert(pert_SI)
         zfs_derivs, V_0_0, V_p_m, V_0_pm = self.calculate_first_order_derivatives()
 
         save_name = (
@@ -362,7 +377,7 @@ class ZFSManager:
         zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd = self.calculate_second_order_derivatives(zfs_1d_derivs)
 
         pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
-        phonon_pert = self.phonon_manager.get_phonon_pert(pert_SI)
+        phonon_pert = self.get_phonon_pert(pert_SI)
 
         save_name = (
             f"{output_filename}.npz"
