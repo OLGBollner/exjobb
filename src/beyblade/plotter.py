@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import ticker
 
 from beyblade.constants import CONSTANTS
 from beyblade.utils import MathUtils
@@ -100,13 +99,11 @@ def plot_1d_spectral_functions(
         ax2.plot(smooth_x, smooth_y, color=col, linewidth=2, label=label_prefix + f"$F_{{{lbl}}}^{(1)}$")
 
     ax.set_ylabel("Coupling coefficient (MHz)")
-    ax.yaxis.set_major_locator(ticker.MultipleLocator(25))
     ax.set_ylim(bottom=0)
 
     ax.set_xlim(0, max(200.0, float(np.max(frequencies_mev)) * 1.05 if len(frequencies_mev) > 0 else 200.0))
     ax.set_xlabel("Vibration frequency (meV)")
     ax2.set_ylabel(r"Spectral function (MHz$^2$/meV)")
-    ax2.yaxis.set_major_locator(ticker.MultipleLocator(500))
     ax2.set_ylim(bottom=0)
 
     if zfs_mev is not None:
