@@ -198,16 +198,23 @@ class PhononSpectrum:
 
     def get_phonon_pert(self, perturbation_scale_si: float = 1.0) -> dict[str, Any]:
         """
-        Computes perturbation displacements (mass-weighted norms), frequencies (J), symmetries, and IPRs.
+        Computes mass-weighted perturbation displacements (SI), frequencies (J), symmetries, and IPRs.
+
+        The perturbation amplitude for each mode follows the mass-weighted
+        phonon coordinate  q = q0 * sqrt(2*omega/hbar), matching the original
+        PhononManager implementation. Modes with frequency <= 0 get None.
         """
-        # Mass-weighted eigenvector norms in SI units
-        eigs_norm = np.linalg.norm(self.eigenvectors.reshape(self.n_modes, -1), axis=1) * perturbation_scale_si
+        omega_rads = self.frequencies_mev * CONSTANTS["meV2rads"]
+        displacements = [
+            perturbation_scale_si * np.sqrt(2.0 * omega / Cn.hbar) if freq > 0 else None
+            for freq, omega in zip(self.frequencies_mev, omega_rads)
+        ]
         freqs_j = self.frequencies_mev * CONSTANTS["meV2J"]
         iprs = self.iprs if self.iprs is not None else np.zeros(self.n_modes)
         syms = self.symmetries if self.symmetries is not None else ["A1"] * self.n_modes
 
         return {
-            "eigs": eigs_norm,
+            "eigs": displacements,
             "freqs": freqs_j,
             "sym": syms,
             "ipr": iprs,

@@ -84,6 +84,11 @@ class PhononManager:
     def get_freqs(self) -> np.ndarray:
         return self.spectrum.frequencies_mev if self.spectrum else np.array([])
 
+    def get_phonon_pert(self, perturbation_scale_si: float) -> dict[str, Any]:
+        if self.spectrum is None:
+            raise ValueError("No phonon data loaded.")
+        return self.spectrum.get_phonon_pert(perturbation_scale_si)
+
     def calc_ipr(self) -> np.ndarray:
         """
         Calculates and caches the Inverse Participation Ratio (IPR) for all phonon modes.

@@ -99,3 +99,59 @@ class TestPhononSpectrum:
         assert list(a1_modes) == [0, 3]
         ex_modes = sample_spectrum.filter_by_symmetry("Ex")
         assert list(ex_modes) == [1, 4]
+
+
+class TestPhononPert:
+    """Regression tests for PhononSpectrum.get_phonon_pert (mass-weighted displacements)."""
+
+    def _make_spectrum(self, freqs_mev):
+        n_modes = len(freqs_mev)
+        n_atoms = 2
+        eigs = np.zeros((n_modes, n_atoms, 3))
+        eigs[:, 0, 0] = 1.0
+        return PhononSpectrum(
+            frequencies_mev=np.asarray(freqs_mev, dtype=float),
+            eigenvectors=eigs,
+            atom_frac_coords=np.zeros((n_atoms, 3)),
+            atom_symbols=["C"] * n_atoms,
+            atomic_masses=np.full(n_atoms, 12.011),
+            lattice=np.eye(3) * 5.0,
+        )
+
+    def test_displacement_increases_with_frequency(self):
+        """Heavier (higher-energy) modes give larger sqrt(2*omega/hbar) displacements."""
+        spectrum = self._make_spectrum([10.0, 30.0, 90.0])
+        pert = spectrum.get_phonon_pert(0.025)
+
+        displacements = pert["eigs"]
+        assert displacements[0] is not None
+        assert displacements[1] is not None
+        assert displacements[2] is not None
+        assert displacements[2] > displacements[1] > displacements[0]
+
+    def test_displacement_values_match_old_phonon_manager(self):
+        """Exact regression against the legacy PhononManager formula."""
+        from scipy import constants as Cn
+        from beyblade.constants import CONSTANTS
+
+        freq_mev = 36.5
+        pert_scale = 0.025
+        spectrum = self._make_spectrum([freq_mev])
+
+        expected = pert_scale * np.sqrt(2 * CONSTANTS["meV2rads"] * freq_mev / Cn.hbar)
+        assert np.isclose(spectrum.get_phonon_pert(pert_scale)["eigs"][0], expected)
+
+    def test_non_positive_frequency_modes_are_none(self):
+        """Modes with frequency <= 0 (acoustic at Gamma) should yield None displacement."""
+        spectrum = self._make_spectrum([0.0, 25.0])
+        pert = spectrum.get_phonon_pert(0.025)
+        assert pert["eigs"][0] is None
+        assert pert["eigs"][1] is not None
+
+    def test_frequencies_converted_to_joule(self):
+        """Frequencies must be returned in SI (Joule)."""
+        from beyblade.constants import CONSTANTS
+
+        spectrum = self._make_spectrum([0.0, 25.0])
+        pert = spectrum.get_phonon_pert(0.025)
+        assert np.isclose(pert["freqs"][1], 25.0 * CONSTANTS["meV2J"])
