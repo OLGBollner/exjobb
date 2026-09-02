@@ -155,6 +155,89 @@ class MathUtils:
         return np.eye(3) - 2.0 * np.outer(n, n)
 
     @staticmethod
+    def calc_ipr(eigenvectors: np.ndarray) -> np.ndarray:
+        """
+        Calculate the Inverse Participation Ratio (IPR) for each phonon mode.
+
+        The IPR measures how localized a mode is over the atoms of the supercell:
+
+            IPR = sum_j ( |e_j|^2 )^2 / ( sum_j |e_j|^2 )^2
+
+        where |e_j|^2 is the squared displacement amplitude (summed over x,y,z)
+        for atom j. For a mode perfectly localized on a single atom IPR = 1,
+        while for a mode uniformly delocalized over N atoms IPR = 1/N.
+
+        Parameters
+        ----------
+        eigenvectors : array_like, shape (n_modes, n_atoms, 3)
+            Mass-weighted phonon eigenvectors.
+
+        Returns
+        -------
+        numpy.ndarray, shape (n_modes,)
+            The IPR value for each mode.
+        """
+        eigs = np.asarray(eigenvectors, dtype=float)
+        # |e_j|^2 per atom (sum over cartesian components), shape (n_modes, n_atoms)
+        disp_sq = np.sum(eigs**2, axis=-1)
+
+        disp_total = np.sum(disp_sq, axis=-1)
+        disp_4 = np.sum(disp_sq**2, axis=-1)
+
+        return disp_4 / disp_total**2
+
+    @staticmethod
+    def calc_locality_weight(
+        eigenvectors: np.ndarray,
+        frac_coords: np.ndarray,
+        lattice: np.ndarray,
+        defect_pos: np.ndarray = (0.0, 0.0, 0.0),
+        radius: float = 2.0,
+    ) -> np.ndarray:
+        """
+        Calculate the fraction of each mode's displacement that lies within
+        `radius` (in Angstrom) of the defect position (locality weight).
+
+        A value close to 1 means the mode is localized around the defect,
+        while a value close to 0 means the mode lives in the bulk.
+
+        Parameters
+        ----------
+        eigenvectors : array_like, shape (n_modes, n_atoms, 3)
+            Mass-weighted phonon eigenvectors.
+        frac_coords : array_like, shape (n_atoms, 3)
+            Fractional atomic coordinates (already shifted so the defect
+            is at the origin, e.g. from PhononManager.translate_defect_to_origin).
+        lattice : array_like, shape (3, 3)
+            Lattice vectors as rows.
+        defect_pos : array_like, shape (3,), optional
+            Fractional coordinate of the defect centre. Default is the origin.
+        radius : float, optional
+            Cutoff radius in Angstrom around the defect. Default is 2.0.
+
+        Returns
+        -------
+        numpy.ndarray, shape (n_modes,)
+            Locality weight in [0, 1] for each mode.
+        """
+        eigs = np.asarray(eigenvectors, dtype=float)
+        frac_coords = np.asarray(frac_coords, dtype=float)
+        lattice = np.asarray(lattice, dtype=float)
+        defect_pos = np.asarray(defect_pos, dtype=float)
+
+        # Minimum-image displacement vectors from the defect, in fractional coords
+        diff_frac = np.mod(frac_coords - defect_pos + 0.5, 1.0) - 0.5
+        cart_dist = np.linalg.norm(diff_frac @ lattice, axis=-1)
+
+        within = cart_dist < radius
+
+        disp_sq = np.sum(eigs**2, axis=-1)          # (n_modes, n_atoms)
+        disp_total = np.sum(disp_sq, axis=-1)        # (n_modes,)
+        disp_local = np.sum(disp_sq[:, within], axis=-1)
+
+        return disp_local / disp_total
+
+    @staticmethod
     def fmt(val, precision=6):
         """Return a nicely formatted string for either a number or a tuple of numbers."""
         if isinstance(val, tuple):

@@ -84,12 +84,21 @@ class PhononManager:
     def get_freqs(self) -> np.ndarray:
         return self.spectrum.frequencies_mev if self.spectrum else np.array([])
 
+    def calc_ipr(self) -> np.ndarray:
+        """
+        Calculates and caches the Inverse Participation Ratio (IPR) for all phonon modes.
+        """
+        if self.spectrum is None:
+            return np.array([])
+        iprs = MathUtils.calc_ipr(self.spectrum.eigenvectors)
+        self.spectrum.iprs = iprs
+        return iprs
+
     def get_ipr(self) -> np.ndarray:
         if self.spectrum is None:
             return np.array([])
         if self.spectrum.iprs is None:
-            iprs = MathUtils.calc_ipr(self.data)
-            self.spectrum.iprs = iprs
+            return self.calc_ipr()
         return self.spectrum.iprs
 
     def translate_defect_to_origin(self, defect_pos: Optional[np.ndarray] = None, wrap: bool = True) -> tuple[np.ndarray, np.ndarray]:
