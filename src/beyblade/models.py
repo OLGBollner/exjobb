@@ -376,9 +376,12 @@ class RawZFSData:
             metadata=dict(self.metadata),
         )
 
-    def save(self, out_path: Union[str, Path]) -> str:
+    def _default_name(self):
+        return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.order}d.npz"
+
+    def save(self, out_path: Optional[Union[str, Path]] = None) -> str:
         """Saves RawZFSData to a .npz file with latest naming conventions and explicit unit metadata."""
-        path = str(out_path)
+        path = self._default_name() if out_path is None else str(out_path)
         if not path.endswith(".npz"):
             path += ".npz"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
