@@ -482,7 +482,7 @@ class RawZFSData:
             eigen_rotation=eigen_rot,
             first_order=first_order,
             second_order=second_order,
-        )
+        ).to_unit("J")
 
 
 @dataclass
