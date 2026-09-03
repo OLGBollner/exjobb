@@ -525,7 +525,9 @@ class SpinPhononCouplingData:
 
         new_derivs = None
         if self.zfs_derivs is not None:
-            new_derivs = convert_energy(self.zfs_derivs, self.derivs_unit, target_unit)
+            # Check for numpy 0-d object array holding None
+            if not (getattr(self.zfs_derivs, "shape", None) == () and self.zfs_derivs.item() is None):
+                new_derivs = convert_energy(self.zfs_derivs, self.derivs_unit, target_unit)
 
         new_gs = self.ground_state_zfs.to_unit(target_unit) if self.ground_state_zfs else None
 
@@ -650,10 +652,15 @@ class SpinPhononCouplingData:
             gs = None
 
         derivs = data["zfs_derivs"] if "zfs_derivs" in data else None
+        if derivs is not None and (getattr(derivs, "shape", None) == () and derivs.item() is None):
+            derivs = None
         derivs_unit = str(data.get("derivs_unit", coupling_unit))
 
-        syms = list(data["sym"]) if "sym" in data and data["sym"] is not None else None
-        iprs = data["ipr"] if "ipr" in data else None
+        sym_arr = data["symmetries"] if "symmetries" in data else (data["sym"] if "sym" in data else None)
+        syms = list(sym_arr) if sym_arr is not None and getattr(sym_arr, "shape", None) != () else None
+
+        ipr_arr = data["iprs"] if "iprs" in data else (data["ipr"] if "ipr" in data else None)
+        iprs = ipr_arr if ipr_arr is not None and getattr(ipr_arr, "shape", None) != () else None
 
         return cls(
             order=int(data["order"]) if "order" in data else 1,

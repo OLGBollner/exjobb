@@ -48,20 +48,20 @@ class RelaxationDynamics:
     return temp_index
 
   def fit_T1_exp(self, population, time_points, steady_state, T1_eigenval):
-    def exp_func(t, T1, c):
-      exp = np.exp(-t / T1) + c
-      return exp
+    def exp_func(t, T1, c, a):
+      return a * np.exp(-t / T1) + c
 
-    initial_guess = [T1_eigenval, steady_state]
+    a_init = population[0] - steady_state
+    initial_guess = [T1_eigenval, steady_state, a_init]
 
-    popt, _, info_dict, _, _ = curve_fit(exp_func, time_points, population, p0=initial_guess, full_output=True)
-    error = np.mean(info_dict["fvec"])
-    if error > 1e-9:
-      print("Error: ", error)
-
-    extracted_T1 = popt[0]
-
-    return extracted_T1
+    try:
+      popt, _ = curve_fit(exp_func, time_points, population, p0=initial_guess, maxfev=5000)
+      extracted_T1 = float(popt[0])
+      if not np.isfinite(extracted_T1) or extracted_T1 <= 0:
+        return T1_eigenval
+      return extracted_T1
+    except Exception:
+      return T1_eigenval
 
   def simulate_relaxation(self, time_points, T=None, temp_index=None):
     if temp_index is None:
@@ -84,10 +84,10 @@ class RelaxationDynamics:
 
     eigenvalues, eigenvectors = np.linalg.eig(A)
 
-    non_zero_eigenvalues = eigenvalues[np.abs(eigenvalues) > 1e-9]
+    non_zero_eigenvalues = np.real(eigenvalues[np.abs(eigenvalues) > 1e-9])
     
     if len(non_zero_eigenvalues) > 0:
-        relaxation_time = -1.0 / np.max(non_zero_eigenvalues)
+        relaxation_time = float(-1.0 / np.max(non_zero_eigenvalues))
     else:
         relaxation_time = np.inf
 
@@ -100,7 +100,11 @@ class RelaxationDynamics:
 
     eigenvalues, eigenvectors = np.linalg.eig(A)
 
-    steady_state = np.concatenate(eigenvectors[:, np.abs(eigenvalues) < 1e-9])
+    zero_idx = np.argmin(np.abs(eigenvalues))
+    steady_state = np.real(eigenvectors[:, zero_idx])
+    sum_s = np.sum(steady_state)
+    if np.abs(sum_s) > 1e-12:
+      steady_state = steady_state / sum_s
 
     return steady_state
 
@@ -120,9 +124,9 @@ class RelaxationDynamics:
     if not np.isfinite(1/T):
       return None
 
-    t_end = 10*T1_eigenval + 1/T
+    t_end = float(np.real(10 * T1_eigenval + 1 / T))
 
-    time_points = np.linspace(0, t_end, 10000)
+    time_points = np.linspace(0, t_end, 10000, dtype=float)
 
     return time_points
 
