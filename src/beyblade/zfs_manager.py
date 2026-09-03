@@ -107,7 +107,7 @@ class ZFSManager:
                 self.zfs_tensors[idx] = {
                     "tensor": tensor_j,
                     "symmetry": phonon_pert["sym"][idx] if phonon_pert else None,
-                    "pert": phonon_pert["eigs"][idx] if phonon_pert else None,
+                    "pert": phonon_pert["disp"][idx] if phonon_pert else None,
                     "ipr": phonon_pert["ipr"][idx] if phonon_pert else None,
                 }
 
@@ -121,7 +121,7 @@ class ZFSManager:
                 self.zfs_tensors_2d[(i, j)] = {
                     "tensor": tensor_j,
                     "symmetry": (phonon_pert["sym"][i], phonon_pert["sym"][j]) if phonon_pert else None,
-                    "pert": (phonon_pert["eigs"][i], phonon_pert["eigs"][j]) if phonon_pert else None,
+                    "pert": (phonon_pert["disp"][i], phonon_pert["disp"][j]) if phonon_pert else None,
                     "ipr": (phonon_pert["ipr"][i], phonon_pert["ipr"][j]) if phonon_pert else None,
                 }
 
@@ -129,7 +129,7 @@ class ZFSManager:
 
     def load_outcar_zfs_data(self, **kwargs):
         """
-        Loads ZFS data by delegating directly to parsers.
+        Loads ZFS data by delegating to parsers.
         """
         if kwargs.get("sim_folder") is not None and kwargs.get("calc_method") is not None:
             sim_folder = kwargs["sim_folder"]
@@ -142,17 +142,8 @@ class ZFSManager:
 
         elif kwargs.get("raw_data_path") is not None:
             raw_paths = kwargs["raw_data_path"]
-            raw_obj, legacy_dict = parse_zfs_dataset_npz(raw_paths)
-
-            self.defect = legacy_dict["defect"]
-            self.cell_size = legacy_dict["cell_size"]
-            self.pert_scale = legacy_dict["pert_scale"]
-            self.calc_method = legacy_dict["calc_method"]
-            self.zfs_relaxed = legacy_dict["zfs_relaxed"]
-            self.eigen_rotation = legacy_dict["eigen_rotation"]
-            self.zfs_tensors = legacy_dict["zfs_tensors"]
-            self.zfs_tensors_2d = legacy_dict["zfs_tensors_2d"]
-            self.treated_modes = self._get_symmetry_factor()
+            raw_data, _ = parse_zfs_dataset_npz(raw_paths)
+            self._ingest_raw_data(raw_data)
 
             print("Successfully loaded ZFS data via parser from .npz files")
             return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation

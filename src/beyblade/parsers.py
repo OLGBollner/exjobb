@@ -341,8 +341,10 @@ def parse_zfs_dataset_npz(raw_paths: Union[list[Union[str, Path]], tuple[Union[s
         defect=defect,
         cell_size=cell_size,
         pert_scale=pert_scale,
+        calc_method=calc_method,
         ground_state_zfs=ZFSTensor(matrix=zfs_relaxed_mat / CONSTANTS["MHz2J"], unit="MHz"),
-        metadata={"calc_method": calc_method},
+        first_order=tensors_1d,
+        second_order=tensors_2d
     )
 
-    return raw_obj, legacy_dict
+    return raw_obj #, legacy_dict

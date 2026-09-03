@@ -201,8 +201,7 @@ class PhononSpectrum:
         Computes mass-weighted perturbation displacements (SI), frequencies (J), symmetries, and IPRs.
 
         The perturbation amplitude for each mode follows the mass-weighted
-        phonon coordinate  q = q0 * sqrt(2*omega/hbar), matching the original
-        PhononManager implementation. Modes with frequency <= 0 get None.
+        phonon coordinate  q = q0 * sqrt(2*omega/hbar). Modes with frequency <= 0 get None.
         """
         omega_rads = self.frequencies_mev * CONSTANTS["meV2rads"]
         displacements = [
@@ -214,7 +213,7 @@ class PhononSpectrum:
         syms = self.symmetries if self.symmetries is not None else ["A1"] * self.n_modes
 
         return {
-            "eigs": displacements,
+            "disp": displacements,
             "freqs": freqs_j,
             "sym": syms,
             "ipr": iprs,
@@ -237,6 +236,7 @@ class RawZFSData:
     defect: str
     cell_size: int
     pert_scale: float
+    calc_method: Optional[str] = None
     ground_state_zfs: Optional[ZFSTensor] = None
     first_order: dict[int, PerturbationEntry] = field(default_factory=dict)
     second_order: dict[tuple[int, int], PerturbationEntry] = field(default_factory=dict)
