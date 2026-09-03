@@ -118,11 +118,18 @@ class TestParsers:
 
             raw = parse_zfs_dataset_npz([path_1d, path_2d])
             assert raw.defect == "NV"
-            assert raw.ground_state_zfs.unit == "MHz"
-            # Ground state converted back to MHz in the model
-            assert np.allclose(raw.ground_state_zfs.matrix, gs_mhz)
-            # The tensor in first_order dict is preserved in Joules
+            # As loaded from legacy file, stored unit is Joules
+            assert raw.ground_state_zfs.unit == "J"
+            assert np.allclose(raw.ground_state_zfs.matrix, gs_joule)
+
+            # Converting via dataclass internal converter
+            raw_mhz = raw.to_unit("MHz")
+            assert raw_mhz.ground_state_zfs.unit == "MHz"
+            assert np.allclose(raw_mhz.ground_state_zfs.matrix, gs_mhz)
+
+            # The tensor in first_order dict is preserved and converted
             assert np.allclose(raw.first_order[0]["tensor"], tensors_1d[0]["tensor"])
+            assert np.allclose(raw_mhz.first_order[0]["tensor"], tensors_1d[0]["tensor"] / CONSTANTS["MHz2J"])
         finally:
             if path_1d.exists():
                 path_1d.unlink()

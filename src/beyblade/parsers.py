@@ -145,13 +145,19 @@ def parse_phonopy_yaml(yaml_path: Union[str, Path], poscar_path: Optional[Union[
 
 
 def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
-    """Loads a precomputed PhononSpectrum from a .npz file."""
+    """Loads a precomputed PhononSpectrum from a .npz file using PhononSpectrum.load."""
     path = Path(npz_path)
     if not path.is_file():
         raise FileNotFoundError(f"Phonon npz file not found: {path}")
 
+    # Fall back to legacy keys if needed
     data = np.load(path, allow_pickle=True)
-    
+    if "frequencies" in data or "frequencies_mev" in data:
+        try:
+            return PhononSpectrum.load(path)
+        except Exception:
+            pass
+
     freqs = data["freqs"] if "freqs" in data else data["frequencies_mev"]
     eigs = data["eigs"] if "eigs" in data else data["eigenvectors"]
     atoms = data["atoms"] if "atoms" in data else data["atom_frac_coords"]
@@ -174,19 +180,9 @@ def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
     )
 
 
-def save_phonon_npz(spectrum: PhononSpectrum, out_path: Union[str, Path]) -> None:
-    """Saves a PhononSpectrum object to a .npz archive."""
-    np.savez(
-        str(out_path),
-        frequencies_mev=spectrum.frequencies_mev,
-        eigenvectors=spectrum.eigenvectors,
-        atom_frac_coords=spectrum.atom_frac_coords,
-        atom_symbols=spectrum.atom_symbols,
-        atomic_masses=spectrum.atomic_masses,
-        lattice=spectrum.lattice,
-        symmetries=spectrum.symmetries,
-        iprs=spectrum.iprs,
-    )
+def save_phonon_npz(spectrum: PhononSpectrum, out_path: Union[str, Path]) -> str:
+    """Saves a PhononSpectrum object to a .npz archive with explicit unit tracking."""
+    return spectrum.save(out_path)
 
 
 def _worker_parse_outcar_1d(outcar_file: Path) -> Optional[tuple[int, ZFSTensor, Optional[float]]]:
@@ -303,48 +299,8 @@ def parse_zfs_simulation_dataset(
     )
 
 
-def parse_zfs_dataset_npz(raw_paths: Union[list[Union[str, Path]], tuple[Union[str, Path], ...]]) -> tuple[RawZFSData, dict[str, Any]]:
+def parse_zfs_dataset_npz(raw_paths: Union[list[Union[str, Path]], tuple[Union[str, Path], ...]]) -> RawZFSData:
     """
-    Loads raw 1D and 2D perturbation data from precomputed .npz files.
+    Loads raw 1D and 2D perturbation data from precomputed .npz files using RawZFSData.load.
     """
-    if not isinstance(raw_paths, (list, tuple)) or len(raw_paths) != 2:
-        raise ValueError("raw_paths requires a list/tuple of two .npz files [1D, 2D].")
-
-    raw_data = [np.load(f, allow_pickle=True) for f in raw_paths]
-    meta_keys = ["calc_method", "pert_scale", "defect", "cell_size"]
-    for key in meta_keys:
-        if raw_data[0][key] != raw_data[1][key]:
-            raise ValueError(f"Metadata mismatch for {key}: {raw_data[0][key]} vs {raw_data[1][key]}")
-
-    defect = str(raw_data[0]["defect"])
-    cell_size = int(raw_data[0]["cell_size"])
-    pert_scale = float(raw_data[0]["pert_scale"])
-    calc_method = str(raw_data[0]["calc_method"])
-
-    zfs_relaxed_mat = raw_data[0]["zfs_relaxed"]
-    eigen_rotation = raw_data[0]["eigen_rotation"]
-    tensors_1d = raw_data[0]["zfs_tensors"][()]
-    tensors_2d = raw_data[1]["zfs_tensors_2d"][()]
-
-    legacy_dict = {
-        "zfs_relaxed": zfs_relaxed_mat,
-        "eigen_rotation": eigen_rotation,
-        "zfs_tensors": tensors_1d,
-        "zfs_tensors_2d": tensors_2d,
-        "calc_method": calc_method,
-        "pert_scale": pert_scale,
-        "defect": defect,
-        "cell_size": cell_size,
-    }
-
-    raw_obj = RawZFSData(
-        defect=defect,
-        cell_size=cell_size,
-        pert_scale=pert_scale,
-        calc_method=calc_method,
-        ground_state_zfs=ZFSTensor(matrix=zfs_relaxed_mat / CONSTANTS["MHz2J"], unit="MHz"),
-        first_order=tensors_1d,
-        second_order=tensors_2d
-    )
-
-    return raw_obj #, legacy_dict
+    return RawZFSData.load(raw_paths)
