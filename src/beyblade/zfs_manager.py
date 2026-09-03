@@ -436,6 +436,66 @@ class ZFSManager:
         results.append(save_path)
         return results
 
+    def process_both_orders(
+        self,
+        output_filename: Optional[str] = None,
+        ipr_thresh_first: Optional[float] = None,
+        ipr_thresh_second: Optional[float] = None,
+    ) -> list[str]:
+        """
+        Calculates first- AND second-order derivatives/couplings in one go and
+        saves them together in a single SpinPhononCouplingData .npz with both
+        V_* (first order) and V2_* (second order) coefficient keys.
+
+        The later transition-rate and T_1 stages need both orders, so a combined
+        run_dir output is the natural container: one file, all couplings.
+        """
+        if not self.zfs_tensors:
+            raise ValueError("First order ZFS data not loaded (need 1d perturbation set).")
+        if not self.zfs_tensors_2d:
+            raise ValueError("Second order ZFS data not loaded (need 2d perturbation set).")
+
+        pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
+        phonon_pert = self.get_phonon_pert(pert_SI)
+        if phonon_pert is None:
+            raise ValueError(
+                "Phonon data (frequencies/symmetry/ipr) is required for combined 1d+2d analysis. "
+                "Provide --phonon_file (phonon_data.npz or phonopy.yaml)."
+            )
+
+        # 1) First order
+        zfs_derivs, V_0_0, V_p_m, V_0_pm = self.calculate_first_order_derivatives(
+            ipr_thresh=ipr_thresh_first
+        )
+
+        # 2) Second order (needs 1d derivs)
+        zfs_2nd_derivs, V2_0_0, V2_p_m, V2_0_pm = self.calculate_second_order_derivatives(
+            zfs_derivs, ipr_thresh=ipr_thresh_second
+        )
+
+        save_name = (
+            f"{output_filename}.npz"
+            if output_filename
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coupling_{self.calc_method}_{self.pert_scale}_both.npz"
+        )
+        save_path = self.save_data(
+            save_name,
+            second_order=True,
+            zfs=1.5 * self.zfs_relaxed[2, 2],
+            zfs_derivs=zfs_derivs,
+            V_0_0=V_0_0,
+            V_p_m=V_p_m,
+            V_0_pm=V_0_pm,
+            V2_0_0=V2_0_0,
+            V2_p_m=V2_p_m,
+            V2_0_pm=V2_0_pm,
+            zfs_2nd_derivs=zfs_2nd_derivs,
+            freqs=phonon_pert["freqs"],
+            sym=phonon_pert["sym"],
+            ipr=phonon_pert["ipr"],
+        )
+        return [save_path]
+
     def save_data(self, save_name: str, **kwargs) -> str:
         """
         Saves simulation or derivative datasets using structured dataclasses
@@ -465,6 +525,10 @@ class ZFSManager:
                 derivs_unit=kwargs.get("derivs_unit", "J"),
                 symmetries=kwargs.get("sym"),
                 iprs=kwargs.get("ipr"),
+                V2_0_0=kwargs.get("V2_0_0"),
+                V2_p_m=kwargs.get("V2_p_m"),
+                V2_0_pm=kwargs.get("V2_0_pm"),
+                zfs_2nd_derivs=kwargs.get("zfs_2nd_derivs"),
             )
             out = coupling_obj.save(save_name)
             print(f"Saved ZFS spin-phonon coupling data to: {out}")

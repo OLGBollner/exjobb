@@ -508,6 +508,25 @@ class SpinPhononCouplingData:
     symmetries: Optional[list[str]] = None
     iprs: Optional[np.ndarray] = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Second-order (2D) coupling coefficients, optional — used when the run
+    # combines first- and second-order data (1d + 2d perturbation sets).
+    V2_0_0: Optional[np.ndarray] = None
+    V2_p_m: Optional[np.ndarray] = None
+    V2_0_pm: Optional[np.ndarray] = None
+    zfs_2nd_derivs: Optional[np.ndarray] = None
+
+    @property
+    def has_second_order(self) -> bool:
+        """Returns True if valid 2nd-order coupling data is present (non-None and non-empty)."""
+        if self.V2_0_0 is None:
+            return False
+        arr = np.asarray(self.V2_0_0)
+        return arr.ndim >= 2 and arr.size > 0
+
+    @property
+    def combined_order(self) -> int:
+        """Effective order for combined runs: 2 when 2d data present, else order."""
+        return 2 if self.has_second_order else self.order
 
     def to_unit(self, target_unit: str) -> SpinPhononCouplingData:
         """
@@ -549,6 +568,10 @@ class SpinPhononCouplingData:
             symmetries=list(self.symmetries) if self.symmetries is not None else None,
             iprs=self.iprs.copy() if self.iprs is not None else None,
             metadata=dict(self.metadata),
+            V2_0_0=convert_energy(self.V2_0_0, self.coupling_unit, target_unit) if self.V2_0_0 is not None else None,
+            V2_p_m=convert_energy(self.V2_p_m, self.coupling_unit, target_unit) if self.V2_p_m is not None else None,
+            V2_0_pm=convert_energy(self.V2_0_pm, self.coupling_unit, target_unit) if self.V2_0_pm is not None else None,
+            zfs_2nd_derivs=convert_energy(self.zfs_2nd_derivs, self.derivs_unit, target_unit) if self.zfs_2nd_derivs is not None else None,
         )
 
     def frequencies_to_unit(self, target_unit: str) -> SpinPhononCouplingData:
@@ -576,6 +599,10 @@ class SpinPhononCouplingData:
             symmetries=list(self.symmetries) if self.symmetries is not None else None,
             iprs=self.iprs.copy() if self.iprs is not None else None,
             metadata=dict(self.metadata),
+            V2_0_0=self.V2_0_0.copy() if self.V2_0_0 is not None else None,
+            V2_p_m=self.V2_p_m.copy() if self.V2_p_m is not None else None,
+            V2_0_pm=self.V2_0_pm.copy() if self.V2_0_pm is not None else None,
+            zfs_2nd_derivs=self.zfs_2nd_derivs.copy() if self.zfs_2nd_derivs is not None else None,
         )
 
     def save(self, out_path: Union[str, Path]) -> str:
@@ -600,11 +627,16 @@ class SpinPhononCouplingData:
             frequencies=self.frequencies,
             freqs=self.frequencies,  # legacy alias
             frequency_unit=self.frequency_unit,
-            # Coupling coefficients
+            # Coupling coefficients (first order)
             V_0_0=self.V_0_0,
             V_p_m=self.V_p_m,
             V_0_pm=self.V_0_pm,
             coupling_unit=self.coupling_unit,
+            # Coupling coefficients (second order, when present)
+            V2_0_0=self.V2_0_0,
+            V2_p_m=self.V2_p_m,
+            V2_0_pm=self.V2_0_pm,
+            zfs_2nd_derivs=self.zfs_2nd_derivs,
             # Ground state
             ground_state_zfs_matrix=gs_mat,
             ground_state_zfs_unit=gs_unit,
@@ -638,6 +670,33 @@ class SpinPhononCouplingData:
         V_p_m = data["V_p_m"]
         V_0_pm = data["V_0_pm"]
 
+        derivs = data["zfs_derivs"] if "zfs_derivs" in data else None
+        if derivs is not None and (getattr(derivs, "shape", None) == () and derivs.item() is None):
+            derivs = None
+
+        # Second-order coupling coefficients (optional)
+        def _arr(key):
+            if key not in data:
+                return None
+            val = data[key]
+            if val is None or (getattr(val, "shape", None) == () and val.item() is None):
+                return None
+            arr = np.asarray(val)
+            return arr if arr.ndim >= 2 and arr.size > 0 else None
+
+        V2_0_0 = _arr("V2_0_0")
+        V2_p_m = _arr("V2_p_m")
+        V2_0_pm = _arr("V2_0_pm")
+        zfs_2nd = _arr("zfs_2nd_derivs")
+
+        # Backward compat: legacy 2d files saved their coefficients under the
+        # first-order keys with order=2 (no V2_* present). Detect and remap.
+        if V2_0_0 is None and "V2_0_0" not in data and int(data.get("order", 1)) == 2:
+            V2_0_0 = V_0_0
+            V2_p_m = V_p_m
+            V2_0_pm = V_0_pm
+            zfs_2nd = zfs_2nd or derivs
+
         # Ground state ZFS
         if "ground_state_zfs_matrix" in data and data["ground_state_zfs_matrix"] is not None:
             gs_mat = data["ground_state_zfs_matrix"]
@@ -651,9 +710,6 @@ class SpinPhononCouplingData:
         else:
             gs = None
 
-        derivs = data["zfs_derivs"] if "zfs_derivs" in data else None
-        if derivs is not None and (getattr(derivs, "shape", None) == () and derivs.item() is None):
-            derivs = None
         derivs_unit = str(data.get("derivs_unit", coupling_unit))
 
         sym_arr = data["symmetries"] if "symmetries" in data else (data["sym"] if "sym" in data else None)
@@ -679,4 +735,8 @@ class SpinPhononCouplingData:
             derivs_unit=derivs_unit,
             symmetries=syms,
             iprs=iprs,
+            V2_0_0=V2_0_0,
+            V2_p_m=V2_p_m,
+            V2_0_pm=V2_0_pm,
+            zfs_2nd_derivs=zfs_2nd,
         )

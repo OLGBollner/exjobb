@@ -112,6 +112,8 @@ def run_full_pipeline(
     *,
     sim_folder: Optional[Union[str, Path]] = None,
     raw_zfs_file: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
+    raw_zfs_file_1d: Optional[Union[str, Path]] = None,
+    raw_zfs_file_2d: Optional[Union[str, Path]] = None,
     coupling_file: Optional[Union[str, Path]] = None,
     phonon_file: Optional[Union[str, Path]] = None,
     two_phonon_file: Optional[Union[str, Path]] = None,
@@ -142,7 +144,10 @@ def run_full_pipeline(
       6. (Optional) Generate and save publication-ready figures
     """
     # ── 1. Resolve order and method ──────────────────────────────────────────
-    if order is None:
+    combine_orders = raw_zfs_file_1d is not None and raw_zfs_file_2d is not None
+    if combine_orders:
+        order = 2 if order is None else order  # combined run is handled below
+    elif order is None:
         if sim_folder is not None:
             s = str(sim_folder).lower()
             if "second_order" in s or "2d" in s or "2nd" in s:
@@ -192,15 +197,21 @@ def run_full_pipeline(
                 defect=defect,
                 cell_size=cell_size,
             )
+        elif combine_orders:
+            # Combine 1d + 2d raw datasets into one RawZFSData with both
+            # first_order and second_order perturbation sets.
+            raw_data = RawZFSData.load([str(raw_zfs_file_1d), str(raw_zfs_file_2d)])
+            order = 2  # both orders present; run combined analysis
         elif raw_zfs_file is not None:
             raw_data = parse_zfs_dataset_npz(raw_zfs_file)
         else:
-            raise ValueError("Must provide either sim_folder, raw_zfs_file, or coupling_file.")
+            raise ValueError("Must provide either sim_folder, raw_zfs_file, raw_zfs_file_1d+2d, or coupling_file.")
 
         defect = raw_data.defect or defect or "defect"
         cell_size = raw_data.cell_size or cell_size or 0
         calc_method = raw_data.calc_method or calc_method
-        order = raw_data.order or order
+        if not combine_orders:
+            order = raw_data.order or order
 
     # ── 3. Create Unique Run Folder ──────────────────────────────────────────
     run_dir = get_unique_run_dir(
@@ -230,7 +241,10 @@ def run_full_pipeline(
     else:
         manager = ZFSManager(raw_data=raw_data, spectrum=spectrum, debug=debug)
         out_base = str(run_dir / "spin_phonon_coupling")
-        if order == 1:
+        if order == 2 and manager.zfs_tensors_2d and manager.zfs_tensors:
+            # Combined 1d + 2d analysis: compute both and save in one file.
+            manager.process_both_orders(output_filename=out_base)
+        elif order == 1:
             manager.process_first_order_perturbations(output_filename=out_base)
         else:
             manager.process_second_order_perturbations(output_filename=out_base)
@@ -251,8 +265,13 @@ def run_full_pipeline(
     two_ph_p = Path(two_phonon_file) if two_phonon_file else None
     calculator = TransitionRate(str(coupling_path), two_phonon_data_file=two_ph_p)
 
+    # For combined 1d+2d runs the coupling file itself carries the second-order
+    # coefficients (V2_*); make sure the calculator sees them as the 2-phonon source.
+    if two_ph_p is None and coupling_data is not None and coupling_data.has_second_order:
+        calculator.data_2ph = calculator.data
+
     omega, J_0_pm, J_p_m, J_0_0 = calculator.get_spectral_density(res=0.02, sigma=7.5)
-    if two_ph_p is not None:
+    if two_ph_p is not None or (coupling_data is not None and coupling_data.has_second_order):
         omega_x, omega_y, J2_0_pm, J2_p_m, J2_0_0 = calculator.get_2d_spectral_density(res=0.5, sigma=7.5)
     else:
         omega_x = omega_y = J2_0_pm = J2_p_m = J2_0_0 = None
@@ -274,7 +293,7 @@ def run_full_pipeline(
     print(f"[3/5] Computing transition rates for {len(temps)} temperature points...")
     for T in temps:
         calculator.compute_transition_rates(T, omega, J_0_pm, J_p_m, J_0_0, omega_zfs)
-        if two_ph_p is not None:
+        if two_ph_p is not None or (coupling_data is not None and coupling_data.has_second_order):
             calculator.compute_two_phonon_rates(T, omega_x, omega_y, J2_0_pm, J2_p_m, J2_0_0, omega_zfs)
 
         total_rates = calculator.get_total_rates()
