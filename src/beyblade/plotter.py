@@ -66,6 +66,7 @@ def plot_1d_spectral_functions(
     label_prefix: str = "",
     ax: Optional[plt.Axes] = None,
     ax2: Optional[plt.Axes] = None,
+    vline_scale: str = "MHz",
 ) -> tuple[plt.Figure, plt.Axes, plt.Axes]:
     """
     Plots 1D spin-phonon coupling coefficients (V_00, V_pm, V_0pm in MHz) as discrete vertical lines,
@@ -73,16 +74,24 @@ def plot_1d_spectral_functions(
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 5))
-        ax2 = ax.twinx()
     else:
         fig = ax.get_figure()
-        if ax2 is None:
-            ax2 = ax.twinx()
+    ax2 = ax.twinx() if ax2 is None else ax2
+
+    vfs = CONSTANTS.get("MHz2J", 1.0)
+    if vline_scale == "J":
+        V_0_0_j = V_0_0 * vfs
+        V_p_m_j = V_p_m * vfs
+        V_0_pm_j = V_0_pm * vfs
+    else:
+        V_0_0_j = V_0_0
+        V_p_m_j = V_p_m
+        V_0_pm_j = V_0_pm
 
     y_data = {
-        label_prefix + r"$V_{+-}^l$": V_p_m,
-        label_prefix + r"$V_{0\pm}^l$": V_0_pm,
-        label_prefix + r"$V_{00}^l$": V_0_0,
+        label_prefix + r"$V_{+-}^l$": V_p_m_j,
+        label_prefix + r"$V_{0\pm}^l$": V_0_pm_j,
+        label_prefix + r"$V_{00}^l$": V_0_0_j,
     }
 
     plot_vlines_sorted_by_magnitude(
@@ -95,11 +104,11 @@ def plot_1d_spectral_functions(
         linewidth=1,
     )
 
-    for V, col, lbl in [(V_p_m, "red", "+-"), (V_0_pm, "blue", r"0\pm"), (V_0_0, "black", "00")]:
+    for V, col, lbl in [(V_p_m_j, "red", "+-"), (V_0_pm_j, "blue", r"0\pm"), (V_0_0_j, "black", "00")]:
         smooth_x, smooth_y = MathUtils.smear_data(frequencies_mev, V**2, res, sigma)
         ax2.plot(smooth_x, smooth_y, color=col, linewidth=2, label=label_prefix + f"$F_{{{lbl}}}^{(1)}$")
 
-    ax.set_ylabel("Coupling coefficient (MHz)")
+    ax.set_ylabel(f"Coupling coefficient ({vline_scale})")
     ax.set_ylim(bottom=0)
 
     ax.set_xlim(0, max(200.0, float(np.max(frequencies_mev)) * 1.05 if len(frequencies_mev) > 0 else 200.0))
@@ -115,6 +124,163 @@ def plot_1d_spectral_functions(
     ax.legend(lines1 + lines2, labels1 + labels2, loc="upper right", frameon=True)
 
     return fig, ax, ax2
+
+
+def plot_transition_rates_stacked(
+    rates_data: Union[str, Path, dict[str, Any]],
+    output_path: Optional[Union[str, Path]] = None,
+    show: bool = False,
+    log_scale: bool = True,
+) -> list[tuple[plt.Figure, plt.Axes]]:
+    """
+    Plots stacked area charts for transition rates (0_1 and 1_-1) versus temperature.
+    """
+    if isinstance(rates_data, (str, Path)):
+        data = np.load(str(rates_data), allow_pickle=True)
+    else:
+        data = rates_data
+
+    temperatures = np.asarray(data["temperatures"], dtype=float)
+    defect = str(data.get("defect", ""))
+    cell_size = str(data.get("cell_size", ""))
+
+    first = data["first_order"][()] if "first_order" in data else {}
+    second = data["second_order"][()] if "second_order" in data else {}
+    two_ph = data["two_phonon"][()] if "two_phonon" in data else {}
+
+    colors = ["#1b9e77", "#d95f02", "#7570b3"]  # direct, 1st-order Raman, 2nd-order Raman
+    process_labels = ["Direct (1-phonon)", "1st-order Raman", "2nd-order Raman"]
+
+    transitions = [("0_1", r"$0 \leftrightarrow \pm 1$"), ("1_-1", r"$+1 \leftrightarrow -1$")]
+    figures = []
+
+    for trans_key, trans_title in transitions:
+        rates_stack = []
+        labels_stack = []
+
+        if trans_key in first and len(first[trans_key]) == len(temperatures):
+            rates_stack.append(np.asarray(first[trans_key], dtype=float))
+            labels_stack.append(process_labels[0])
+        else:
+            rates_stack.append(np.zeros_like(temperatures))
+            labels_stack.append(process_labels[0])
+
+        if trans_key in second and len(second[trans_key]) == len(temperatures):
+            rates_stack.append(np.asarray(second[trans_key], dtype=float))
+            labels_stack.append(process_labels[1])
+        else:
+            rates_stack.append(np.zeros_like(temperatures))
+            labels_stack.append(process_labels[1])
+
+        if trans_key in two_ph and len(two_ph[trans_key]) == len(temperatures):
+            rates_stack.append(np.asarray(two_ph[trans_key], dtype=float))
+            labels_stack.append(process_labels[2])
+        else:
+            rates_stack.append(np.zeros_like(temperatures))
+            labels_stack.append(process_labels[2])
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        cumulative = np.zeros_like(temperatures)
+
+        for rate, label, col in zip(rates_stack, labels_stack, colors):
+            upper = cumulative + rate
+            ax.fill_between(temperatures, cumulative, upper, color=col, alpha=0.55, label=label, linewidth=0)
+            ax.plot(temperatures, upper, color=col, lw=0.8, alpha=0.9)
+            cumulative = upper.copy()
+
+        # Total line
+        ax.plot(temperatures, cumulative, color="black", lw=1.5, label="Total")
+
+        if log_scale:
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            valid_cum = cumulative[cumulative > 0]
+            if len(valid_cum) > 0:
+                ax.set_ylim(bottom=max(1e-12, float(np.min(valid_cum)) * 0.5))
+
+        ax.set_xlabel("Temperature (K)")
+        ax.set_ylabel(r"Transition rate $\Gamma$ (s$^{-1}$)")
+        title_str = f"Transition rate {trans_title}"
+        if defect:
+            title_str += f" ({defect} {cell_size})"
+        ax.set_title(title_str)
+        ax.grid(True, which="both", linestyle=":", alpha=0.5)
+        ax.legend(loc="upper left", frameon=True)
+        fig.tight_layout()
+
+        if output_path is not None:
+            p = Path(output_path)
+            stem = p.stem
+            out_file = p.parent / f"{stem}_{trans_key}{p.suffix}"
+            fig.savefig(out_file, dpi=300)
+            print(f"Saved stacked rate figure to: {out_file}")
+
+        figures.append((fig, ax))
+
+    if show:
+        plt.show()
+
+    return figures
+
+
+def plot_t1_relaxation(
+    t1_data: Union[str, Path, dict[str, Any]],
+    output_path: Optional[Union[str, Path]] = None,
+    show: bool = False,
+) -> tuple[plt.Figure, plt.Axes]:
+    """
+    Plots T_1 relaxation times versus temperature.
+    """
+    if isinstance(t1_data, (str, Path)):
+        data = np.load(str(t1_data), allow_pickle=True)
+    else:
+        data = t1_data
+
+    temperatures = np.asarray(data["temperatures"], dtype=float)
+    defect = str(data.get("defect", ""))
+    cell_size = str(data.get("cell_size", ""))
+    calc_method = str(data.get("calc_method", ""))
+    init_state = str(data.get("init_state", "ms_0"))
+
+    t1_fit = np.asarray(data["t1_fit"], dtype=float) if "t1_fit" in data else None
+    t1_eigenval = np.asarray(data["t1_eigenval"], dtype=float) if "t1_eigenval" in data else None
+
+    # Fallback for legacy key
+    if t1_fit is None and "T1_times" in data:
+        t1_fit = np.asarray(data["T1_times"], dtype=float)
+    if t1_fit is None and "T1_range" in data:
+        t1_fit = np.asarray(data["T1_range"], dtype=float)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    label_suffix = f" ({defect} {cell_size})" if defect else ""
+    if t1_fit is not None:
+        valid = np.isfinite(t1_fit) & (t1_fit > 0)
+        ax.plot(temperatures[valid], t1_fit[valid], "o-", color="#1f77b4", linewidth=2, markersize=5, label=f"$T_1$ ODE fit{label_suffix}")
+
+    if t1_eigenval is not None:
+        valid_eig = np.isfinite(t1_eigenval) & (t1_eigenval > 0)
+        ax.plot(temperatures[valid_eig], t1_eigenval[valid_eig], "--", color="#d62728", linewidth=1.8, label=f"$T_1$ Eigenvalue{label_suffix}")
+
+    ax.set_xlabel("Temperature (K)", fontsize=14)
+    ax.set_ylabel(r"$T_1$ (s)", fontsize=14)
+    ax.set_yscale("log")
+    ax.grid(True, which="both", linestyle=":", alpha=0.6)
+    ax.tick_params(axis="both", which="both", direction="in")
+    ax.set_title(r"$T_1$ Spin Relaxation Time vs Temperature", fontsize=15)
+    ax.legend(frameon=True, fontsize=12)
+    fig.tight_layout()
+
+    if output_path is not None:
+        p = Path(output_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(p, dpi=300)
+        print(f"Saved T1 figure to: {p}")
+
+    if show:
+        plt.show()
+
+    return fig, ax
 
 
 def plot_ipr_spectrum(
@@ -151,8 +317,11 @@ def plot_2d_spectral_density_map(
     sigma: float = 7.5,
     res: float = 1.0,
     ax: Optional[plt.Axes] = None,
+    zfs_2nd_derivs_unit: str = "MHz",
 ) -> tuple[plt.Figure, plt.Axes]:
     """Plots a 2D Raman phonon coupling intensity heatmap."""
+    if zfs_2nd_derivs_unit == "J":
+        zfs_2nd_derivs_mhz = zfs_2nd_derivs_mhz / CONSTANTS["MHz2J"]
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 5))
     else:

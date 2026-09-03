@@ -1,3 +1,4 @@
+from typing import Union, Optional
 import numpy as np
 from scipy import constants as Cn
 from pathlib import Path
@@ -61,11 +62,28 @@ class TransitionRate:
     if two_phonon_data_file is not None:
       self.load_data_2ph(two_phonon_data_file)
 
-  def load_data_2ph(self, filename: Path) -> None:
-    self.data_2ph = np.load(filename)
+  def load_data_2ph(self, filename: Union[str, Path]) -> None:
+    self.data_2ph = np.load(str(filename), allow_pickle=True)
 
-  def load_data(self, filename: str) -> None:
-    self.data = np.load(filename)
+  def load_data(self, filename: Union[str, Path, "SpinPhononCouplingData"]) -> None:
+    from beyblade.models import SpinPhononCouplingData
+    if isinstance(filename, SpinPhononCouplingData):
+      # Export to dictionary representation matching npz format
+      self.data = {
+          "defect": filename.defect,
+          "cell_size": filename.cell_size,
+          "calc_method": filename.calc_method,
+          "pert_scale": filename.pert_scale,
+          "zfs": filename.ground_state_zfs,
+          "V_0_0": filename.V_0_0,
+          "V_p_m": filename.V_p_m,
+          "V_0_pm": filename.V_0_pm,
+          "freqs": filename.frequencies,
+          "symmetries": filename.symmetries,
+          "ipr": filename.iprs,
+      }
+    else:
+      self.data = np.load(str(filename), allow_pickle=True)
 
   def get_spectral_density(self, res, sigma):
     V_0_0 =  self.data["V_0_0"]  / CONSTANTS["meV2J"]
