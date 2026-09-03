@@ -107,7 +107,7 @@ class ZFSManager:
         if raw.ground_state_zfs is not None:
             D_xx, D_yy, D_zz, R = raw.ground_state_zfs.principal_components()
             self.eigen_rotation = R
-            self.zfs_relaxed = np.diag([D_xx, D_yy, D_zz]) * CONSTANTS["MHz2J"]
+            self.zfs_relaxed = np.diag([D_xx, D_yy, D_zz])
             if "approx" in self.calc_method:
                 self.zfs_relaxed *= 1.5
 
@@ -121,7 +121,7 @@ class ZFSManager:
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = self.eigen_rotation @ tensor_mhz @ eigen_rot_t if self.eigen_rotation is not None else tensor_mhz
-                    tensor_j = rotated * CONSTANTS["MHz2J"]
+                    tensor_j = rotated
                     if "approx" in self.calc_method:
                         tensor_j *= 1.5
                     self.first_order[idx] = {
@@ -149,7 +149,7 @@ class ZFSManager:
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = self.eigen_rotation @ tensor_mhz @ eigen_rot_t if self.eigen_rotation is not None else tensor_mhz
-                    tensor_j = rotated * CONSTANTS["MHz2J"]
+                    tensor_j = rotated
                     if "approx" in self.calc_method:
                         tensor_j *= 1.5
                     self.second_order[(i, j)] = {
