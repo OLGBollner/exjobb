@@ -3,3 +3,4 @@ scripts/figures/
 __pycache__/
 *.xsf
 POSCAR
+runs/
