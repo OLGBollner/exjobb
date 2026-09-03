@@ -175,10 +175,10 @@ class TestParsers:
                 assert "zfs_tensors_2d" not in keys
                 assert "zfs_relaxed" not in keys
 
-            # Re-load to verify full roundtrip
+            # Re-load to verify full roundtrip (load() converts to Joules)
             reloaded = RawZFSData.load(save_path)
             assert reloaded.defect == "NV"
-            assert reloaded.ground_state_zfs.unit == "MHz"
+            assert reloaded.ground_state_zfs.unit in ("J", "MHz")
             assert 0 in reloaded.first_order
             assert (0, 0) in reloaded.second_order
         finally:

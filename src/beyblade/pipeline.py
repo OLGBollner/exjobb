@@ -144,6 +144,7 @@ def run_full_pipeline(
       6. (Optional) Generate and save publication-ready figures
     """
     # ── 1. Resolve order and method ──────────────────────────────────────────
+    user_order = order  # preserve explicit caller / CLI override
     combine_orders = raw_zfs_file_1d is not None and raw_zfs_file_2d is not None
     if combine_orders:
         order = 2 if order is None else order  # combined run is handled below
@@ -154,6 +155,8 @@ def run_full_pipeline(
                 order = 2
             else:
                 order = 1
+        elif raw_zfs_file is not None and any(k in str(raw_zfs_file).lower() for k in ("second_order", "2d", "2nd")):
+            order = 2
         else:
             order = 1
 
@@ -209,9 +212,28 @@ def run_full_pipeline(
 
         defect = raw_data.defect or defect or "defect"
         cell_size = raw_data.cell_size or cell_size or 0
-        calc_method = raw_data.calc_method or calc_method
-        if not combine_orders:
-            order = raw_data.order or order
+
+        # Resolve calc_method (avoid string "None")
+        if calc_method in (None, "None", ""):
+            if raw_data.calc_method not in (None, "None", ""):
+                calc_method = raw_data.calc_method
+            elif raw_zfs_file:
+                for cm in ("all_bands", "defect_band_approx", "approx"):
+                    if cm in str(raw_zfs_file):
+                        calc_method = "all_bands" if cm == "all_bands" else "defect_band_approx"
+                        break
+
+        # Resolve order: explicit user request takes priority; otherwise inspect data
+        if user_order is not None:
+            order = user_order
+        elif combine_orders or (raw_data is not None and len(raw_data.second_order) > 0):
+            order = 2
+        elif raw_data is not None and raw_data.order is not None and str(raw_data.order) != "None":
+            order = int(raw_data.order)
+        elif raw_zfs_file is not None and any(k in str(raw_zfs_file).lower() for k in ("2d", "second_order", "2nd")):
+            order = 2
+        elif raw_data is not None and len(raw_data.first_order) > 0:
+            order = 1
 
     # ── 3. Create Unique Run Folder ──────────────────────────────────────────
     run_dir = get_unique_run_dir(
@@ -240,14 +262,22 @@ def run_full_pipeline(
         print(f"[2/5] Using provided coupling data -> {coupling_path.name}")
     else:
         manager = ZFSManager(raw_data=raw_data, spectrum=spectrum, debug=debug)
+        if calc_method:
+            manager.calc_method = calc_method
         out_base = str(run_dir / "spin_phonon_coupling")
-        if order == 2 and manager.zfs_tensors_2d and manager.zfs_tensors:
+        has_both = bool(manager.zfs_tensors_2d and manager.zfs_tensors)
+
+        if (order == 2 or user_order is None) and has_both:
             # Combined 1d + 2d analysis: compute both and save in one file.
             manager.process_both_orders(output_filename=out_base)
+        elif order == 2 and manager.zfs_tensors_2d:
+            manager.process_second_order_perturbations(output_filename=out_base)
         elif order == 1:
             manager.process_first_order_perturbations(output_filename=out_base)
-        else:
+        elif manager.zfs_tensors_2d:
             manager.process_second_order_perturbations(output_filename=out_base)
+        else:
+            manager.process_first_order_perturbations(output_filename=out_base)
         coupling_data = SpinPhononCouplingData.load(coupling_path)
         print(f"[2/5] Computed and saved spin-phonon coupling -> {coupling_path.name}")
 

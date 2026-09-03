@@ -303,6 +303,7 @@ def parse_zfs_simulation_dataset(
         defect=defect,
         cell_size=cell_size,
         pert_scale=pert_scale,
+        calc_method=calc_method,
         ground_state_zfs=ground_state_zfs,
         order=order,
         first_order=first_order,

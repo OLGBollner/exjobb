@@ -43,7 +43,11 @@ class ZFSManager:
         self.defect: Optional[str] = raw_data.defect if raw_data else None
         self.cell_size: Optional[int] = raw_data.cell_size if raw_data else None
         self.pert_scale: Optional[float] = raw_data.pert_scale if raw_data else None
-        self.calc_method: Optional[str] = raw_data.metadata.get("calc_method") if raw_data else None
+        self.calc_method: Optional[str] = (
+            raw_data.calc_method or raw_data.metadata.get("calc_method")
+            if raw_data
+            else None
+        )
 
         # Processed ZFS data in defect principal frame
         self.zfs_relaxed: Optional[np.ndarray] = None          # Shape (3, 3) in J
@@ -313,7 +317,7 @@ class ZFSManager:
                     continue
 
             (q_i, q_j) = item["pert"]
-            if q_i is None or q_j is None or q_i != q_j:
+            if q_i is None or q_j is None or q_i == 0 or q_j == 0:
                 continue
 
             dD_qi = zfs_1d_derivs[i]
