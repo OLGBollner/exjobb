@@ -123,7 +123,7 @@ class TestPhononPert:
         spectrum = self._make_spectrum([10.0, 30.0, 90.0])
         pert = spectrum.get_phonon_pert(0.025)
 
-        displacements = pert["eigs"]
+        displacements = pert["disp"]
         assert displacements[0] is not None
         assert displacements[1] is not None
         assert displacements[2] is not None
@@ -139,14 +139,14 @@ class TestPhononPert:
         spectrum = self._make_spectrum([freq_mev])
 
         expected = pert_scale * np.sqrt(2 * CONSTANTS["meV2rads"] * freq_mev / Cn.hbar)
-        assert np.isclose(spectrum.get_phonon_pert(pert_scale)["eigs"][0], expected)
+        assert np.isclose(spectrum.get_phonon_pert(pert_scale)["disp"][0], expected)
 
     def test_non_positive_frequency_modes_are_none(self):
         """Modes with frequency <= 0 (acoustic at Gamma) should yield None displacement."""
         spectrum = self._make_spectrum([0.0, 25.0])
         pert = spectrum.get_phonon_pert(0.025)
-        assert pert["eigs"][0] is None
-        assert pert["eigs"][1] is not None
+        assert pert["disp"][0] is None
+        assert pert["disp"][1] is not None
 
     def test_frequencies_converted_to_joule(self):
         """Frequencies must be returned in SI (Joule)."""
