@@ -39,6 +39,16 @@ def main():
     # Input modes
     parser.add_argument("--sim_folder", type=str, help="Path to VASP simulation folder.")
     parser.add_argument("--raw_zfs_file", type=str, nargs="+", help="Path to raw ZFS .npz dataset file(s).")
+    parser.add_argument(
+        "--raw_zfs_file_1d",
+        type=str,
+        help="Path to raw ZFS 1st-order .npz dataset (combined 1d+2d mode).",
+    )
+    parser.add_argument(
+        "--raw_zfs_file_2d",
+        type=str,
+        help="Path to raw ZFS 2nd-order .npz dataset (combined 1d+2d mode).",
+    )
     parser.add_argument("--coupling_file", type=str, help="Path to pre-computed spin-phonon coupling .npz file.")
     parser.add_argument("-ph", "--phonon_file", type=str, help="Path to phonopy.yaml or phonon_data.npz.")
     parser.add_argument("--two_phonon", type=str, help="Path to two-phonon Raman .npz file (optional).")
@@ -96,6 +106,8 @@ def main():
     res = run_full_pipeline(
         sim_folder=args.sim_folder,
         raw_zfs_file=raw_files,
+        raw_zfs_file_1d=args.raw_zfs_file_1d,
+        raw_zfs_file_2d=args.raw_zfs_file_2d,
         coupling_file=args.coupling_file,
         phonon_file=args.phonon_file,
         two_phonon_file=args.two_phonon,
@@ -112,6 +124,7 @@ def main():
         output_root=args.output_root,
         run_name=args.run_name,
         save_plots=args.plot,
+        show_plots=False,
         debug=args.debug,
     )
 

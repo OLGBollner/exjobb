@@ -82,8 +82,21 @@ class TransitionRate:
           "symmetries": filename.symmetries,
           "ipr": filename.iprs,
       }
+      # Carry second-order coefficients into the dict; used by get_2ph_coupling
+      if filename.has_second_order:
+        self.data["V2_0_0"] = filename.V2_0_0
+        self.data["V2_p_m"] = filename.V2_p_m
+        self.data["V2_0_pm"] = filename.V2_0_pm
+        if self.data_2ph is None:
+          self.data_2ph = self.data
     else:
       self.data = np.load(str(filename), allow_pickle=True)
+      # If the same file also carries second-order coefficients, treat it as
+      # the two-phonon source so combined 1d+2d runs work with one file.
+      if self.data_2ph is None and "V2_0_0" in self.data:
+        v2 = np.asarray(self.data["V2_0_0"])
+        if v2.ndim >= 2 and v2.size > 0:
+          self.data_2ph = self.data
 
   def get_spectral_density(self, res, sigma):
     V_0_0 =  self.data["V_0_0"]  / CONSTANTS["meV2J"]
@@ -143,9 +156,14 @@ class TransitionRate:
   def get_2ph_coupling(self, V_key: str) -> np.ndarray:
     if self.data_2ph is None:
       raise ValueError("Data not loaded. Please call load_data_2ph() first.")
-    if V_key not in self.data_2ph:
-      raise KeyError(f"Key '{V_key}' not found in data file.")
-    return self.data_2ph[V_key]
+    # Prioritise second-order prefix V2_* when looking up 2-phonon coupling
+    # (e.g. key 'V_0_pm' -> look for 'V2_0_pm' before 'V_0_pm')
+    v2_key = f"V2_{V_key[2:]}" if V_key.startswith("V_") else f"V2_{V_key}"
+    if v2_key in self.data_2ph and np.asarray(self.data_2ph[v2_key]).ndim == 2:
+      return self.data_2ph[v2_key]
+    if V_key in self.data_2ph:
+      return self.data_2ph[V_key]
+    raise KeyError(f"Key '{V_key}' (or '{v2_key}') not found in data file.")
 
   def get_2d_spectral_density(self, res, sigma):
     V_0_pm_2ph = self.get_2ph_coupling("V_0_pm")/ CONSTANTS["meV2J"]
