@@ -5,7 +5,7 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.models import ZFSTensor, PhononSpectrum, RawZFSData
+from beyblade.models import ZFSTensor, PhononSpectrum, RawZFSData, SpinPhononCouplingData
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
@@ -401,16 +401,64 @@ class ZFSManager:
         return results
 
     def save_data(self, save_name: str, **kwargs) -> str:
+        """
+        Saves simulation or derivative datasets using structured dataclasses
+        with explicit unit metadata.
+        """
         if not save_name.endswith(".npz"):
             save_name += ".npz"
+        Path(save_name).parent.mkdir(parents=True, exist_ok=True)
 
+        # 1. If saving calculated coupling coefficients (SpinPhononCouplingData)
+        if "V_0_0" in kwargs:
+            gs_tensor = ZFSTensor(matrix=self.zfs_relaxed, unit="J") if self.zfs_relaxed is not None else None
+            coupling_obj = SpinPhononCouplingData(
+                order=kwargs.get("order", 2 if kwargs.get("second_order", False) or "2nd" in save_name else 1),
+                defect=self.defect,
+                cell_size=self.cell_size,
+                pert_scale=self.pert_scale,
+                calc_method=self.calc_method,
+                frequencies=kwargs.get("freqs", np.array([])),
+                frequency_unit=kwargs.get("frequency_unit", "J"),
+                V_0_0=kwargs["V_0_0"],
+                V_p_m=kwargs.get("V_p_m", np.array([])),
+                V_0_pm=kwargs.get("V_0_pm", np.array([])),
+                coupling_unit=kwargs.get("coupling_unit", "J"),
+                ground_state_zfs=gs_tensor,
+                zfs_derivs=kwargs.get("zfs_derivs"),
+                derivs_unit=kwargs.get("derivs_unit", "J"),
+                symmetries=kwargs.get("sym"),
+                iprs=kwargs.get("ipr"),
+            )
+            out = coupling_obj.save(save_name)
+            print(f"Saved ZFS spin-phonon coupling data to: {out}")
+            return out
+
+        # 2. If saving raw dataset (RawZFSData)
+        if "zfs_tensors" in kwargs or "zfs_tensors_2d" in kwargs:
+            gs_tensor = ZFSTensor(matrix=self.zfs_relaxed, unit="J") if self.zfs_relaxed is not None else None
+            raw_obj = RawZFSData(
+                defect=self.defect,
+                cell_size=self.cell_size,
+                pert_scale=self.pert_scale,
+                calc_method=self.calc_method,
+                order=kwargs.get("order", 1 if "zfs_tensors" in kwargs else 2),
+                ground_state_zfs=gs_tensor,
+                eigen_rotation=self.eigen_rotation,
+                first_order=kwargs.get("zfs_tensors", {}),
+                second_order=kwargs.get("zfs_tensors_2d", {}),
+            )
+            out = raw_obj.save(save_name)
+            print(f"Saved raw ZFS dataset to: {out}")
+            return out
+
+        # 3. Fallback for generic arrays
         metadata = {
             "defect": self.defect,
             "cell_size": self.cell_size,
             "calc_method": self.calc_method,
             "pert_scale": self.pert_scale,
         }
-        Path(save_name).parent.mkdir(parents=True, exist_ok=True)
         np.savez(save_name, **metadata, **kwargs)
         print(f"Saved ZFS data to: {save_name}")
         return save_name

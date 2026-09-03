@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from beyblade.constants import CONSTANTS
+from beyblade.models import SpinPhononCouplingData
 from beyblade.utils import MathUtils
 
 
@@ -185,36 +186,46 @@ class ZFSPlotter:
             "legend.fontsize": 14,
         })
 
-    def plot_data(self, data_files: Sequence[Union[str, Path]], args: Any):
+    def plot_data(self, data_files: Sequence[Union[str, Path, SpinPhononCouplingData]], args: Any):
         """
-        Processes and plots one or more derivative dataset files.
-        Maintains backward compatibility with CLI arguments from zfs_analysis.py.
+        Processes and plots one or more derivative dataset files or SpinPhononCouplingData objects.
+        Uses the internal unit conversion of SpinPhononCouplingData instead of manual conversions.
         """
-        zfs_data_list = [np.load(file, allow_pickle=True) for file in data_files]
+        for item in data_files:
+            if isinstance(item, SpinPhononCouplingData):
+                raw_data = item
+            else:
+                raw_data = SpinPhononCouplingData.load(item)
 
-        for data in zfs_data_list:
-            cell_size = data["cell_size"]
-            defect = data["defect"]
-            pert_scale = data["pert_scale"]
-            is_second_order = bool(data.get("second_order", False))
+            # Convert to display units (MHz for coupling, meV for frequencies) using dataclass methods!
+            display_data = raw_data.to_unit("MHz").frequencies_to_unit("meV")
 
-            freqs_mev = data["freqs"] / CONSTANTS["meV2J"]
-            zfs_mev = (data["zfs"] / CONSTANTS["meV2J"]) if "zfs" in data else None
+            cell_size = display_data.cell_size
+            defect = display_data.defect
+            pert_scale = display_data.pert_scale
+            is_second_order = display_data.order == 2
 
-            if is_second_order:
+            freqs_mev = display_data.frequencies
+            zfs_mev = (
+                display_data.ground_state_zfs.to_unit("meV").D
+                if display_data.ground_state_zfs is not None
+                else None
+            )
+
+            if is_second_order and display_data.V_0_0.ndim == 2:
                 # Extract diagonal for 1D representation safely without mutating original data
-                V_0_0 = data["V_0_0"].diagonal() / CONSTANTS["MHz2J"]
-                V_p_m = data["V_p_m"].diagonal() / CONSTANTS["MHz2J"]
-                V_0_pm = data["V_0_pm"].diagonal() / CONSTANTS["MHz2J"]
+                V_0_0 = display_data.V_0_0.diagonal()
+                V_p_m = display_data.V_p_m.diagonal()
+                V_0_pm = display_data.V_0_pm.diagonal()
                 calc_suffix = "_2ph"
             else:
-                V_0_0 = data["V_0_0"] / CONSTANTS["MHz2J"]
-                V_p_m = data["V_p_m"] / CONSTANTS["MHz2J"]
-                V_0_pm = data["V_0_pm"] / CONSTANTS["MHz2J"]
+                V_0_0 = display_data.V_0_0
+                V_p_m = display_data.V_p_m
+                V_0_pm = display_data.V_0_pm
                 calc_suffix = ""
 
-            if getattr(args, "ipr", False):
-                fig, ax = plot_ipr_spectrum(freqs_mev, data["ipr"], as_bar=getattr(args, "bar", False))
+            if getattr(args, "ipr", False) and display_data.iprs is not None:
+                fig, ax = plot_ipr_spectrum(freqs_mev, display_data.iprs, as_bar=getattr(args, "bar", False))
             else:
                 fig, ax, _ = plot_1d_spectral_functions(
                     freqs_mev,
