@@ -65,8 +65,10 @@ def get_unique_run_dir(
     return final_dir
 
 
-def find_default_phonon_file(sim_folder: Path) -> Optional[Path]:
+def find_default_phonon_file(sim_folder: Optional[Path]) -> Optional[Path]:
     """Search conventional defect locations for phonopy.yaml or phonon_data.npz."""
+    if sim_folder is None:
+        return None
     candidates = [
         sim_folder / "phonopy.yaml",
         sim_folder / "phonon_data.npz",
@@ -75,6 +77,30 @@ def find_default_phonon_file(sim_folder: Path) -> Optional[Path]:
         sim_folder.parent.parent / "data" / "phonon_data.npz",
         sim_folder.parent.parent / "phonon_data.npz",
         sim_folder.parent.parent.parent / "data" / "phonon_data.npz",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    return None
+
+
+def find_default_phonon_file_for_raw(raw_zfs_file: Union[str, Path, Sequence[Union[str, Path]]]) -> Optional[Path]:
+    """Search next to the raw ZFS .npz file(s) for phonon_data.npz / phonopy.yaml."""
+    if raw_zfs_file is None:
+        return None
+    if isinstance(raw_zfs_file, (list, tuple)):
+        if not raw_zfs_file:
+            return None
+        anchor = Path(raw_zfs_file[0])
+    else:
+        anchor = Path(raw_zfs_file)
+    anchor_dir = anchor.parent
+    candidates = [
+        anchor_dir / "phonon_data.npz",
+        anchor_dir / "phonopy.yaml",
+        anchor_dir.parent / "phonon_data.npz",
+        anchor_dir.parent / "phonopy.yaml",
+        anchor_dir.parent.parent / "data" / "phonon_data.npz",
     ]
     for cand in candidates:
         if cand.exists():
@@ -142,7 +168,9 @@ def run_full_pipeline(
         order = coupling_data.order or order
     else:
         # Load phonons
-        ph_path = Path(phonon_file) if phonon_file else (find_default_phonon_file(Path(sim_folder)) if sim_folder else None)
+        ph_from_sim = find_default_phonon_file(Path(sim_folder)) if sim_folder else None
+        ph_from_raw = find_default_phonon_file_for_raw(raw_zfs_file) if raw_zfs_file is not None else None
+        ph_path = Path(phonon_file) if phonon_file else (ph_from_sim or ph_from_raw)
         if ph_path is not None and ph_path.exists():
             if ph_path.suffix in [".yaml", ".yml"]:
                 spectrum = parse_phonopy_yaml(ph_path)
@@ -150,6 +178,8 @@ def run_full_pipeline(
                 spectrum = parse_phonon_npz(ph_path)
         elif phonon_file is not None:
             raise FileNotFoundError(f"Phonon file not found: {phonon_file}")
+        elif ph_path is not None and not ph_path.exists():
+            print(f"Warning: phonon file {ph_path} not found, running without phonon data.")
 
         # Load raw ZFS
         if sim_folder is not None:
