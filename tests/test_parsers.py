@@ -60,3 +60,71 @@ class TestParsers:
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
+
+    def test_raw_zfs_npz_roundtrip_units_in_joule(self):
+        """Verifies that saved npz tensors are in Joules and correctly converted."""
+        from beyblade.constants import CONSTANTS
+
+        # Create dummy 1D and 2D npz archives matching ZFSManager.save_data
+        gs_mhz = np.diag([-1000.0, -1000.0, 2000.0])
+        gs_joule = gs_mhz * CONSTANTS["MHz2J"]
+        eigen_rot = np.eye(3)
+
+        tensors_1d = {
+            0: {
+                "tensor": gs_joule + np.diag([0, 0, 10.0]) * CONSTANTS["MHz2J"],
+                "pert": 1e-12,
+                "symmetry": "A1",
+                "ipr": 0.5,
+            }
+        }
+        tensors_2d = {
+            (0, 0): {
+                "tensor": gs_joule + np.diag([0, 0, 20.0]) * CONSTANTS["MHz2J"],
+                "pert": (1e-12, 1e-12),
+                "symmetry": ("A1", "A1"),
+                "ipr": (0.5, 0.5),
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(suffix="_1d.npz", delete=False) as f1, \
+             tempfile.NamedTemporaryFile(suffix="_2d.npz", delete=False) as f2:
+            path_1d = Path(f1.name)
+            path_2d = Path(f2.name)
+
+        try:
+            np.savez(
+                str(path_1d),
+                order=1,
+                defect="NV",
+                cell_size=64,
+                pert_scale=0.025,
+                calc_method="all_bands",
+                zfs_relaxed=gs_joule,
+                eigen_rotation=eigen_rot,
+                zfs_tensors=tensors_1d,
+            )
+            np.savez(
+                str(path_2d),
+                order=2,
+                defect="NV",
+                cell_size=64,
+                pert_scale=0.025,
+                calc_method="all_bands",
+                zfs_relaxed=gs_joule,
+                eigen_rotation=eigen_rot,
+                zfs_tensors_2d=tensors_2d,
+            )
+
+            raw = parse_zfs_dataset_npz([path_1d, path_2d])
+            assert raw.defect == "NV"
+            assert raw.ground_state_zfs.unit == "MHz"
+            # Ground state converted back to MHz in the model
+            assert np.allclose(raw.ground_state_zfs.matrix, gs_mhz)
+            # The tensor in first_order dict is preserved in Joules
+            assert np.allclose(raw.first_order[0]["tensor"], tensors_1d[0]["tensor"])
+        finally:
+            if path_1d.exists():
+                path_1d.unlink()
+            if path_2d.exists():
+                path_2d.unlink()

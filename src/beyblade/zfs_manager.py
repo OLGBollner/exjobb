@@ -100,30 +100,40 @@ class ZFSManager:
         if raw.first_order:
             self.zfs_tensors = {}
             for idx, entry in raw.first_order.items():
-                rotated = self.eigen_rotation @ entry.zfs_tensor.matrix @ eigen_rot_t if self.eigen_rotation is not None else entry.zfs_tensor.matrix
-                tensor_j = rotated * CONSTANTS["MHz2J"]
-                if "approx" in self.calc_method:
-                    tensor_j *= 1.5
-                self.zfs_tensors[idx] = {
-                    "tensor": tensor_j,
-                    "symmetry": phonon_pert["sym"][idx] if phonon_pert else None,
-                    "pert": phonon_pert["disp"][idx] if phonon_pert else None,
-                    "ipr": phonon_pert["ipr"][idx] if phonon_pert else None,
-                }
+                if isinstance(entry, PerturbationEntry):
+                    tensor_mhz = entry.zfs_tensor.matrix
+                    rotated = self.eigen_rotation @ tensor_mhz @ eigen_rot_t if self.eigen_rotation is not None else tensor_mhz
+                    tensor_j = rotated * CONSTANTS["MHz2J"]
+                    if "approx" in self.calc_method:
+                        tensor_j *= 1.5
+                    self.zfs_tensors[idx] = {
+                        "tensor": tensor_j,
+                        "symmetry": phonon_pert["sym"][idx] if phonon_pert else None,
+                        "pert": phonon_pert["disp"][idx] if phonon_pert else None,
+                        "ipr": phonon_pert["ipr"][idx] if phonon_pert else None,
+                    }
+                elif isinstance(entry, dict):
+                    # Already in Joules from legacy/saved raw_zfs_data npz
+                    self.zfs_tensors[idx] = entry
 
         if raw.second_order:
             self.zfs_tensors_2d = {}
             for (i, j), entry in raw.second_order.items():
-                rotated = self.eigen_rotation @ entry.zfs_tensor.matrix @ eigen_rot_t if self.eigen_rotation is not None else entry.zfs_tensor.matrix
-                tensor_j = rotated * CONSTANTS["MHz2J"]
-                if "approx" in self.calc_method:
-                    tensor_j *= 1.5
-                self.zfs_tensors_2d[(i, j)] = {
-                    "tensor": tensor_j,
-                    "symmetry": (phonon_pert["sym"][i], phonon_pert["sym"][j]) if phonon_pert else None,
-                    "pert": (phonon_pert["disp"][i], phonon_pert["disp"][j]) if phonon_pert else None,
-                    "ipr": (phonon_pert["ipr"][i], phonon_pert["ipr"][j]) if phonon_pert else None,
-                }
+                if isinstance(entry, PerturbationEntry):
+                    tensor_mhz = entry.zfs_tensor.matrix
+                    rotated = self.eigen_rotation @ tensor_mhz @ eigen_rot_t if self.eigen_rotation is not None else tensor_mhz
+                    tensor_j = rotated * CONSTANTS["MHz2J"]
+                    if "approx" in self.calc_method:
+                        tensor_j *= 1.5
+                    self.zfs_tensors_2d[(i, j)] = {
+                        "tensor": tensor_j,
+                        "symmetry": (phonon_pert["sym"][i], phonon_pert["sym"][j]) if phonon_pert else None,
+                        "pert": (phonon_pert["disp"][i], phonon_pert["disp"][j]) if phonon_pert else None,
+                        "ipr": (phonon_pert["ipr"][i], phonon_pert["ipr"][j]) if phonon_pert else None,
+                    }
+                elif isinstance(entry, dict):
+                    # Already in Joules from legacy/saved raw_zfs_data npz
+                    self.zfs_tensors_2d[(i, j)] = entry
 
         self.treated_modes = self._get_symmetry_factor()
 
@@ -142,7 +152,7 @@ class ZFSManager:
 
         elif kwargs.get("raw_data_path") is not None:
             raw_paths = kwargs["raw_data_path"]
-            raw_data, _ = parse_zfs_dataset_npz(raw_paths)
+            raw_data = parse_zfs_dataset_npz(raw_paths)
             self._ingest_raw_data(raw_data)
 
             print("Successfully loaded ZFS data via parser from .npz files")
