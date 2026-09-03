@@ -5,7 +5,7 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.models import ZFSTensor, PhononSpectrum, RawZFSData, SpinPhononCouplingData
+from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
@@ -132,7 +132,16 @@ class ZFSManager:
                     }
                 elif isinstance(entry, dict):
                     # Already in Joules from saved raw_zfs_data npz
-                    self.first_order[idx] = entry
+                    enriched = dict(entry)
+                    # Add symmetry/pert/ipr from phonon data when missing so
+                    # downstream derivative/symmetry routines work from .npz reload.
+                    if phonon_pert is not None and "symmetry" not in enriched:
+                        enriched["symmetry"] = phonon_pert["sym"][idx]
+                    if phonon_pert is not None and "pert" not in enriched:
+                        enriched["pert"] = phonon_pert["disp"][idx]
+                    if phonon_pert is not None and "ipr" not in enriched:
+                        enriched["ipr"] = phonon_pert["ipr"][idx]
+                    self.first_order[idx] = enriched
 
         if raw.second_order:
             self.second_order = {}
@@ -151,7 +160,14 @@ class ZFSManager:
                     }
                 elif isinstance(entry, dict):
                     # Already in Joules from saved raw_zfs_data npz
-                    self.second_order[(i, j)] = entry
+                    enriched = dict(entry)
+                    if phonon_pert is not None and "symmetry" not in enriched:
+                        enriched["symmetry"] = (phonon_pert["sym"][i], phonon_pert["sym"][j])
+                    if phonon_pert is not None and "pert" not in enriched:
+                        enriched["pert"] = (phonon_pert["disp"][i], phonon_pert["disp"][j])
+                    if phonon_pert is not None and "ipr" not in enriched:
+                        enriched["ipr"] = (phonon_pert["ipr"][i], phonon_pert["ipr"][j])
+                    self.second_order[(i, j)] = enriched
 
         self.treated_modes = self._get_symmetry_factor()
 
@@ -221,7 +237,9 @@ class ZFSManager:
             q = item["pert"]
             if q is None:
                 continue
-            sym = item["symmetry"]
+            sym = item.get("symmetry")
+            if sym is None:
+                continue
 
             dD = D_i - self.zfs_relaxed
             self._check_symmetry(dD, sym, i)

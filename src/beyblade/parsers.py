@@ -255,12 +255,19 @@ def parse_zfs_simulation_dataset(
     zfs_folder: str = "relaxed",
     calc_method: str = "calc",
     max_workers: int = 4,
+    order: Optional[int] = None,
+    pert_scale: Optional[float] = None,
+    defect: Optional[str] = None,
+    cell_size: Optional[int] = None,
 ) -> RawZFSData:
     """
     Parses an entire simulation directory structure:
     - Extracts defect name, cell size, and perturbation scale from directory paths
     - Reads the unperturbed ground-state ZFS tensor
     - Reads all 1D or 2D perturbed calculations
+
+    Explicit overrides (order, pert_scale, defect, cell_size) take precedence over
+    values inferred from the directory path.
     """
     sim_path = Path(sim_folder)
     if not sim_path.is_dir():
@@ -269,9 +276,9 @@ def parse_zfs_simulation_dataset(
     if "pert" not in sim_path.name:
         raise ValueError("Perturbation scale not found in folder name (expected e.g. 'pert_0.01').")
 
-    defect = sim_path.parent.parent.name.split("_")[0]
-    cell_size = int(sim_path.parent.parent.name.split("_")[-1])
-    pert_scale = float(sim_path.name.split("_")[1])
+    defect = defect or sim_path.parent.parent.name.split("_")[0]
+    cell_size = cell_size or int(sim_path.parent.parent.name.split("_")[-1])
+    pert_scale = pert_scale if pert_scale is not None else float(sim_path.name.split("_")[1])
 
     # Unperturbed relaxed ground state
     relaxed_outcar = sim_path.parent.parent / zfs_folder / "OUTCAR"
@@ -283,9 +290,13 @@ def parse_zfs_simulation_dataset(
     first_order = {}
     second_order = {}
 
-    if "first" in sim_path.parent.name:
+    if order is None:
+        # Infer from parent folder (e.g. 'first_order', 'second_order')
+        order = 1 if "first" in sim_path.parent.name else 2 if "second" in sim_path.parent.name else None
+
+    if order == 1:
         first_order = parse_perturbation_directory(search_path, order=1, amplitude=pert_scale, max_workers=max_workers)
-    elif "second" in sim_path.parent.name:
+    elif order == 2:
         second_order = parse_perturbation_directory(search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers)
 
     return RawZFSData(
@@ -293,6 +304,7 @@ def parse_zfs_simulation_dataset(
         cell_size=cell_size,
         pert_scale=pert_scale,
         ground_state_zfs=ground_state_zfs,
+        order=order,
         first_order=first_order,
         second_order=second_order,
         metadata={"calc_method": calc_method, "sim_path": str(sim_path)},
