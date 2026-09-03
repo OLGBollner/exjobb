@@ -100,7 +100,7 @@ def test_run_full_pipeline_from_coupling_data(tmp_path, dummy_coupling_file):
     repo_root = Path(__file__).resolve().parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from scripts.plot_results import plot_run_coupling, plot_run_rates, plot_run_t1
+    from beyblade.plotter import plot_run_coupling, plot_run_rates, plot_run_t1
     custom_fig_dir = tmp_path / "custom_figures"
     custom_fig_dir.mkdir()
     plot_run_coupling(run_dir, custom_fig_dir, "png", 150, False)

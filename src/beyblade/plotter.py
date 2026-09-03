@@ -343,6 +343,122 @@ def plot_2d_spectral_density_map(
     return fig, ax
 
 
+def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
+    """Plots 1D and diagonal 2D spin-phonon couplings and spectral functions."""
+    coupling_file = run_dir / "spin_phonon_coupling.npz"
+    if not coupling_file.exists():
+        print(f"Skipping coupling plot: {coupling_file} not found.")
+        return
+
+    data = SpinPhononCouplingData.load(coupling_file)
+    data_display = data.to_unit("MHz").frequencies_to_unit("meV")
+
+    # 1D plot
+    fig1, _, _ = plot_1d_spectral_functions(
+        frequencies_mev=data_display.frequencies,
+        V_0_0=data_display.V_0_0,
+        V_p_m=data_display.V_p_m,
+        V_0_pm=data_display.V_0_pm,
+        order=1,
+    )
+    out_file1 = out_dir / f"coupling_spectral_1d.{fmt}"
+    fig1.savefig(out_file1, dpi=dpi, bbox_inches="tight")
+    print(f"  [✓] Saved 1D coupling plot -> {out_file1}")
+
+    # Backward compatible alias
+    out_file_alias = out_dir / f"coupling_spectral.{fmt}"
+    fig1.savefig(out_file_alias, dpi=dpi, bbox_inches="tight")
+
+    # 2D plot (diagonal phonons i == j)
+    if data_display.V2_0_0 is not None:
+        v2_00 = data_display.V2_0_0
+        v2_pm = data_display.V2_p_m
+        v2_0pm = data_display.V2_0_pm
+
+        v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
+        v2_pm_diag = np.diag(v2_pm) if (v2_pm is not None and v2_pm.ndim == 2) else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
+        v2_0pm_diag = np.diag(v2_0pm) if (v2_0pm is not None and v2_0pm.ndim == 2) else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+
+        fig2, _, _ = plot_1d_spectral_functions(
+            frequencies_mev=data_display.frequencies,
+            V_0_0=v2_00_diag,
+            V_p_m=v2_pm_diag,
+            V_0_pm=v2_0pm_diag,
+            order=2,
+        )
+        out_file2 = out_dir / f"coupling_spectral_2d.{fmt}"
+        fig2.savefig(out_file2, dpi=dpi, bbox_inches="tight")
+        print(f"  [✓] Saved 2D coupling plot -> {out_file2}")
+
+
+def plot_run_rates(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
+    """Plots transition rates vs temperature."""
+    rates_file = run_dir / "transition_rates.npz"
+    if not rates_file.exists():
+        print(f"Skipping transition rates plot: {rates_file} not found.")
+        return
+
+    out_base = out_dir / f"transition_rates.{fmt}"
+    plot_transition_rates_stacked(rates_file, output_path=out_base)
+    print(f"  [✓] Saved transition rate plots in -> {out_dir}")
+
+
+def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
+    """Plots T_1 relaxation times vs temperature."""
+    t1_file = run_dir / "t1_relaxation.npz"
+    if not t1_file.exists():
+        print(f"Skipping T1 plot: {t1_file} not found.")
+        return
+
+    out_file = out_dir / f"t1_vs_temperature.{fmt}"
+    plot_t1_relaxation(t1_file, output_path=out_file)
+    print(f"  [✓] Saved T1 plot -> {out_file}")
+
+
+def compare_runs_t1(run_dirs: list[Path], out_dir: Path, fmt: str, dpi: int, show: bool):
+    """Overlays T_1 curves from multiple runs for easy comparison."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    colors = plt.cm.tab10.colors
+    plotted_any = False
+
+    for idx, r_dir in enumerate(run_dirs):
+        t1_file = r_dir / "t1_relaxation.npz"
+        if not t1_file.exists():
+            continue
+
+        data = np.load(t1_file, allow_pickle=True)
+        temps = data["temperatures"]
+        t1_fit = data["t1_fit"] if "t1_fit" in data else None
+        defect = data.get("defect", r_dir.name)
+        cell = data.get("cell_size", "")
+        method = data.get("calc_method", "")
+        label = f"{defect} {cell} ({method})" if cell else r_dir.name
+
+        color = colors[idx % len(colors)]
+        if t1_fit is not None:
+            valid = np.isfinite(t1_fit) & (t1_fit > 0)
+            if np.any(valid):
+                ax.plot(temps[valid], t1_fit[valid], "o-", color=color, linewidth=2, markersize=5, label=label)
+                plotted_any = True
+
+    if not plotted_any:
+        print("No valid T1 data found across provided run directories.")
+        return
+
+    ax.set_xlabel("Temperature (K)", fontsize=14)
+    ax.set_ylabel(r"$T_1$ (s)", fontsize=14)
+    ax.set_yscale("log")
+    ax.grid(True, which="both", linestyle=":", alpha=0.6)
+    ax.set_title(r"Comparison of $T_1$ Relaxation Times", fontsize=15)
+    ax.legend(frameon=True, fontsize=11)
+    fig.tight_layout()
+
+    out_file = out_dir / f"t1_comparison.{fmt}"
+    fig.savefig(out_file, dpi=dpi, bbox_inches="tight")
+    print(f"  [✓] Saved multi-run T1 comparison -> {out_file}")
+
+
 class ZFSPlotter:
     """
     High-level plotter that coordinates matplotlib rendering without mutating underlying data arrays.

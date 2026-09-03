@@ -1,3 +1,4 @@
+from _pytest.tmpdir import tmp_path
 import pytest
 import numpy as np
 import matplotlib.pyplot as plt
@@ -46,9 +47,8 @@ class TestPlotter:
         assert fig is not None
         plt.close(fig)
 
-    def test_zfs_plotter_with_spin_phonon_coupling_data(self):
+    def test_zfs_plotter_with_spin_phonon_coupling_data(self, tmp_path, monkeypatch):
         """Tests that ZFSPlotter accepts SpinPhononCouplingData directly and converts units seamlessly."""
-        from pathlib import Path
         from types import SimpleNamespace
         from beyblade.models import SpinPhononCouplingData, ZFSTensor
         from beyblade.plotter import ZFSPlotter
@@ -78,10 +78,12 @@ class TestPlotter:
         )
 
         plotter = ZFSPlotter()
-        args = SimpleNamespace(plot=False, ipr=False, output="test_output", format=".png")
+        monkeypatch.chdir(path=tmp_path)
+        
+        (tmp_path / "figures").mkdir()
 
-        # Plot directly without throwing errors or mutating units
+        args = SimpleNamespace(plot=False, ipr=False, output="test_output", format=".png")
         plotter.plot_data([data], args)
-        out_file = Path("figures/test_output.png")
+
+        out_file = tmp_path / "figures" / "test_output.png"
         assert out_file.exists()
-        out_file.unlink()
