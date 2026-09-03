@@ -252,8 +252,7 @@ def parse_perturbation_directory(
 
 def parse_zfs_simulation_dataset(
     sim_folder: Union[str, Path],
-    zfs_folder: str = "relaxed",
-    calc_method: str = "calc",
+    method: str,
     max_workers: int = 4,
     order: Optional[int] = None,
     pert_scale: Optional[float] = None,
@@ -272,6 +271,8 @@ def parse_zfs_simulation_dataset(
     sim_path = Path(sim_folder)
     if not sim_path.is_dir():
         raise FileNotFoundError(f"Simulation folder not found: {sim_path}")
+
+    calc_method, zfs_folder = ("all_bands", "ZFS_hyp") if method == "all" else ("defect_band_approx", "ZFS_occup")
 
     if "pert" not in sim_path.name:
         raise ValueError("Perturbation scale not found in folder name (expected e.g. 'pert_0.01').")
