@@ -12,6 +12,7 @@ dependencies = [
     "scipy",
     "pymatgen",
     "matplotlib",
+    "pyyaml",
 ]
 
 [tool.setuptools.packages.find]
