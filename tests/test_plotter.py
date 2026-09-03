@@ -15,11 +15,16 @@ class TestPlotter:
         V_pm = np.random.rand(10) * 10
         V_0pm = np.random.rand(10) * 10
 
-        fig, ax, ax2 = plot_1d_spectral_functions(freqs, V_00, V_pm, V_0pm, zfs_mev=1.2)
+        fig, ax, ax2 = plot_1d_spectral_functions(freqs, V_00, V_pm, V_0pm, zfs_mev=1.2, order=1)
         assert fig is not None
         assert ax is not None
         assert ax2 is not None
         plt.close(fig)
+
+        # Test order=2 (diagonal of 2-phonon coupling)
+        fig2, ax_2, ax2_2 = plot_1d_spectral_functions(freqs, V_00, V_pm, V_0pm, order=2)
+        assert fig2 is not None
+        plt.close(fig2)
 
     def test_plot_ipr_spectrum(self):
         freqs = np.linspace(10, 100, 10)
