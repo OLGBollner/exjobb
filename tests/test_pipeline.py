@@ -111,3 +111,99 @@ def test_run_full_pipeline_from_coupling_data(tmp_path, dummy_coupling_file):
     assert (custom_fig_dir / "coupling_spectral_1d.png").exists()
     assert (custom_fig_dir / "coupling_spectral_2d.png").exists()
     assert (custom_fig_dir / "t1_vs_temperature.png").exists()
+
+
+def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
+    """
+    Verifies that passing a single raw_zfs_file containing both 1D and 2D data:
+    1. Preserves order=2 (or detects it automatically) and uses _2d_ in run_dir name.
+    2. Computes both 1D and 2D couplings via process_both_orders.
+    3. Preserves calc_method='all_bands' instead of resetting to None.
+    """
+    n_modes = 4
+    pert_scale = 0.025
+    pert_si = pert_scale * 1.60218e-22  # in J
+
+    # Build dummy RawZFSData with both 1st and 2nd order perturbations
+    gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
+    first_order = {}
+    for i in range(n_modes):
+        first_order[i] = {
+            "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+            "pert": pert_si,
+            "symmetry": "A1" if i % 2 == 0 else "Ex",
+            "ipr": 0.5,
+        }
+    second_order = {}
+    for i in range(n_modes):
+        for j in range(i, n_modes):
+            second_order[(i, j)] = {
+                "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+                "pert": (pert_si, pert_si),
+                "symmetry": ("A1", "A1") if i == j else ("A1", "Ex"),
+                "ipr": (0.5, 0.5),
+            }
+
+    raw = RawZFSData(
+        defect="ClV",
+        cell_size=128,
+        pert_scale=pert_scale,
+        calc_method="all_bands",
+        order=1,  # Note: even if saved with order=1 in file, 2D data exists!
+        ground_state_zfs=gs,
+        first_order=first_order,
+        second_order=second_order,
+    )
+    raw_file = tmp_path / "raw_zfs_data.npz"
+    raw.save(raw_file)
+
+    # Build dummy phonon spectrum
+    freqs = np.linspace(10.0, 40.0, n_modes)
+    syms = ["A1", "Ex", "Ey", "A1"][:n_modes]
+    spec = PhononSpectrum(
+        frequencies_mev=freqs,
+        symmetries=syms,
+        iprs=np.ones(n_modes) * 0.5,
+        eigenvectors=np.ones((n_modes, 1, 3)),
+        atom_frac_coords=np.zeros((1, 3)),
+        atom_symbols=["C"],
+        atomic_masses=np.array([12.0]),
+        lattice=np.eye(3) * 5.0,
+    )
+    ph_file = tmp_path / "phonon_data.npz"
+    spec.save(ph_file)
+
+    # Test 1: User explicitly passes order=2
+    res = run_full_pipeline(
+        raw_zfs_file=raw_file,
+        phonon_file=ph_file,
+        order=2,
+        calc_method="all_bands",
+        save_plots=False,
+        output_root=tmp_path / "runs1",
+        temperatures=[10.0],
+    )
+    run_dir = res["run_dir"]
+    assert "_2d_" in run_dir.name
+    coupling_file = run_dir / "spin_phonon_coupling.npz"
+    assert coupling_file.exists()
+    cdata = SpinPhononCouplingData.load(coupling_file)
+    assert cdata.has_second_order
+    assert cdata.V2_0_0 is not None
+    assert cdata.calc_method == "all_bands"
+
+    # Test 2: User passes order=None, pipeline should detect second-order data and use order=2
+    res2 = run_full_pipeline(
+        raw_zfs_file=raw_file,
+        phonon_file=ph_file,
+        order=None,
+        calc_method="all_bands",
+        save_plots=False,
+        output_root=tmp_path / "runs2",
+        temperatures=[10.0],
+    )
+    run_dir2 = res2["run_dir"]
+    assert "_2d_" in run_dir2.name
+    cdata2 = SpinPhononCouplingData.load(run_dir2 / "spin_phonon_coupling.npz")
+    assert cdata2.has_second_order
+    assert cdata2.V2_0_0 is not None

@@ -306,6 +306,21 @@ class RawZFSData:
     second_order: dict[tuple[int, int], Union[PerturbationEntry, dict[str, Any]]] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def has_second_order(self) -> bool:
+        """Returns True if second-order perturbation data is present and non-empty."""
+        return len(self.second_order) > 0
+
+    @property
+    def has_first_order(self) -> bool:
+        """Returns True if first-order perturbation data is present and non-empty."""
+        return len(self.first_order) > 0
+
+    @property
+    def combined_order(self) -> int:
+        """Effective order: 2 if second-order data is present, else order or 1."""
+        return 2 if self.has_second_order else (self.order or 1)
+
     def to_unit(self, target_unit: str) -> RawZFSData:
         """Converts all tensors in the container to the specified unit."""
         new_gs = self.ground_state_zfs.to_unit(target_unit) if self.ground_state_zfs else None
@@ -396,9 +411,16 @@ class RawZFSData:
             elif isinstance(entry, dict):
                 saved_2d[key] = entry
 
+        eff_order = self.order
+        if eff_order is None or eff_order == 1:
+            if self.second_order:
+                eff_order = 2
+            elif self.first_order:
+                eff_order = 1
+
         np.savez(
             path,
-            order=self.order if self.order is not None else (1 if self.first_order else 2),
+            order=eff_order,
             defect=self.defect,
             cell_size=self.cell_size,
             pert_scale=self.pert_scale,
@@ -428,8 +450,20 @@ class RawZFSData:
         defect = str(base["defect"])
         cell_size = int(base["cell_size"])
         pert_scale = float(base["pert_scale"])
-        calc_method = str(base["calc_method"]) if "calc_method" in base else None
-        order = int(base["order"]) if "order" in base else None
+        calc_method = None
+        if "calc_method" in base and base["calc_method"] is not None:
+            cm = str(base["calc_method"])
+            if cm != "None" and cm != "":
+                calc_method = cm
+
+        order = None
+        if "order" in base and base["order"] is not None:
+            try:
+                ord_str = str(base["order"])
+                if ord_str != "None" and ord_str != "":
+                    order = int(ord_str)
+            except (ValueError, TypeError):
+                order = None
         eigen_rot = base["eigen_rotation"] if "eigen_rotation" in base and base["eigen_rotation"] is not None else None
 
         # Reconstruct ground state ZFSTensor with explicit unit
@@ -471,6 +505,12 @@ class RawZFSData:
                     for k, v in d2.items():
                         parsed_key = tuple(int(x) for x in k.split("_")) if isinstance(k, str) and "_" in k else k
                         second_order[parsed_key] = v
+
+        # Determine effective order from loaded perturbation data
+        if second_order:
+            order = 2
+        elif order is None:
+            order = 1 if first_order else None
 
         return cls(
             defect=defect,
