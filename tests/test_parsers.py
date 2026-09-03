@@ -135,3 +135,52 @@ class TestParsers:
                 path_1d.unlink()
             if path_2d.exists():
                 path_2d.unlink()
+
+    def test_raw_zfs_saves_with_latest_naming_convention(self):
+        """Verifies that saving RawZFSData uses latest keys (first_order/second_order), not legacy keys."""
+        from beyblade.models import RawZFSData, ZFSTensor
+
+        gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
+        first = {0: {"tensor": np.eye(3), "pert": 0.01}}
+        second = {(0, 0): {"tensor": np.eye(3), "pert": (0.01, 0.01)}}
+
+        raw = RawZFSData(
+            defect="NV",
+            cell_size=64,
+            pert_scale=0.025,
+            calc_method="all_bands",
+            order=2,
+            ground_state_zfs=gs,
+            first_order=first,
+            second_order=second,
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as f:
+            save_path = Path(f.name)
+
+        try:
+            raw.save(save_path)
+
+            # Inspect raw keys in the npz file
+            with np.load(str(save_path), allow_pickle=True) as npz:
+                keys = set(npz.files)
+                # Must use latest naming conventions
+                assert "first_order" in keys
+                assert "second_order" in keys
+                assert "ground_state_zfs_matrix" in keys
+                assert "ground_state_zfs_unit" in keys
+
+                # Must NOT contain duplicate legacy keys when saving new files
+                assert "zfs_tensors" not in keys
+                assert "zfs_tensors_2d" not in keys
+                assert "zfs_relaxed" not in keys
+
+            # Re-load to verify full roundtrip
+            reloaded = RawZFSData.load(save_path)
+            assert reloaded.defect == "NV"
+            assert reloaded.ground_state_zfs.unit == "MHz"
+            assert 0 in reloaded.first_order
+            assert (0, 0) in reloaded.second_order
+        finally:
+            if save_path.exists():
+                save_path.unlink()

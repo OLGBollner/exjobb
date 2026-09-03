@@ -362,7 +362,7 @@ class RawZFSData:
         )
 
     def save(self, out_path: Union[str, Path]) -> str:
-        """Saves RawZFSData to a .npz file with explicit unit metadata."""
+        """Saves RawZFSData to a .npz file with latest naming conventions and explicit unit metadata."""
         path = str(out_path)
         if not path.endswith(".npz"):
             path += ".npz"
@@ -371,28 +371,30 @@ class RawZFSData:
         gs_mat = self.ground_state_zfs.matrix if self.ground_state_zfs else None
         gs_unit = self.ground_state_zfs.unit if self.ground_state_zfs else "MHz"
 
-        # Format legacy dictionaries for backward compatibility
-        legacy_1d = {}
+        # Format dictionaries into clean serializable entries
+        saved_1d = {}
         for idx, entry in self.first_order.items():
             if isinstance(entry, PerturbationEntry):
-                legacy_1d[idx] = {
+                saved_1d[idx] = {
                     "tensor": entry.zfs_tensor.matrix,
                     "unit": entry.zfs_tensor.unit,
                     "pert": entry.amplitude,
                 }
             elif isinstance(entry, dict):
-                legacy_1d[idx] = entry
+                saved_1d[idx] = entry
 
-        legacy_2d = {}
+        saved_2d = {}
         for idx, entry in self.second_order.items():
+            # For 2D keys, tuple (i, j) can be stored as "i_j" string for numpy compatibility
+            key = f"{idx[0]}_{idx[1]}" if isinstance(idx, tuple) else str(idx)
             if isinstance(entry, PerturbationEntry):
-                legacy_2d[idx] = {
+                saved_2d[key] = {
                     "tensor": entry.zfs_tensor.matrix,
                     "unit": entry.zfs_tensor.unit,
                     "pert": entry.amplitude,
                 }
             elif isinstance(entry, dict):
-                legacy_2d[idx] = entry
+                saved_2d[key] = entry
 
         np.savez(
             path,
@@ -404,15 +406,17 @@ class RawZFSData:
             eigen_rotation=self.eigen_rotation,
             ground_state_zfs_matrix=gs_mat,
             ground_state_zfs_unit=gs_unit,
-            zfs_relaxed=self.ground_state_zfs.to_unit("J").matrix if self.ground_state_zfs else None,
-            zfs_tensors=legacy_1d if legacy_1d else None,
-            zfs_tensors_2d=legacy_2d if legacy_2d else None,
+            first_order=saved_1d if saved_1d else None,
+            second_order=saved_2d if saved_2d else None,
         )
         return path
 
     @classmethod
     def load(cls, in_path: Union[str, Path, Sequence[Union[str, Path]]]) -> RawZFSData:
-        """Loads RawZFSData from one or more .npz files."""
+        """
+        Loads RawZFSData from one or more .npz files.
+        Maintains backward compatibility with legacy keys (zfs_tensors, zfs_tensors_2d, zfs_relaxed).
+        """
         if isinstance(in_path, (list, tuple)):
             paths = [Path(p) for p in in_path]
         else:
@@ -444,14 +448,29 @@ class RawZFSData:
         second_order = {}
 
         for data in raw_data:
-            if "zfs_tensors" in data and data["zfs_tensors"] is not None:
+            # Check latest key first, fallback to legacy
+            if "first_order" in data and data["first_order"] is not None:
+                d1 = data["first_order"][()]
+                if isinstance(d1, dict):
+                    first_order.update(d1)
+            elif "zfs_tensors" in data and data["zfs_tensors"] is not None:
                 d1 = data["zfs_tensors"][()]
                 if isinstance(d1, dict):
                     first_order.update(d1)
-            if "zfs_tensors_2d" in data and data["zfs_tensors_2d"] is not None:
+
+            if "second_order" in data and data["second_order"] is not None:
+                d2 = data["second_order"][()]
+                if isinstance(d2, dict):
+                    for k, v in d2.items():
+                        # Parse tuple key from string "i_j" if needed
+                        parsed_key = tuple(int(x) for x in k.split("_")) if isinstance(k, str) and "_" in k else k
+                        second_order[parsed_key] = v
+            elif "zfs_tensors_2d" in data and data["zfs_tensors_2d"] is not None:
                 d2 = data["zfs_tensors_2d"][()]
                 if isinstance(d2, dict):
-                    second_order.update(d2)
+                    for k, v in d2.items():
+                        parsed_key = tuple(int(x) for x in k.split("_")) if isinstance(k, str) and "_" in k else k
+                        second_order[parsed_key] = v
 
         return cls(
             defect=defect,

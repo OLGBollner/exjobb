@@ -48,14 +48,32 @@ class ZFSManager:
         # Processed ZFS data in defect principal frame
         self.zfs_relaxed: Optional[np.ndarray] = None          # Shape (3, 3) in J
         self.eigen_rotation: Optional[np.ndarray] = None        # Shape (3, 3)
-        self.zfs_tensors: dict[int, dict[str, Any]] = {}        # 1D perturbations
-        self.zfs_tensors_2d: dict[tuple[int, int], dict[str, Any]] = {}  # 2D perturbations
+        self.first_order: dict[int, dict[str, Any]] = {}        # 1D perturbations
+        self.second_order: dict[tuple[int, int], dict[str, Any]] = {}  # 2D perturbations
         self.treated_modes: set[int] = set()
 
         self.debug = debug
 
         if raw_data is not None:
             self._ingest_raw_data(raw_data)
+
+    @property
+    def zfs_tensors(self) -> dict[int, dict[str, Any]]:
+        """Backward-compatible alias for first_order perturbations."""
+        return self.first_order
+
+    @zfs_tensors.setter
+    def zfs_tensors(self, val: dict[int, dict[str, Any]]):
+        self.first_order = val
+
+    @property
+    def zfs_tensors_2d(self) -> dict[tuple[int, int], dict[str, Any]]:
+        """Backward-compatible alias for second_order perturbations."""
+        return self.second_order
+
+    @zfs_tensors_2d.setter
+    def zfs_tensors_2d(self, val: dict[tuple[int, int], dict[str, Any]]):
+        self.second_order = val
 
     @property
     def nmodes(self) -> int:
@@ -98,7 +116,7 @@ class ZFSManager:
         eigen_rot_t = self.eigen_rotation.T if self.eigen_rotation is not None else np.eye(3)
 
         if raw.first_order:
-            self.zfs_tensors = {}
+            self.first_order = {}
             for idx, entry in raw.first_order.items():
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
@@ -106,18 +124,18 @@ class ZFSManager:
                     tensor_j = rotated * CONSTANTS["MHz2J"]
                     if "approx" in self.calc_method:
                         tensor_j *= 1.5
-                    self.zfs_tensors[idx] = {
+                    self.first_order[idx] = {
                         "tensor": tensor_j,
                         "symmetry": phonon_pert["sym"][idx] if phonon_pert else None,
                         "pert": phonon_pert["disp"][idx] if phonon_pert else None,
                         "ipr": phonon_pert["ipr"][idx] if phonon_pert else None,
                     }
                 elif isinstance(entry, dict):
-                    # Already in Joules from legacy/saved raw_zfs_data npz
-                    self.zfs_tensors[idx] = entry
+                    # Already in Joules from saved raw_zfs_data npz
+                    self.first_order[idx] = entry
 
         if raw.second_order:
-            self.zfs_tensors_2d = {}
+            self.second_order = {}
             for (i, j), entry in raw.second_order.items():
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
@@ -125,15 +143,15 @@ class ZFSManager:
                     tensor_j = rotated * CONSTANTS["MHz2J"]
                     if "approx" in self.calc_method:
                         tensor_j *= 1.5
-                    self.zfs_tensors_2d[(i, j)] = {
+                    self.second_order[(i, j)] = {
                         "tensor": tensor_j,
                         "symmetry": (phonon_pert["sym"][i], phonon_pert["sym"][j]) if phonon_pert else None,
                         "pert": (phonon_pert["disp"][i], phonon_pert["disp"][j]) if phonon_pert else None,
                         "ipr": (phonon_pert["ipr"][i], phonon_pert["ipr"][j]) if phonon_pert else None,
                     }
                 elif isinstance(entry, dict):
-                    # Already in Joules from legacy/saved raw_zfs_data npz
-                    self.zfs_tensors_2d[(i, j)] = entry
+                    # Already in Joules from saved raw_zfs_data npz
+                    self.second_order[(i, j)] = entry
 
         self.treated_modes = self._get_symmetry_factor()
 
@@ -435,18 +453,20 @@ class ZFSManager:
             return out
 
         # 2. If saving raw dataset (RawZFSData)
-        if "zfs_tensors" in kwargs or "zfs_tensors_2d" in kwargs:
+        first = kwargs.get("first_order", kwargs.get("zfs_tensors"))
+        second = kwargs.get("second_order", kwargs.get("zfs_tensors_2d"))
+        if first is not None or second is not None:
             gs_tensor = ZFSTensor(matrix=self.zfs_relaxed, unit="J") if self.zfs_relaxed is not None else None
             raw_obj = RawZFSData(
                 defect=self.defect,
                 cell_size=self.cell_size,
                 pert_scale=self.pert_scale,
                 calc_method=self.calc_method,
-                order=kwargs.get("order", 1 if "zfs_tensors" in kwargs else 2),
+                order=kwargs.get("order", 1 if first is not None else 2),
                 ground_state_zfs=gs_tensor,
                 eigen_rotation=self.eigen_rotation,
-                first_order=kwargs.get("zfs_tensors", {}),
-                second_order=kwargs.get("zfs_tensors_2d", {}),
+                first_order=first or {},
+                second_order=second or {},
             )
             out = raw_obj.save(save_name)
             print(f"Saved raw ZFS dataset to: {out}")
