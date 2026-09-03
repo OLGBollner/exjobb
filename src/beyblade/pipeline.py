@@ -410,18 +410,47 @@ def run_full_pipeline(
         fig_dir.mkdir(exist_ok=True)
         print(f"[5/5] Generating figures in {fig_dir.name}/ ...")
 
-        # Coupling plot
+        # Coupling plots (1D and 2D diagonal)
         try:
             coupling_display = coupling_data.to_unit("MHz").frequencies_to_unit("meV")
-            fig_c, _, _ = plot_1d_spectral_functions(
+            
+            # 1D coupling plot
+            fig_c1, _, _ = plot_1d_spectral_functions(
                 frequencies_mev=coupling_display.frequencies,
                 V_0_0=coupling_display.V_0_0,
                 V_p_m=coupling_display.V_p_m,
                 V_0_pm=coupling_display.V_0_pm,
+                order=1,
             )
+            fc1_path = fig_dir / "coupling_spectral_1d.png"
+            fig_c1.savefig(fc1_path, dpi=300)
+            figures_saved.append(fc1_path)
+
+            # Also save alias coupling_spectral.png for backward compatibility
             fc_path = fig_dir / "coupling_spectral.png"
-            fig_c.savefig(fc_path, dpi=300)
+            fig_c1.savefig(fc_path, dpi=300)
             figures_saved.append(fc_path)
+
+            # 2D coupling plot (diagonal phonons i == j)
+            if coupling_display.V2_0_0 is not None:
+                v2_00 = coupling_display.V2_0_0
+                v2_pm = coupling_display.V2_p_m
+                v2_0pm = coupling_display.V2_0_pm
+
+                v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
+                v2_pm_diag = np.diag(v2_pm) if (v2_pm is not None and v2_pm.ndim == 2) else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
+                v2_0pm_diag = np.diag(v2_0pm) if (v2_0pm is not None and v2_0pm.ndim == 2) else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+
+                fig_c2, _, _ = plot_1d_spectral_functions(
+                    frequencies_mev=coupling_display.frequencies,
+                    V_0_0=v2_00_diag,
+                    V_p_m=v2_pm_diag,
+                    V_0_pm=v2_0pm_diag,
+                    order=2,
+                )
+                fc2_path = fig_dir / "coupling_spectral_2d.png"
+                fig_c2.savefig(fc2_path, dpi=300)
+                figures_saved.append(fc2_path)
         except Exception as e:
             print(f"Warning: could not generate coupling plot: {e}")
 

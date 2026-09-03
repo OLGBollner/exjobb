@@ -12,7 +12,7 @@ from beyblade.pipeline import get_unique_run_dir, run_full_pipeline
 def dummy_coupling_file(tmp_path):
     n_modes = 5
     coupling = SpinPhononCouplingData(
-        order=1,
+        order=2,
         defect="NV",
         cell_size=64,
         pert_scale=0.025,
@@ -23,6 +23,9 @@ def dummy_coupling_file(tmp_path):
         V_0_0=np.array([1e-25, 2e-25, 1.5e-25, 3e-25, 2.2e-25]),
         V_p_m=np.array([2e-25, 1e-25, 2.5e-25, 1.8e-25, 3.1e-25]),
         V_0_pm=np.array([1.2e-25, 2.1e-25, 1.9e-25, 2.7e-25, 1.4e-25]),
+        V2_0_0=np.ones((n_modes, n_modes)) * 1e-25,
+        V2_p_m=np.ones((n_modes, n_modes)) * 2e-25,
+        V2_0_pm=np.ones((n_modes, n_modes)) * 1.5e-25,
         coupling_unit="J",
         symmetries=["A1", "E", "E", "A1", "E"],
         iprs=np.full(n_modes, 0.2),
@@ -88,6 +91,8 @@ def test_run_full_pipeline_from_coupling_data(tmp_path, dummy_coupling_file):
     fig_dir = run_dir / "figures"
     assert fig_dir.exists()
     assert (fig_dir / "coupling_spectral.png").exists()
+    assert (fig_dir / "coupling_spectral_1d.png").exists()
+    assert (fig_dir / "coupling_spectral_2d.png").exists()
     assert (fig_dir / "t1_vs_temperature.png").exists()
 
     # Test plot_results script functions on this run directory
@@ -103,4 +108,6 @@ def test_run_full_pipeline_from_coupling_data(tmp_path, dummy_coupling_file):
     plot_run_t1(run_dir, custom_fig_dir, "png", 150, False)
 
     assert (custom_fig_dir / "coupling_spectral.png").exists()
+    assert (custom_fig_dir / "coupling_spectral_1d.png").exists()
+    assert (custom_fig_dir / "coupling_spectral_2d.png").exists()
     assert (custom_fig_dir / "t1_vs_temperature.png").exists()

@@ -64,13 +64,14 @@ def plot_1d_spectral_functions(
     sigma: float = 7.5,
     res: float = 1.0,
     label_prefix: str = "",
+    order: int = 1,
     ax: Optional[plt.Axes] = None,
     ax2: Optional[plt.Axes] = None,
     vline_scale: str = "MHz",
 ) -> tuple[plt.Figure, plt.Axes, plt.Axes]:
     """
-    Plots 1D spin-phonon coupling coefficients (V_00, V_pm, V_0pm in MHz) as discrete vertical lines,
-    and their Gaussian-smeared spectral functions F(w) on a twin y-axis.
+    Plots 1D or diagonal 2D spin-phonon coupling coefficients (V_00, V_pm, V_0pm in MHz)
+    as discrete vertical lines, and their Gaussian-smeared spectral functions F(w) on a twin y-axis.
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 5))
@@ -88,10 +89,12 @@ def plot_1d_spectral_functions(
         V_p_m_j = V_p_m
         V_0_pm_j = V_0_pm
 
+    sup = f"({order})"
+    idx_str = "ll" if order == 2 else "l"
     y_data = {
-        label_prefix + r"$V_{+-}^l$": V_p_m_j,
-        label_prefix + r"$V_{0\pm}^l$": V_0_pm_j,
-        label_prefix + r"$V_{00}^l$": V_0_0_j,
+        label_prefix + rf"$V_{{+-}}^{{{idx_str}}}$": V_p_m_j,
+        label_prefix + rf"$V_{{0\pm}}^{{{idx_str}}}$": V_0_pm_j,
+        label_prefix + rf"$V_{{00}}^{{{idx_str}}}$": V_0_0_j,
     }
 
     plot_vlines_sorted_by_magnitude(
@@ -106,7 +109,7 @@ def plot_1d_spectral_functions(
 
     for V, col, lbl in [(V_p_m_j, "red", "+-"), (V_0_pm_j, "blue", r"0\pm"), (V_0_0_j, "black", "00")]:
         smooth_x, smooth_y = MathUtils.smear_data(frequencies_mev, V**2, res, sigma)
-        ax2.plot(smooth_x, smooth_y, color=col, linewidth=2, label=label_prefix + f"$F_{{{lbl}}}^{(1)}$")
+        ax2.plot(smooth_x, smooth_y, color=col, linewidth=2, label=label_prefix + f"$F_{{{lbl}}}^{{{sup}}}$")
 
     ax.set_ylabel(f"Coupling coefficient ({vline_scale})")
     ax.set_ylim(bottom=0)

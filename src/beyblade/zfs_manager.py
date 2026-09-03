@@ -247,14 +247,21 @@ class ZFSManager:
             dD_dq = dD / q
             zfs_deriv[i] = dD_dq
 
+            trace_in_plane = dD_dq[0, 0] + dD_dq[1, 1]
+            diff_in_plane = dD_dq[0, 0] - dD_dq[1, 1]
+            off_diag_in_plane = dD_dq[0, 1]
+
             if sym == "A1":
-                V_0_0[i] = np.abs(dD_dq[2, 2]) / 2.0
-            elif sym == sym_y:
-                V_p_m[i] = np.abs(np.mean([dD_dq[0, 1], dD_dq[1, 0]]))
-                V_0_pm[i] = np.abs(np.mean([dD_dq[1, 2], dD_dq[2, 1]])) / np.sqrt(2)
-            elif sym == sym_x:
-                V_p_m[i] = np.abs(0.5 * (dD_dq[1, 1] - dD_dq[0, 0]))
-                V_0_pm[i] = np.abs(np.mean([dD_dq[2, 0], dD_dq[0, 2]])) / np.sqrt(2)
+                # Appendix A.1 Eq. A.5:
+                # Traceless projection: dD_zz - 0.5 * (dD_xx + dD_yy) = 1.5 * d\tilde{D}_zz
+                # V_00 = 0.5 * d\tilde{D}_zz = 1/3 * (dD_zz - 0.5 * (dD_xx + dD_yy))
+                V_0_0[i] = np.abs(dD_dq[2, 2] - 0.5 * trace_in_plane) / 3.0
+            elif sym in [sym_x, sym_y, "Ex", "Ey"]:
+                # Appendix A.1 Eq. A.6 & A.7 (rotationally invariant in xy-plane):
+                # V_+- = 0.5 * sqrt((dD_xx - dD_yy)^2 + 4 * dD_xy^2)
+                # V_0+- = sqrt(dD_xz^2 + dD_yz^2) / sqrt(2)
+                V_p_m[i] = 0.5 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
+                V_0_pm[i] = np.sqrt(dD_dq[0, 2]**2 + dD_dq[1, 2]**2) / np.sqrt(2)
 
             # Degenerate mode handling
             if len(self.treated_modes) < n_modes and len(phonon_energies) == n_modes:
@@ -322,19 +329,23 @@ class ZFSManager:
             zfs_2nd_derivs[i, j] = d2D_dqidqj
             zfs_2nd_derivs[j, i] = d2D_dqidqj
 
+            trace_in_plane = d2D_dqidqj[0, 0] + d2D_dqidqj[1, 1]
+            diff_in_plane = d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1]
+            off_diag_in_plane = d2D_dqidqj[0, 1]
+
             if sym == ["A1"]:
-                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2]) / 4.0
+                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
             elif {sym_i, sym_j} == {"Ex"}:
-                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2]) / 4.0
-                V_0_pm_2nd[i, j] = 0.5 * np.abs(np.mean([d2D_dqidqj[2, 0], d2D_dqidqj[0, 2]])) / np.sqrt(2)
-                V_p_m_2nd[i, j] = 0.25 * np.abs(d2D_dqidqj[0, 0] - d2D_dqidqj[1, 1])
+                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
+                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
+                V_p_m_2nd[i, j] = 0.25 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
             elif {sym_i, sym_j} == {"Ey"}:
-                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2]) / 4.0
-                V_0_pm_2nd[i, j] = 0.5 * np.abs(np.mean([d2D_dqidqj[2, 0], d2D_dqidqj[0, 2]])) / np.sqrt(2)
-                V_p_m_2nd[i, j] = 0.25 * np.abs(d2D_dqidqj[1, 1] - d2D_dqidqj[0, 0])
+                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
+                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
+                V_p_m_2nd[i, j] = 0.25 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
             elif {sym_i, sym_j} == {"Ex", "Ey"}:
-                V_0_pm_2nd[i, j] = 0.5 * np.abs(np.mean([d2D_dqidqj[1, 2], d2D_dqidqj[2, 1]])) / np.sqrt(2)
-                V_p_m_2nd[i, j] = 0.5 * np.abs(np.mean([d2D_dqidqj[1, 0], d2D_dqidqj[0, 1]]))
+                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
+                V_p_m_2nd[i, j] = 0.5 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
 
             if len(self.treated_modes) < n_modes and len(phonon_energies) == n_modes and i == j:
                 freq_i = phonon_energies[i]

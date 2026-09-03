@@ -39,7 +39,7 @@ from beyblade.plotter import (
 
 
 def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
-    """Plots 1D spin-phonon couplings and spectral functions."""
+    """Plots 1D and diagonal 2D spin-phonon couplings and spectral functions."""
     coupling_file = run_dir / "spin_phonon_coupling.npz"
     if not coupling_file.exists():
         print(f"Skipping coupling plot: {coupling_file} not found.")
@@ -48,15 +48,42 @@ def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bo
     data = SpinPhononCouplingData.load(coupling_file)
     data_display = data.to_unit("MHz").frequencies_to_unit("meV")
 
-    fig, ax1, ax2 = plot_1d_spectral_functions(
+    # 1D plot
+    fig1, _, _ = plot_1d_spectral_functions(
         frequencies_mev=data_display.frequencies,
         V_0_0=data_display.V_0_0,
         V_p_m=data_display.V_p_m,
         V_0_pm=data_display.V_0_pm,
+        order=1,
     )
-    out_file = out_dir / f"coupling_spectral.{fmt}"
-    fig.savefig(out_file, dpi=dpi, bbox_inches="tight")
-    print(f"  [✓] Saved coupling plot -> {out_file}")
+    out_file1 = out_dir / f"coupling_spectral_1d.{fmt}"
+    fig1.savefig(out_file1, dpi=dpi, bbox_inches="tight")
+    print(f"  [✓] Saved 1D coupling plot -> {out_file1}")
+
+    # Backward compatible alias
+    out_file_alias = out_dir / f"coupling_spectral.{fmt}"
+    fig1.savefig(out_file_alias, dpi=dpi, bbox_inches="tight")
+
+    # 2D plot (diagonal phonons i == j)
+    if data_display.V2_0_0 is not None:
+        v2_00 = data_display.V2_0_0
+        v2_pm = data_display.V2_p_m
+        v2_0pm = data_display.V2_0_pm
+
+        v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
+        v2_pm_diag = np.diag(v2_pm) if (v2_pm is not None and v2_pm.ndim == 2) else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
+        v2_0pm_diag = np.diag(v2_0pm) if (v2_0pm is not None and v2_0pm.ndim == 2) else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+
+        fig2, _, _ = plot_1d_spectral_functions(
+            frequencies_mev=data_display.frequencies,
+            V_0_0=v2_00_diag,
+            V_p_m=v2_pm_diag,
+            V_0_pm=v2_0pm_diag,
+            order=2,
+        )
+        out_file2 = out_dir / f"coupling_spectral_2d.{fmt}"
+        fig2.savefig(out_file2, dpi=dpi, bbox_inches="tight")
+        print(f"  [✓] Saved 2D coupling plot -> {out_file2}")
 
 
 def plot_run_rates(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
