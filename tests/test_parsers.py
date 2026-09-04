@@ -216,7 +216,7 @@ class TestParsers:
         self._create_mock_outcar(run_1060, d_diag=(-990.0, -990.0, 1980.0), energy=-510.5)
         self._create_mock_outcar(run_1307, d_diag=(-980.0, -980.0, 1960.0), energy=-511.2)
 
-        raw_data = parse_zfs_simulation_dataset(sim_dir, method="approx")
+        raw_data = parse_zfs_simulation_dataset(sim_dir, calc_method="approx")
 
         assert raw_data.defect == "NV"
         assert raw_data.cell_size == 512
@@ -250,7 +250,7 @@ class TestParsers:
         self._create_mock_outcar(run_412_412, d_diag=(-995.0, -995.0, 1990.0), energy=-520.1)
         self._create_mock_outcar(run_412_413, d_diag=(-992.0, -992.0, 1984.0), energy=-520.3)
 
-        raw_data = parse_zfs_simulation_dataset(sim_dir, method="all_bands")
+        raw_data = parse_zfs_simulation_dataset(sim_dir, calc_method="all_bands")
 
         assert raw_data.defect == "NV"
         assert raw_data.cell_size == 512
@@ -279,7 +279,7 @@ class TestParsers:
         # Test overrides
         raw = parse_zfs_simulation_dataset(
             sim_dir,
-            method="approx",
+            calc_method="approx",
             defect="Divacancy",
             cell_size=128,
             pert_scale=0.05,
@@ -292,16 +292,16 @@ class TestParsers:
 
         # Test non-existent directory
         with pytest.raises(FileNotFoundError):
-            parse_zfs_simulation_dataset(tmp_path / "nonexistent", method="approx")
+            parse_zfs_simulation_dataset(tmp_path / "nonexistent", calc_method="approx")
 
         # Test folder name without "pert"
         bad_dir = root / "first_order" / "invalid_name"
         bad_dir.mkdir(parents=True, exist_ok=True)
         with pytest.raises(ValueError, match="Perturbation scale not found"):
-            parse_zfs_simulation_dataset(bad_dir, method="approx")
+            parse_zfs_simulation_dataset(bad_dir, calc_method="approx")
 
         # Test missing relaxed OUTCAR
         sim_dir_no_relaxed = tmp_path / "Missing_64" / "first_order" / "pert_0.1"
         (sim_dir_no_relaxed / "defect_band_approx" / "runs" / "1").mkdir(parents=True, exist_ok=True)
         with pytest.raises(ValueError, match="Relaxed ZFS tensor not found"):
-            parse_zfs_simulation_dataset(sim_dir_no_relaxed, method="approx")
+            parse_zfs_simulation_dataset(sim_dir_no_relaxed, calc_method="approx")
