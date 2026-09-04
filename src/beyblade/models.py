@@ -321,6 +321,112 @@ class RawZFSData:
         """Effective order: 2 if second-order data is present, else order or 1."""
         return 2 if self.has_second_order else (self.order or 1)
 
+    def combine(self, other: RawZFSData) -> RawZFSData:
+        """
+        Combines two RawZFSData containers (e.g. 1D and 2D datasets).
+
+        Verifies that metadata (defect, cell_size, pert_scale, calc_method) matches.
+        Raises ValueError if there is any metadata mismatch.
+        """
+        if not isinstance(other, RawZFSData):
+            raise TypeError(f"Cannot combine RawZFSData with object of type {type(other)}")
+
+        # 1. Verify defect
+        d1 = self.defect if self.defect not in (None, "None", "") else None
+        d2 = other.defect if other.defect not in (None, "None", "") else None
+        if d1 is not None and d2 is not None and d1 != d2:
+            raise ValueError(f"Cannot combine RawZFSData: defect mismatch ('{d1}' != '{d2}').")
+
+        # 2. Verify cell_size
+        c1 = self.cell_size if self.cell_size not in (None, 0) else None
+        c2 = other.cell_size if other.cell_size not in (None, 0) else None
+        if c1 is not None and c2 is not None and c1 != c2:
+            raise ValueError(f"Cannot combine RawZFSData: cell_size mismatch ({c1} != {c2}).")
+
+        # 3. Verify pert_scale
+        p1 = self.pert_scale if self.pert_scale not in (None, 0.0) else None
+        p2 = other.pert_scale if other.pert_scale not in (None, 0.0) else None
+        if p1 is not None and p2 is not None and not np.isclose(p1, p2, rtol=1e-3, atol=1e-5):
+            raise ValueError(f"Cannot combine RawZFSData: pert_scale mismatch ({p1} != {p2}).")
+
+        # 4. Verify calc_method
+        def _norm_method(m: Optional[str]) -> Optional[str]:
+            if not m or m in ("None", ""):
+                return None
+            if m in ("all", "all_bands"):
+                return "all_bands"
+            if m in ("approx", "defect_band_approx"):
+                return "defect_band_approx"
+            return str(m)
+
+        m1 = _norm_method(self.calc_method)
+        m2 = _norm_method(other.calc_method)
+        if m1 is not None and m2 is not None and m1 != m2:
+            raise ValueError(f"Cannot combine RawZFSData: calc_method mismatch ('{m1}' != '{m2}').")
+
+        # 5. Verify common metadata dictionary keys
+        if self.metadata and other.metadata:
+            for k in set(self.metadata.keys()) & set(other.metadata.keys()):
+                if k in ("sim_path", "source_file", "source_files", "order", "calc_method"):
+                    continue
+                v1, v2 = self.metadata[k], other.metadata[k]
+                if v1 is not None and v2 is not None and v1 != v2:
+                    raise ValueError(f"Cannot combine RawZFSData: metadata mismatch for '{k}' ({v1} != {v2}).")
+
+        # 6. Verify ground state ZFS if both have it
+        gs = self.ground_state_zfs
+        if gs is None and other.ground_state_zfs is not None:
+            gs = other.ground_state_zfs
+        elif gs is not None and other.ground_state_zfs is not None:
+            gs_self_mhz = gs.to_unit("MHz")
+            gs_other_mhz = other.ground_state_zfs.to_unit("MHz")
+            if not np.allclose(gs_self_mhz.matrix, gs_other_mhz.matrix, rtol=1e-2, atol=1e-1):
+                raise ValueError("Cannot combine RawZFSData: ground_state_zfs tensor mismatch.")
+
+        # 7. Merge perturbation entries
+        merged_first = dict(self.first_order)
+        merged_first.update(other.first_order)
+
+        merged_second = dict(self.second_order)
+        merged_second.update(other.second_order)
+
+        eff_order = 2 if len(merged_second) > 0 else (self.order or other.order or 1)
+        merged_defect = d1 or d2 or "defect"
+        merged_cell = c1 or c2 or 0
+        merged_scale = p1 or p2 or 0.0
+        merged_method = m1 or m2 or self.calc_method or other.calc_method
+        merged_rotation = self.eigen_rotation if self.eigen_rotation is not None else other.eigen_rotation
+
+        merged_metadata = dict(self.metadata)
+        for k, v in other.metadata.items():
+            if k == "sim_path":
+                p_existing = merged_metadata.get("sim_path")
+                if p_existing:
+                    if isinstance(p_existing, list):
+                        merged_metadata["sim_path"] = p_existing + [v]
+                    else:
+                        merged_metadata["sim_path"] = [p_existing, v]
+                else:
+                    merged_metadata["sim_path"] = v
+            elif k not in merged_metadata or merged_metadata[k] is None:
+                merged_metadata[k] = v
+
+        return RawZFSData(
+            defect=merged_defect,
+            cell_size=merged_cell,
+            pert_scale=merged_scale,
+            calc_method=merged_method,
+            order=eff_order,
+            ground_state_zfs=gs,
+            eigen_rotation=merged_rotation,
+            first_order=merged_first,
+            second_order=merged_second,
+            metadata=merged_metadata,
+        )
+
+    def __add__(self, other: RawZFSData) -> RawZFSData:
+        return self.combine(other)
+
     def to_unit(self, target_unit: str) -> RawZFSData:
         """Converts all tensors in the container to the specified unit."""
         new_gs = self.ground_state_zfs.to_unit(target_unit) if self.ground_state_zfs else None

@@ -8,7 +8,9 @@ class MathUtils:
     @staticmethod
     def broad_delta(omega, omega_p, sigma):
         delta = np.exp(-0.5 * (omega_p - omega)**2 / (sigma**2)) * 1 / (np.sqrt(2*Cn.pi)*sigma)**omega.ndim
-        delta /= delta.sum()
+        s = delta.sum()
+        if s > 0:
+            delta /= s
         return delta
 
     @staticmethod
@@ -35,6 +37,10 @@ class MathUtils:
         kernel = np.exp(-0.5 * (x_kernel / sigma)**2) / (sigma * np.sqrt(2 * Cn.pi))
 
         y_smooth = np.convolve(y_dense, kernel, mode="same")
+        if len(y_smooth) > len(x_grid):
+            diff = len(y_smooth) - len(x_grid)
+            start = diff // 2
+            y_smooth = y_smooth[start : start + len(x_grid)]
 
         return x_grid, y_smooth
 
