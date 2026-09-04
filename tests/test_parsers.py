@@ -9,6 +9,7 @@ from beyblade.parsers import (
     parse_phonon_npz,
     save_phonon_npz,
     parse_zfs_dataset_npz,
+    parse_zfs_simulation_dataset,
 )
 from beyblade.models import PhononSpectrum, ZFSTensor
 
@@ -184,3 +185,123 @@ class TestParsers:
         finally:
             if save_path.exists():
                 save_path.unlink()
+
+    @staticmethod
+    def _create_mock_outcar(path: Path, d_diag=(-950.0, -950.0, 1900.0), energy=-500.12345):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = f"""
+ free  energy   TOTEN  =       {energy:.8f} eV
+
+ Spin-spin contribution to zero-field splitting tensor (MHz)
+ -------------------------------------------------------------
+      D_xx      D_yy      D_zz      D_xy      D_xz      D_yz
+ -------------------------------------------------------------
+   {d_diag[0]:.2f}   {d_diag[1]:.2f}   {d_diag[2]:.2f}      0.00      0.00      0.00
+ -------------------------------------------------------------
+"""
+        path.write_text(content, encoding="utf-8")
+
+    def test_parse_zfs_simulation_dataset_1d(self, tmp_path):
+        """Tests parsing a 1D simulation directory structure (e.g. NV_512/first_order/pert_0.1)."""
+        root = tmp_path / "NV_512"
+
+        # Ground-state unperturbed OUTCAR in ZFS_occup
+        relaxed_outcar = root / "ZFS_occup" / "OUTCAR"
+        self._create_mock_outcar(relaxed_outcar, d_diag=(-1000.0, -1000.0, 2000.0))
+
+        # 1D perturbation runs
+        sim_dir = root / "first_order" / "pert_0.1"
+        run_1060 = sim_dir / "defect_band_approx" / "runs" / "1060" / "OUTCAR"
+        run_1307 = sim_dir / "defect_band_approx" / "runs" / "1307" / "OUTCAR"
+        self._create_mock_outcar(run_1060, d_diag=(-990.0, -990.0, 1980.0), energy=-510.5)
+        self._create_mock_outcar(run_1307, d_diag=(-980.0, -980.0, 1960.0), energy=-511.2)
+
+        raw_data = parse_zfs_simulation_dataset(sim_dir, method="approx")
+
+        assert raw_data.defect == "NV"
+        assert raw_data.cell_size == 512
+        assert raw_data.pert_scale == pytest.approx(0.1)
+        assert raw_data.calc_method == "defect_band_approx"
+        assert raw_data.order == 1
+        assert raw_data.ground_state_zfs is not None
+        assert np.isclose(raw_data.ground_state_zfs.matrix[2, 2], 2000.0)
+
+        assert 1059 in raw_data.first_order
+        assert 1306 in raw_data.first_order
+        entry_1060 = raw_data.first_order[1059]
+        assert entry_1060.order == 1
+        assert entry_1060.mode_indices == (1059,)
+        assert entry_1060.amplitude == pytest.approx(0.1)
+        assert np.isclose(entry_1060.zfs_tensor.matrix[2, 2], 1980.0)
+        assert entry_1060.energy == pytest.approx(-510.5, abs=1e-3)
+
+    def test_parse_zfs_simulation_dataset_2d(self, tmp_path):
+        """Tests parsing a 2D simulation directory structure (e.g. NV_512/second_order/pert_0.1)."""
+        root = tmp_path / "NV_512"
+
+        # Ground-state unperturbed OUTCAR in ZFS_hyp for all_bands
+        relaxed_outcar = root / "ZFS_hyp" / "OUTCAR"
+        self._create_mock_outcar(relaxed_outcar, d_diag=(-1000.0, -1000.0, 2000.0))
+
+        # 2D perturbation runs
+        sim_dir = root / "second_order" / "pert_0.1"
+        run_412_412 = sim_dir / "all_bands" / "runs" / "412_412" / "OUTCAR"
+        run_412_413 = sim_dir / "all_bands" / "runs" / "412_413" / "OUTCAR"
+        self._create_mock_outcar(run_412_412, d_diag=(-995.0, -995.0, 1990.0), energy=-520.1)
+        self._create_mock_outcar(run_412_413, d_diag=(-992.0, -992.0, 1984.0), energy=-520.3)
+
+        raw_data = parse_zfs_simulation_dataset(sim_dir, method="all_bands")
+
+        assert raw_data.defect == "NV"
+        assert raw_data.cell_size == 512
+        assert raw_data.pert_scale == pytest.approx(0.1)
+        assert raw_data.calc_method == "all_bands"
+        assert raw_data.order == 2
+        assert (411, 411) in raw_data.second_order
+        assert (411, 412) in raw_data.second_order
+
+        entry_2d = raw_data.second_order[(411, 411)]
+        assert entry_2d.order == 2
+        assert entry_2d.mode_indices == (411, 411)
+        assert entry_2d.amplitude == (0.1, 0.1)
+        assert np.isclose(entry_2d.zfs_tensor.matrix[2, 2], 1990.0)
+
+    def test_parse_zfs_simulation_dataset_overrides_and_errors(self, tmp_path):
+        """Tests parameter overrides and error handling in parse_zfs_simulation_dataset."""
+        root = tmp_path / "Custom_256"
+        relaxed = root / "ZFS_occup" / "OUTCAR"
+        self._create_mock_outcar(relaxed)
+
+        sim_dir = root / "first_order" / "pert_0.02"
+        run_1 = sim_dir / "defect_band_approx" / "runs" / "1" / "OUTCAR"
+        self._create_mock_outcar(run_1)
+
+        # Test overrides
+        raw = parse_zfs_simulation_dataset(
+            sim_dir,
+            method="approx",
+            defect="Divacancy",
+            cell_size=128,
+            pert_scale=0.05,
+            order=1,
+        )
+        assert raw.defect == "Divacancy"
+        assert raw.cell_size == 128
+        assert raw.pert_scale == pytest.approx(0.05)
+        assert raw.order == 1
+
+        # Test non-existent directory
+        with pytest.raises(FileNotFoundError):
+            parse_zfs_simulation_dataset(tmp_path / "nonexistent", method="approx")
+
+        # Test folder name without "pert"
+        bad_dir = root / "first_order" / "invalid_name"
+        bad_dir.mkdir(parents=True, exist_ok=True)
+        with pytest.raises(ValueError, match="Perturbation scale not found"):
+            parse_zfs_simulation_dataset(bad_dir, method="approx")
+
+        # Test missing relaxed OUTCAR
+        sim_dir_no_relaxed = tmp_path / "Missing_64" / "first_order" / "pert_0.1"
+        (sim_dir_no_relaxed / "defect_band_approx" / "runs" / "1").mkdir(parents=True, exist_ok=True)
+        with pytest.raises(ValueError, match="Relaxed ZFS tensor not found"):
+            parse_zfs_simulation_dataset(sim_dir_no_relaxed, method="approx")
