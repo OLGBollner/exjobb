@@ -252,7 +252,6 @@ def parse_perturbation_directory(
 
 def parse_zfs_simulation_dataset(
     sim_folder: Union[str, Path],
-    method: Optional[str] = None,
     max_workers: int = 4,
     order: Optional[int] = None,
     pert_scale: Optional[float] = None,
@@ -275,13 +274,11 @@ def parse_zfs_simulation_dataset(
     if not sim_path.is_dir():
         raise FileNotFoundError(f"Simulation folder not found: {sim_path}")
 
-    resolved_method = method or calc_method or "approx"
-    inferred_calc_method, default_zfs = (
+    calc_method, default_zfs = (
         ("all_bands", "ZFS_hyp")
-        if resolved_method in ("all", "all_bands")
+        if calc_method in ("all", "all_bands")
         else ("defect_band_approx", "ZFS_occup")
     )
-    final_calc_method = calc_method or inferred_calc_method
     final_zfs_folder = zfs_folder or default_zfs
 
     if "pert" not in sim_path.name:
@@ -297,7 +294,7 @@ def parse_zfs_simulation_dataset(
     if ground_state_zfs is None:
         raise ValueError(f"Relaxed ZFS tensor not found in: {relaxed_outcar}")
 
-    search_path = sim_path / final_calc_method
+    search_path = sim_path / calc_method
     first_order = {}
     second_order = {}
 
@@ -314,12 +311,12 @@ def parse_zfs_simulation_dataset(
         defect=defect,
         cell_size=cell_size,
         pert_scale=pert_scale,
-        calc_method=final_calc_method,
+        calc_method=calc_method,
         ground_state_zfs=ground_state_zfs,
         order=order,
         first_order=first_order,
         second_order=second_order,
-        metadata={"calc_method": final_calc_method, "sim_path": str(sim_path)},
+        metadata={"calc_method": calc_method, "sim_path": str(sim_path)},
     )
 
 
