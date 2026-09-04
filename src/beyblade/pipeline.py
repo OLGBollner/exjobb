@@ -110,7 +110,7 @@ def find_default_phonon_file_for_raw(raw_zfs_file: Union[str, Path, Sequence[Uni
 
 def run_full_pipeline(
     *,
-    sim_folder: Optional[Union[str, Path]] = None,
+    sim_folder: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
     raw_zfs_file: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
     raw_zfs_file_1d: Optional[Union[str, Path]] = None,
     raw_zfs_file_2d: Optional[Union[str, Path]] = None,
@@ -151,7 +151,7 @@ def run_full_pipeline(
     elif order is None:
         if sim_folder is not None:
             s = str(sim_folder).lower()
-            if "second_order" in s or "2d" in s or "2nd" in s:
+            if any(k in s for k in ("second_order", "2d", "2nd")):
                 order = 2
             else:
                 order = 1

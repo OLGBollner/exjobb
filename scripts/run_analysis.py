@@ -37,7 +37,7 @@ def main():
     )
 
     # Input modes
-    parser.add_argument("--sim_folder", type=str, help="Path to VASP simulation folder.")
+    parser.add_argument("--sim_folder", type=str, nargs="+", help="Path to VASP simulation folder.")
     parser.add_argument("--raw_zfs_file", type=str, nargs="+", help="Path to raw ZFS .npz dataset file(s).")
     parser.add_argument(
         "--raw_zfs_file_1d",
