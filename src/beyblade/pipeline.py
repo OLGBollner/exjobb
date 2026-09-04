@@ -145,7 +145,8 @@ def run_full_pipeline(
     """
     # ── 1. Resolve order and method ──────────────────────────────────────────
     user_order = order  # preserve explicit caller / CLI override
-    combine_orders = raw_zfs_file_1d is not None and raw_zfs_file_2d is not None
+    is_multi_sim = isinstance(sim_folder, (list, tuple)) and len(sim_folder) > 1
+    combine_orders = (raw_zfs_file_1d is not None and raw_zfs_file_2d is not None) or is_multi_sim
     if combine_orders:
         order = 2 if order is None else order  # combined run is handled below
     elif order is None:
@@ -176,7 +177,8 @@ def run_full_pipeline(
         order = coupling_data.order or order
     else:
         # Load phonons
-        ph_from_sim = find_default_phonon_file(Path(sim_folder)) if sim_folder else None
+        sim_p = sim_folder[0] if isinstance(sim_folder, (list, tuple)) else sim_folder
+        ph_from_sim = find_default_phonon_file(Path(sim_p)) if sim_p else None
         ph_from_raw = find_default_phonon_file_for_raw(raw_zfs_file) if raw_zfs_file is not None else None
         ph_path = Path(phonon_file) if phonon_file else (ph_from_sim or ph_from_raw)
         if ph_path is not None and ph_path.exists():
@@ -191,15 +193,33 @@ def run_full_pipeline(
 
         # Load raw ZFS
         if sim_folder is not None:
-            raw_data = parse_zfs_simulation_dataset(
-                sim_folder=sim_folder,
-                calc_method=calc_method,
-                zfs_folder=zfs_folder,
-                order=order,
-                pert_scale=pert_scale,
-                defect=defect,
-                cell_size=cell_size,
-            )
+            if isinstance(sim_folder, (list, tuple)) and len(sim_folder) > 1:
+                datasets = []
+                for sf in sim_folder:
+                    ds = parse_zfs_simulation_dataset(
+                        sim_folder=sf,
+                        calc_method=calc_method,
+                        zfs_folder=zfs_folder,
+                        pert_scale=pert_scale,
+                        defect=defect,
+                        cell_size=cell_size,
+                    )
+                    datasets.append(ds)
+
+                raw_data = datasets[0]
+                for other_ds in datasets[1:]:
+                    raw_data = raw_data.combine(other_ds)
+            else:
+                sf = sim_folder[0] if isinstance(sim_folder, (list, tuple)) else sim_folder
+                raw_data = parse_zfs_simulation_dataset(
+                    sim_folder=sf,
+                    calc_method=calc_method,
+                    zfs_folder=zfs_folder,
+                    order=order,
+                    pert_scale=pert_scale,
+                    defect=defect,
+                    cell_size=cell_size,
+                )
         elif combine_orders:
             # Combine 1d + 2d raw datasets into one RawZFSData with both
             # first_order and second_order perturbation sets.

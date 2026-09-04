@@ -213,3 +213,135 @@ class TestSpinPhononCouplingData:
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
+
+    def test_raw_zfs_data_combine_success(self):
+        """Verifies that two RawZFSData objects with matching metadata combine correctly."""
+        from beyblade.models import RawZFSData, ZFSTensor, PerturbationEntry
+
+        gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
+        p1 = PerturbationEntry(order=1, mode_indices=(0,), amplitude=0.1, zfs_tensor=gs)
+        p2 = PerturbationEntry(order=2, mode_indices=(0, 0), amplitude=(0.1, 0.1), zfs_tensor=gs)
+
+        data1 = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            order=1,
+            ground_state_zfs=gs,
+            first_order={0: p1},
+            metadata={"calc_method": "all_bands"},
+        )
+        data2 = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            order=2,
+            ground_state_zfs=gs,
+            second_order={(0, 0): p2},
+            metadata={"calc_method": "all_bands"},
+        )
+
+        combined = data1.combine(data2)
+        assert combined.defect == "NV"
+        assert combined.cell_size == 512
+        assert combined.pert_scale == pytest.approx(0.1)
+        assert combined.calc_method == "all_bands"
+        assert combined.order == 2
+        assert 0 in combined.first_order
+        assert (0, 0) in combined.second_order
+
+        # Verify operator overloading (+)
+        added = data1 + data2
+        assert added.order == 2
+        assert 0 in added.first_order
+        assert (0, 0) in added.second_order
+
+    def test_raw_zfs_data_combine_metadata_mismatches_raise(self):
+        """Verifies that combine() raises ValueError when metadata doesn't match."""
+        from beyblade.models import RawZFSData, ZFSTensor
+
+        gs1 = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
+        gs2 = ZFSTensor(matrix=np.diag([-500.0, -500.0, 1000.0]), unit="MHz")
+
+        base = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            ground_state_zfs=gs1,
+        )
+
+        # 1. Defect mismatch
+        mismatched_defect = RawZFSData(
+            defect="ClV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            ground_state_zfs=gs1,
+        )
+        with pytest.raises(ValueError, match="defect mismatch"):
+            base.combine(mismatched_defect)
+
+        # 2. Cell size mismatch
+        mismatched_cell = RawZFSData(
+            defect="NV",
+            cell_size=64,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            ground_state_zfs=gs1,
+        )
+        with pytest.raises(ValueError, match="cell_size mismatch"):
+            base.combine(mismatched_cell)
+
+        # 3. Perturbation scale mismatch
+        mismatched_pert = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.05,
+            calc_method="all_bands",
+            ground_state_zfs=gs1,
+        )
+        with pytest.raises(ValueError, match="pert_scale mismatch"):
+            base.combine(mismatched_pert)
+
+        # 4. Calculation method mismatch
+        mismatched_method = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="defect_band_approx",
+            ground_state_zfs=gs1,
+        )
+        with pytest.raises(ValueError, match="calc_method mismatch"):
+            base.combine(mismatched_method)
+
+        # 5. Metadata dictionary mismatch
+        base_with_meta = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            metadata={"k_points": "gamma"},
+        )
+        other_with_meta = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            metadata={"k_points": "monkhorst"},
+        )
+        with pytest.raises(ValueError, match="metadata mismatch for 'k_points'"):
+            base_with_meta.combine(other_with_meta)
+
+        # 6. Ground state ZFS tensor mismatch
+        mismatched_gs = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            ground_state_zfs=gs2,
+        )
+        with pytest.raises(ValueError, match="ground_state_zfs tensor mismatch"):
+            base.combine(mismatched_gs)

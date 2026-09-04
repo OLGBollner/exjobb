@@ -207,3 +207,87 @@ def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
     cdata2 = SpinPhononCouplingData.load(run_dir2 / "spin_phonon_coupling.npz")
     assert cdata2.has_second_order
     assert cdata2.V2_0_0 is not None
+
+
+def _write_mock_outcar(path: Path, d_diag=(-950.0, -950.0, 1900.0), energy=-500.123):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = f"""
+ free  energy   TOTEN  =       {energy:.8f} eV
+
+ Spin-spin contribution to zero-field splitting tensor (MHz)
+ -------------------------------------------------------------
+      D_xx      D_yy      D_zz      D_xy      D_xz      D_yz
+ -------------------------------------------------------------
+   {d_diag[0]:.2f}   {d_diag[1]:.2f}   {d_diag[2]:.2f}      0.00      0.00      0.00
+ -------------------------------------------------------------
+"""
+    path.write_text(content, encoding="utf-8")
+
+
+def test_pipeline_with_multiple_sim_folders(tmp_path):
+    """Tests passing multiple sim_folders (1D and 2D) to pipeline, combining their datasets."""
+    root = tmp_path / "NV_512"
+
+    # Relaxed unperturbed OUTCAR in ZFS_hyp
+    _write_mock_outcar(root / "ZFS_hyp" / "OUTCAR", d_diag=(-1000.0, -1000.0, 2000.0))
+
+    # 1D perturbation folder
+    sim_1d = root / "first_order" / "pert_0.1"
+    _write_mock_outcar(sim_1d / "all_bands" / "runs" / "1" / "OUTCAR", d_diag=(-980.0, -980.0, 1960.0))
+    _write_mock_outcar(sim_1d / "all_bands" / "runs" / "2" / "OUTCAR", d_diag=(-970.0, -970.0, 1940.0))
+
+    # 2D perturbation folder
+    sim_2d = root / "second_order" / "pert_0.1"
+    _write_mock_outcar(sim_2d / "all_bands" / "runs" / "1_1" / "OUTCAR", d_diag=(-990.0, -990.0, 1980.0))
+    _write_mock_outcar(sim_2d / "all_bands" / "runs" / "1_2" / "OUTCAR", d_diag=(-985.0, -985.0, 1970.0))
+
+    spec = PhononSpectrum(
+        frequencies_mev=np.array([20.0, 50.0]),
+        eigenvectors=np.ones((2, 1, 3)),
+        symmetries=["A1", "A1"],
+        iprs=np.array([0.1, 0.1]),
+        atom_frac_coords=np.zeros((1, 3)),
+        atom_symbols=["C"],
+        atomic_masses=np.array([12.0]),
+        lattice=np.eye(3) * 5.0,
+    )
+    ph_file = root / "phonon_data.npz"
+    spec.save(ph_file)
+
+    res = run_full_pipeline(
+        sim_folder=[sim_1d, sim_2d],
+        phonon_file=ph_file,
+        calc_method="all_bands",
+        save_plots=False,
+        output_root=tmp_path / "runs_multi_sim",
+        temperatures=[10.0],
+    )
+    run_dir = res["run_dir"]
+    assert "_2d_" in run_dir.name
+    raw_saved = RawZFSData.load(run_dir / "raw_zfs_data.npz")
+    assert 0 in raw_saved.first_order
+    assert 1 in raw_saved.first_order
+    assert (0, 0) in raw_saved.second_order
+    assert (0, 1) in raw_saved.second_order
+
+
+def test_pipeline_with_mismatched_sim_folders_raises(tmp_path):
+    """Tests that passing sim_folders with mismatched defect metadata raises ValueError."""
+    root_nv = tmp_path / "NV_512"
+    _write_mock_outcar(root_nv / "ZFS_hyp" / "OUTCAR")
+    sim_nv = root_nv / "first_order" / "pert_0.1"
+    _write_mock_outcar(sim_nv / "all_bands" / "runs" / "1" / "OUTCAR")
+
+    root_clv = tmp_path / "ClV_128"
+    _write_mock_outcar(root_clv / "ZFS_hyp" / "OUTCAR")
+    sim_clv = root_clv / "second_order" / "pert_0.1"
+    _write_mock_outcar(sim_clv / "all_bands" / "runs" / "1_1" / "OUTCAR")
+
+    with pytest.raises(ValueError, match="Cannot combine RawZFSData: defect mismatch"):
+        run_full_pipeline(
+            sim_folder=[sim_nv, sim_clv],
+            calc_method="all_bands",
+            save_plots=False,
+            output_root=tmp_path / "runs_mismatched",
+            temperatures=[10.0],
+        )

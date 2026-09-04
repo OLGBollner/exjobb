@@ -98,13 +98,17 @@ def main():
     calc_method = "defect_band_approx" if args.approx else "all_bands"
     zfs_folder = "ZFS_occup" if args.approx else "ZFS_hyp"
 
-    # Normalize raw_zfs_file if single argument
+    # Normalize sim_folder and raw_zfs_file if single argument
+    sim_folders = args.sim_folder
+    if sim_folders and len(sim_folders) == 1:
+        sim_folders = sim_folders[0]
+
     raw_files = args.raw_zfs_file
     if raw_files and len(raw_files) == 1:
         raw_files = raw_files[0]
 
     res = run_full_pipeline(
-        sim_folder=args.sim_folder,
+        sim_folder=sim_folders,
         raw_zfs_file=raw_files,
         raw_zfs_file_1d=args.raw_zfs_file_1d,
         raw_zfs_file_2d=args.raw_zfs_file_2d,
