@@ -113,6 +113,87 @@ class TestIPRCalculation:
         assert spectrum.iprs is not None
         assert np.allclose(mgr.get_ipr(), [1.0, 0.5, 0.25, 0.125])
 
+
+class TestC3vSymmetryClassification:
+    """Verifies that PhononSpectrum automatically computes C3v symmetry representations."""
+
+    def test_symmetry_computed_automatically_if_none(self):
+        n_modes = 4
+        n_atoms = 4
+        spectrum = PhononSpectrum(
+            frequencies_mev=np.array([10.0, 20.0, 30.0, 40.0]),
+            eigenvectors=np.ones((n_modes, n_atoms, 3)),
+            atom_frac_coords=np.zeros((n_atoms, 3)),
+            atom_symbols=["C"] * n_atoms,
+            atomic_masses=np.full(n_atoms, 12.011),
+            lattice=np.eye(3) * 5.0,
+            symmetries=None,
+        )
+        assert spectrum.symmetries is not None
+        assert len(spectrum.symmetries) == n_modes
+        assert all(isinstance(s, str) for s in spectrum.symmetries)
+
+    def test_c3v_symmetry_classification_a1_and_e_modes(self):
+        # 4-atom cluster with C3v: N at origin, 3 C atoms at 120 deg
+        axis = np.array([1.0, 1.0, 1.0])
+        normal = np.array([1.0, -1.0, 0.0])
+        R_C3 = MathUtils.rotation_around_symmetry_axis(axis, order=3)
+        R_sv = MathUtils.reflection_matrix(normal)
+
+        v1 = np.array([1.0, 1.0, -2.0])
+        v1 = v1 / np.linalg.norm(v1) * 1.54
+        pos = np.zeros((4, 3))
+        pos[0] = [0.0, 0.0, 0.0]  # N
+        pos[1] = v1               # C1
+        pos[2] = R_C3 @ v1        # C2
+        pos[3] = R_C3 @ pos[2]    # C3
+
+        lattice = np.eye(3) * 10.0
+        frac_coords = pos / 10.0
+        symbols = ["N", "C", "C", "C"]
+        masses = np.array([14.0, 12.0, 12.0, 12.0])
+
+        # Mode 0: A1 mode along C3 axis
+        eig_A1 = np.zeros((4, 3))
+        eig_A1[0] = axis / np.linalg.norm(axis)
+        eig_A1 /= np.linalg.norm(eig_A1)
+
+        # Pure Ex (in mirror plane) and Ey (normal to mirror plane)
+        eig_Ex_pure = np.zeros((4, 3))
+        eig_Ex_pure[0] = v1 / np.linalg.norm(v1)
+        eig_Ex_pure /= np.linalg.norm(eig_Ex_pure)
+
+        eig_Ey_pure = np.zeros((4, 3))
+        eig_Ey_pure[0] = normal / np.linalg.norm(normal)
+        eig_Ey_pure /= np.linalg.norm(eig_Ey_pure)
+
+        # Degenerate pair (arbitrary rotation in E subspace, e.g. theta = 0.55 rad)
+        theta = 0.55
+        e1 = np.cos(theta) * eig_Ex_pure + np.sin(theta) * eig_Ey_pure
+        e2 = -np.sin(theta) * eig_Ex_pure + np.cos(theta) * eig_Ey_pure
+
+        eigs = np.array([eig_A1, e1, e2])
+        freqs = np.array([15.0, 30.0, 30.0])
+
+        spectrum = PhononSpectrum(
+            frequencies_mev=freqs,
+            eigenvectors=eigs,
+            atom_frac_coords=frac_coords,
+            atom_symbols=symbols,
+            atomic_masses=masses,
+            lattice=lattice,
+            symmetries=None,  # triggers automatic C3v classification
+        )
+
+        assert spectrum.symmetries == ["A1", "Ex", "Ey"]
+
+        # Also verify via PhononManager
+        mgr = PhononManager(spectrum=spectrum)
+        syms_mgr = mgr.analyze_c3v_symmetry()
+        assert syms_mgr == ["A1", "Ex", "Ey"]
+        assert "sym" in mgr.symmetry_data
+        assert np.array_equal(mgr.symmetry_data["sym"], ["A1", "Ex", "Ey"])
+
     def test_locality_weight(self):
         """Verifies spatial defect-neighbourhood locality calculation."""
         n_atoms = 4
