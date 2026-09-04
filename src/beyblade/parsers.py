@@ -274,11 +274,13 @@ def parse_zfs_simulation_dataset(
     if not sim_path.is_dir():
         raise FileNotFoundError(f"Simulation folder not found: {sim_path}")
 
-    calc_method, default_zfs = (
-        ("all_bands", "ZFS_hyp")
-        if calc_method in ("all", "all_bands")
-        else ("defect_band_approx", "ZFS_occup")
-    )
+    if calc_method in ("all", "all_bands"):
+        calc_method, default_zfs = ("all_bands", "ZFS_hyp")
+    elif calc_method in ("approx", "defect_band_approx"):
+        calc_method, default_zfs = ("defect_band_approx", "ZFS_occup")
+    else:
+        raise ValueError(f"{calc_method} is mot a valid zfs calculation method.")
+    
     final_zfs_folder = zfs_folder or default_zfs
 
     if "pert" not in sim_path.name:

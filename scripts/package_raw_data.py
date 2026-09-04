@@ -1,9 +1,16 @@
-import sys
 from beyblade.parsers import parse_zfs_simulation_dataset
+import argparse
 
 def main():
-  data_path = sys.argv[1]
-  method = str(sys.argv[2])
+  parser = argparse.ArgumentParser(description="Package simulation data into a single .npz")
+
+  parser.add_argument("--sim_folder", type=str, nargs="+", help="Path to VASP simulation folder.")
+  parser.add_argument("--method", type=str, help="Sets zfs calculation method (all or approx).")
+
+  args = parser.parse_args()
+  data_path = args.sim_folder
+  method = args.method
+
   print(f"Collecting data from {data_path}")
   if data_path is not None:
       if isinstance(data_path, (list, tuple)) and len(data_path) > 1:
