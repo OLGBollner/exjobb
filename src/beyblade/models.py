@@ -724,11 +724,63 @@ class RawZFSData:
             metadata=dict(self.metadata),
         )
 
+    def enrich_with_spectrum(self, spectrum: PhononSpectrum) -> None:
+        """
+        Enriches first_order and second_order entries with mode-dependent SI displacements,
+        C3v symmetries, and IPRs from the given phonon spectrum.
+        """
+        pert_SI = (self.pert_scale or 1.0) * CONSTANTS["ang_amu2SI"]
+        phonon_pert = spectrum.get_phonon_pert(pert_SI)
+        disps = phonon_pert.get("disp", [])
+        syms = phonon_pert.get("sym", [])
+        iprs = phonon_pert.get("ipr", [])
+
+        for idx, entry in list(self.first_order.items()):
+            disp = disps[idx] if idx < len(disps) else None
+            sym = syms[idx] if idx < len(syms) else None
+            ipr = iprs[idx] if idx < len(iprs) else None
+            if isinstance(entry, PerturbationEntry):
+                if disp is not None:
+                    entry.amplitude = disp
+            elif isinstance(entry, dict):
+                if disp is not None:
+                    entry["pert"] = disp
+                if sym is not None:
+                    entry["symmetry"] = sym
+                if ipr is not None:
+                    entry["ipr"] = ipr
+
+        for (i, j), entry in list(self.second_order.items()):
+            disp_i = disps[i] if i < len(disps) else None
+            disp_j = disps[j] if j < len(disps) else None
+            sym_i = syms[i] if i < len(syms) else None
+            sym_j = syms[j] if j < len(syms) else None
+            ipr_i = iprs[i] if i < len(iprs) else None
+            ipr_j = iprs[j] if j < len(iprs) else None
+            pair_disp = (disp_i, disp_j) if (disp_i is not None and disp_j is not None) else None
+            if isinstance(entry, PerturbationEntry):
+                if pair_disp is not None:
+                    entry.amplitude = pair_disp
+            elif isinstance(entry, dict):
+                if pair_disp is not None:
+                    entry["pert"] = pair_disp
+                if sym_i is not None and sym_j is not None:
+                    entry["symmetry"] = (sym_i, sym_j)
+                if ipr_i is not None and ipr_j is not None:
+                    entry["ipr"] = (ipr_i, ipr_j)
+
     def _default_name(self):
         return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.order}d.npz"
 
-    def save(self, out_path: Optional[Union[str, Path]] = None) -> str:
+    def save(
+        self,
+        out_path: Optional[Union[str, Path]] = None,
+        spectrum: Optional[PhononSpectrum] = None,
+    ) -> str:
         """Saves RawZFSData to a .npz file with latest naming conventions and explicit unit metadata."""
+        if spectrum is not None:
+            self.enrich_with_spectrum(spectrum)
+
         path = self._default_name() if out_path is None else str(out_path)
         if not path.endswith(".npz"):
             path += ".npz"
@@ -741,10 +793,14 @@ class RawZFSData:
         saved_1d = {}
         for idx, entry in self.first_order.items():
             if isinstance(entry, PerturbationEntry):
+                amp = entry.amplitude
+                # Convert amplitude from Å*sqrt(amu) to SI units if it has not yet been converted/enriched
+                if isinstance(amp, (int, float)) and amp > 1e-4:
+                    amp = amp * CONSTANTS["ang_amu2SI"]
                 saved_1d[idx] = {
                     "tensor": entry.zfs_tensor.matrix,
                     "unit": entry.zfs_tensor.unit,
-                    "pert": entry.amplitude,
+                    "pert": amp,
                 }
             elif isinstance(entry, dict):
                 saved_1d[idx] = entry
@@ -754,10 +810,15 @@ class RawZFSData:
             # For 2D keys, tuple (i, j) can be stored as "i_j" string for numpy compatibility
             key = f"{idx[0]}_{idx[1]}" if isinstance(idx, tuple) else str(idx)
             if isinstance(entry, PerturbationEntry):
+                amp = entry.amplitude
+                if isinstance(amp, (tuple, list)):
+                    amp = tuple(a * CONSTANTS["ang_amu2SI"] if (isinstance(a, (int, float)) and a > 1e-4) else a for a in amp)
+                elif isinstance(amp, (int, float)) and amp > 1e-4:
+                    amp = (amp * CONSTANTS["ang_amu2SI"], amp * CONSTANTS["ang_amu2SI"])
                 saved_2d[key] = {
                     "tensor": entry.zfs_tensor.matrix,
                     "unit": entry.zfs_tensor.unit,
-                    "pert": entry.amplitude,
+                    "pert": amp,
                 }
             elif isinstance(entry, dict):
                 saved_2d[key] = entry

@@ -272,7 +272,7 @@ def run_full_pipeline(
     # ── 4. Save Raw ZFS Data (if generated/loaded) ───────────────────────────
     raw_path = run_dir / "raw_zfs_data.npz"
     if raw_data is not None:
-        raw_data.save(raw_path)
+        raw_data.save(raw_path, spectrum=spectrum)
         print(f"[1/5] Saved raw ZFS data -> {raw_path.name}")
 
     # ── 5. Calculate Spin-Phonon Couplings ───────────────────────────────────

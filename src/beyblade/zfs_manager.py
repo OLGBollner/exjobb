@@ -137,14 +137,16 @@ class ZFSManager:
                 elif isinstance(entry, dict):
                     # Already in Joules from saved raw_zfs_data npz
                     enriched = dict(entry)
-                    # Add symmetry/pert/ipr from phonon data when missing so
-                    # downstream derivative/symmetry routines work from .npz reload.
-                    if phonon_pert is not None and "symmetry" not in enriched:
-                        enriched["symmetry"] = phonon_pert["sym"][idx]
-                    if phonon_pert is not None and "pert" not in enriched:
-                        enriched["pert"] = phonon_pert["disp"][idx]
-                    if phonon_pert is not None and "ipr" not in enriched:
-                        enriched["ipr"] = phonon_pert["ipr"][idx]
+                    # When phonon data is available, always update symmetry/pert/ipr
+                    # so that mode-dependent SI displacements q_i = q0 * sqrt(2*omega/hbar)
+                    # are used for derivatives instead of a raw pert_scale.
+                    if phonon_pert is not None:
+                        if phonon_pert.get("sym") is not None and idx < len(phonon_pert["sym"]):
+                            enriched["symmetry"] = phonon_pert["sym"][idx]
+                        if phonon_pert.get("disp") is not None and idx < len(phonon_pert["disp"]):
+                            enriched["pert"] = phonon_pert["disp"][idx]
+                        if phonon_pert.get("ipr") is not None and idx < len(phonon_pert["ipr"]):
+                            enriched["ipr"] = phonon_pert["ipr"][idx]
                     self.first_order[idx] = enriched
 
         if raw.second_order:
@@ -165,12 +167,13 @@ class ZFSManager:
                 elif isinstance(entry, dict):
                     # Already in Joules from saved raw_zfs_data npz
                     enriched = dict(entry)
-                    if phonon_pert is not None and "symmetry" not in enriched:
-                        enriched["symmetry"] = (phonon_pert["sym"][i], phonon_pert["sym"][j])
-                    if phonon_pert is not None and "pert" not in enriched:
-                        enriched["pert"] = (phonon_pert["disp"][i], phonon_pert["disp"][j])
-                    if phonon_pert is not None and "ipr" not in enriched:
-                        enriched["ipr"] = (phonon_pert["ipr"][i], phonon_pert["ipr"][j])
+                    if phonon_pert is not None:
+                        if phonon_pert.get("sym") is not None and i < len(phonon_pert["sym"]) and j < len(phonon_pert["sym"]):
+                            enriched["symmetry"] = (phonon_pert["sym"][i], phonon_pert["sym"][j])
+                        if phonon_pert.get("disp") is not None and i < len(phonon_pert["disp"]) and j < len(phonon_pert["disp"]):
+                            enriched["pert"] = (phonon_pert["disp"][i], phonon_pert["disp"][j])
+                        if phonon_pert.get("ipr") is not None and i < len(phonon_pert["ipr"]) and j < len(phonon_pert["ipr"]):
+                            enriched["ipr"] = (phonon_pert["ipr"][i], phonon_pert["ipr"][j])
                     self.second_order[(i, j)] = enriched
 
         self.treated_modes = self._get_symmetry_factor()
