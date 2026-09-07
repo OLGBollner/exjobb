@@ -1,4 +1,5 @@
-from beyblade.parsers import parse_zfs_simulation_dataset, parse_phonon_npz, parse_phonopy_yaml, find_default_phonon_file
+from beyblade.parsers import parse_zfs_simulation_dataset, parse_phonon_npz, parse_phonopy_yaml
+from beyblade.pipeline import find_default_phonon_file
 from pathlib import Path
 import argparse
 
