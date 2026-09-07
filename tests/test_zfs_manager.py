@@ -161,3 +161,57 @@ class TestZFSManager:
         # 2D displacements are SI and mode-dependent tuple
         assert np.isclose(reloaded.second_order[(0, 3)]["pert"][0], expected_pert["disp"][0])
         assert np.isclose(reloaded.second_order[(0, 3)]["pert"][1], expected_pert["disp"][3])
+
+    def test_ingest_rotates_tensors_into_principal_eigenframe(self, setup_system):
+        """Regression test: loaded .npz (dict) tensors must be rotated into the
+        ground-state principal eigenframe with R.T @ tensor @ R so that A1,A1
+        modes produce a diagonal d2D. Using R @ tensor @ R.T (the wrong
+        orientation) leaves off-diagonal terms at the same scale as the
+        diagonal, which is what Oskar observed for mode (187,187)."""
+        _, spectrum, gs_zfs = setup_system
+
+        # Ground state with a non-trivial eigenframe: NV axis along [1,1,1]
+        # gives an off-diagonal crystal-frame matrix (like the real NV_64 data).
+        R = np.array([
+            [0.74867142,  0.32581862, -0.57735027],
+            [-0.0921685, -0.81127778, -0.57735027],
+            [-0.65650291,  0.48545915, -0.57735027],
+        ])
+        D_gs_diag = np.diag([-2870.0 / 3, -2870.0 / 3, 2 * 2870.0 / 3])  # MHz
+        gs_crystal = R @ D_gs_diag @ R.T  # MHz
+        ground_state_zfs = ZFSTensor(matrix=gs_crystal, unit="MHz")
+
+        # Perturbed tensor is diagonal *in the eigenframe* (A1,A1 mode should be
+        # diagonal in dD). In the crystal frame it is R @ D_pert @ R.T.
+        D_pert_diag = np.diag([-2870.0 / 3 + 35.0, -2870.0 / 3 + 35.0, 2 * 2870.0 / 3 - 70.0])
+        T_crystal = R @ D_pert_diag @ R.T  # MHz
+
+        raw_data = RawZFSData(
+            defect="NV",
+            cell_size=64,
+            pert_scale=0.025,
+            calc_method="all_bands",
+            ground_state_zfs=ground_state_zfs,
+            first_order={
+                0: {"tensor": T_crystal * CONSTANTS["MHz2J"], "unit": "J", "pert": 0.025},
+            },
+            second_order={
+                (0, 0): {"tensor": T_crystal * CONSTANTS["MHz2J"], "unit": "J", "pert": (0.025, 0.025)},
+            },
+        )
+
+        manager = ZFSManager(spectrum=spectrum, raw_data=raw_data)
+
+        # The ingested tensor must equal the eigenframe-diagonal tensor:
+        # R.T @ T_crystal @ R == D_pert_diag.
+        ingested = manager.second_order[(0, 0)]["tensor"]
+        expected = D_pert_diag * CONSTANTS["MHz2J"]
+        assert np.allclose(ingested, expected, atol=1e-24), (
+            f"Tensor not rotated into eigenframe; off-diagonals remain.\n"
+            f"ingested: {ingested}\nexpected: {expected}"
+        )
+
+        # Sanity: the wrong orientation R @ T @ R.T would NOT match.
+        T_j = T_crystal * CONSTANTS["MHz2J"]
+        wrong = R @ T_j @ R.T
+        assert not np.allclose(wrong, expected, atol=1e-24)

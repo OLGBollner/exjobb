@@ -117,14 +117,17 @@ class ZFSManager:
 
         pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
         phonon_pert = self.get_phonon_pert(pert_SI)
-        eigen_rot_t = self.eigen_rotation.T if self.eigen_rotation is not None else np.eye(3)
+        # eigen_rotation columns are the ground-state principal-frame eigenvectors,
+        # so rotating into that frame is R.T @ tensor @ R (NOT R @ tensor @ R.T).
+        eigen_rot = self.eigen_rotation if self.eigen_rotation is not None else np.eye(3)
+        eigen_rot_t = eigen_rot.T
 
         if raw.first_order:
             self.first_order = {}
             for idx, entry in raw.first_order.items():
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
-                    rotated = self.eigen_rotation @ tensor_mhz @ eigen_rot_t if self.eigen_rotation is not None else tensor_mhz
+                    rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
                     if "approx" in self.calc_method:
                         tensor_j *= 1.5
@@ -135,8 +138,16 @@ class ZFSManager:
                         "ipr": phonon_pert["ipr"][idx] if phonon_pert else None,
                     }
                 elif isinstance(entry, dict):
-                    # Already in Joules from saved raw_zfs_data npz
+                    # Loaded from saved raw_zfs_data .npz: rotate into the defect
+                    # eigenframe with R.T @ tensor @ R, exactly as the
+                    # PerturbationEntry branch does above, otherwise the derivative
+                    # subtraction mixes frames and A1/A1 modes become non-diagonal.
                     enriched = dict(entry)
+                    tensor = np.asarray(enriched.get("tensor"), dtype=float)
+                    rotated = eigen_rot_t @ tensor @ eigen_rot if self.eigen_rotation is not None else tensor
+                    if "approx" in self.calc_method:
+                        rotated *= 1.5
+                    enriched["tensor"] = rotated
                     # When phonon data is available, always update symmetry/pert/ipr
                     # so that mode-dependent SI displacements q_i = q0 * sqrt(2*omega/hbar)
                     # are used for derivatives instead of a raw pert_scale.
@@ -154,7 +165,7 @@ class ZFSManager:
             for (i, j), entry in raw.second_order.items():
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
-                    rotated = self.eigen_rotation @ tensor_mhz @ eigen_rot_t if self.eigen_rotation is not None else tensor_mhz
+                    rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
                     if "approx" in self.calc_method:
                         tensor_j *= 1.5
@@ -165,8 +176,15 @@ class ZFSManager:
                         "ipr": (phonon_pert["ipr"][i], phonon_pert["ipr"][j]) if phonon_pert else None,
                     }
                 elif isinstance(entry, dict):
-                    # Already in Joules from saved raw_zfs_data npz
+                    # Loaded from saved raw_zfs_data .npz: rotate into the defect
+                    # eigenframe with R.T @ tensor @ R, exactly as the
+                    # PerturbationEntry branch does above.
                     enriched = dict(entry)
+                    tensor = np.asarray(enriched.get("tensor"), dtype=float)
+                    rotated = eigen_rot_t @ tensor @ eigen_rot if self.eigen_rotation is not None else tensor
+                    if "approx" in self.calc_method:
+                        rotated *= 1.5
+                    enriched["tensor"] = rotated
                     if phonon_pert is not None:
                         if phonon_pert.get("sym") is not None and i < len(phonon_pert["sym"]) and j < len(phonon_pert["sym"]):
                             enriched["symmetry"] = (phonon_pert["sym"][i], phonon_pert["sym"][j])
