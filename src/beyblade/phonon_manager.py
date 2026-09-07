@@ -109,34 +109,27 @@ class PhononManager:
             return self.calc_ipr()
         return self.spectrum.iprs
 
-    def translate_defect_to_origin(self, defect_pos: Optional[np.ndarray] = None, wrap: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    def translate_defect_to_origin(
+        self, defect_pos: Optional[np.ndarray] = None, wrap: bool = False
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Translates all atomic positions so that the defect position is at the origin.
         """
         if self.spectrum is None:
             raise ValueError("No phonon data loaded.")
 
-        shifted_frac, defect_frac = self.spectrum.translate_defect_to_origin(defect_pos)
-        if wrap:
-            shifted_frac = np.mod(shifted_frac, 1.0)
+        shifted_frac, defect_frac = self.spectrum.translate_defect_to_origin(defect_pos=defect_pos, wrap=wrap)
         self._defect_shift = defect_frac.copy()
         return shifted_frac, defect_frac
 
-    def analyze_c3v_symmetry(
-        self,
-        principal_axis: Optional[Sequence[float]] = None,
-        reflection_normal: Optional[Sequence[float]] = None,
-    ):
+    def analyze_c3v_symmetry(self):
         """
         Analyzes C3v point group symmetry representations (A1, A2, Ex, Ey) for each phonon mode.
         """
         if self.spectrum is None:
             raise ValueError("No phonon data loaded.")
 
-        syms = self.spectrum.classify_c3v_symmetries(
-            principal_axis=principal_axis,
-            reflection_normal=reflection_normal,
-        )
+        syms = self.spectrum.analyze_c3v_symmetry()
         self.symmetry_data = {
             "idx": np.arange(self.spectrum.n_modes),
             "freqs": self.spectrum.frequencies_mev,

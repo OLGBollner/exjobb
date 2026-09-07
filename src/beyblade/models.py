@@ -179,12 +179,10 @@ class PhononSpectrum:
     symmetries: Optional[list[str]] = None  # Length N_modes
     iprs: Optional[np.ndarray] = None       # Shape (N_modes,)
     frequency_unit: str = "meV"
-    defect_index: Optional[int] = None
 
     def __post_init__(self):
-        # Compute C3v symmetries if missing
         if self.symmetries is None and self.eigenvectors is not None and len(self.eigenvectors) > 0:
-            self.classify_c3v_symmetries()
+            self.analyze_c3v_symmetry()
 
     @property
     def n_modes(self) -> int:
@@ -220,234 +218,112 @@ class PhononSpectrum:
         """Convert mode frequencies from meV to target energy/frequency unit."""
         return convert_energy(self.frequencies_mev, "meV", target_unit)
 
-    def translate_defect_to_origin(self, defect_pos: Optional[np.ndarray] = None) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Translates all atomic coordinates so that the defect is at the origin,
-        using minimum image convention under periodic boundary conditions.
-        """
-        if self.atom_frac_coords is None or self.n_atoms == 0:
-            return np.zeros((0, 3)), np.zeros(3)
+    def translate_defect_to_origin(
+        self, defect_pos: Optional[np.ndarray] = None, wrap: bool = False
+    ) -> tuple[np.ndarray, np.ndarray]:
+        frac_atoms = self.atom_frac_coords
+        lattice = self.lattice
+        inv_lat = np.linalg.inv(lattice)
+        symbols = self.atom_symbols
 
-        num_atoms = self.n_atoms
-        symbols = list(self.atom_symbols)
-
-        if defect_pos is not None:
-            defect_pos = np.asarray(defect_pos, dtype=float)
-            if defect_pos.shape == (3,):
-                # If given in cartesian, convert to fractional
-                if np.max(np.abs(defect_pos)) > 1.0 and self.lattice is not None:
-                    defect_frac = defect_pos @ np.linalg.inv(self.lattice)
-                else:
-                    defect_frac = defect_pos
+        if defect_pos is None:
+            if "N" in symbols and "C" in symbols:
+                n_indices = [i for i, s in enumerate(symbols) if s == "N"]
+                if len(n_indices) != 1:
+                    raise ValueError(f"Expected exactly one N, found {len(n_indices)}")
+                defect_frac = frac_atoms[n_indices[0]]
+            elif "Cl" in symbols and "Si" in symbols:
+                cl_indices = [i for i, s in enumerate(symbols) if s == "Cl"]
+                defect_frac = frac_atoms[cl_indices].mean(axis=0)
             else:
-                defect_frac = np.zeros(3)
-        elif self.defect_index is not None and 0 <= self.defect_index < num_atoms:
-            defect_frac = np.asarray(self.atom_frac_coords[self.defect_index], dtype=float)
-        elif "N" in symbols and "C" in symbols:
-            n_idx = [i for i, s in enumerate(symbols) if s == "N"]
-            defect_frac = np.asarray(self.atom_frac_coords[n_idx[0]], dtype=float)
-        elif "Cl" in symbols and "Si" in symbols:
-            cl_idx = [i for i, s in enumerate(symbols) if s == "Cl"]
-            defect_frac = np.mean(self.atom_frac_coords[cl_idx], axis=0)
+                print("Warning: Could not identify defect centre, no shift applied.")
+                return frac_atoms, np.zeros(3)
         else:
-            from collections import Counter
-            counts = Counter(symbols)
-            min_sym = min(counts, key=counts.get)
-            if counts[min_sym] < num_atoms:
-                defect_frac = np.asarray(self.atom_frac_coords[symbols.index(min_sym)], dtype=float)
-            else:
-                defect_frac = np.zeros(3)
+            defect_pos = np.asarray(defect_pos, dtype=float)
+            defect_frac = defect_pos @ inv_lat
 
-        frac_centered = np.mod(self.atom_frac_coords - defect_frac + 0.5, 1.0) - 0.5
-        return frac_centered, defect_frac
+        shifted_frac = frac_atoms - defect_frac
+        if wrap:
+            shifted_frac = np.mod(shifted_frac, 1.0)
 
-    def classify_c3v_symmetries(
-        self,
-        principal_axis: Optional[Sequence[float]] = None,
-        reflection_normal: Optional[Sequence[float]] = None,
-        tol_dist: float = 0.4,
-        deg_thresh_mev: float = 0.1,
-    ) -> list[str]:
+        return shifted_frac, defect_frac
+
+    def analyze_c3v_symmetry(self) -> list[str]:
         """
-        Classifies each phonon mode under C3v point group symmetry representations (A1, A2, Ex, Ey).
-        For degenerate E mode pairs, transforms the eigenvectors to diagonalize the reflection operator sigma_v,
-        producing clean Ex (even under sigma_v) and Ey (odd under sigma_v) modes.
-
-        Stores the result in self.symmetries and returns it.
+        Analyzes C3v point group symmetry representations (A1, A2, Ex, Ey) for each phonon mode.
         """
         from beyblade.utils import MathUtils
 
-        if self.eigenvectors is None or len(self.eigenvectors) == 0:
-            self.symmetries = []
-            return []
-
-        n_modes = self.n_modes
-        num_atoms = self.n_atoms
-        symbols = list(self.atom_symbols)
-
-        # Fallback if structure is missing or degenerate mock
-        if self.atom_frac_coords is None or num_atoms == 0 or self.lattice is None:
-            self.symmetries = ["A1"] * n_modes
+        try:
+            frac_atoms, _ = self.translate_defect_to_origin()
+        except Exception:
+            self.symmetries = ["A1"] * self.n_modes
             return self.symmetries
 
-        # Check if coordinates are non-informative (e.g. all zeros in synthetic tests)
-        if np.allclose(self.atom_frac_coords, 0.0) or num_atoms <= 1:
-            self.symmetries = ["A1"] * n_modes
-            return self.symmetries
-
-        inv_lat = np.linalg.inv(self.lattice)
-        frac_centered, _ = self.translate_defect_to_origin()
-        cart_centered = frac_centered @ self.lattice
-
-        # Helper to compute atom mapping under an orthogonal 3x3 matrix R
-        def _get_mapping(R: np.ndarray) -> tuple[np.ndarray, int]:
-            cart_rot = cart_centered @ R.T
-            frac_rot = cart_rot @ inv_lat
-            mapping = np.zeros(num_atoms, dtype=int)
-            match_count = 0
-            for i in range(num_atoms):
-                same_species = np.where(np.array(symbols) == symbols[i])[0]
-                diff = np.mod(frac_centered[same_species] - frac_rot[i] + 0.5, 1.0) - 0.5
-                dists = np.linalg.norm(diff @ self.lattice, axis=1)
-                best_idx = np.argmin(dists)
-                if dists[best_idx] < tol_dist:
-                    match_count += 1
-                mapping[i] = same_species[best_idx]
-            return mapping, match_count
-
-        # 1. Select principal axis (C3)
-        if principal_axis is not None:
-            c3_axis = np.asarray(principal_axis, dtype=float)
-            c3_axis = c3_axis / np.linalg.norm(c3_axis)
-        else:
-            candidate_axes = [
-                np.array([1.0, 1.0, 1.0]),
-                np.array([1.0, -1.0, -1.0]),
-                np.array([-1.0, 1.0, -1.0]),
-                np.array([-1.0, -1.0, 1.0]),
-                np.array([0.0, 0.0, 1.0]),
-                np.array([0.0, 1.0, 0.0]),
-                np.array([1.0, 0.0, 0.0]),
-            ]
-            best_axis = candidate_axes[0]
-            max_matches = -1
-            for cand in candidate_axes:
-                cand_u = cand / np.linalg.norm(cand)
-                R_test = MathUtils.rotation_around_symmetry_axis(cand_u, order=3)
-                _, matches = _get_mapping(R_test)
-                if matches > max_matches:
-                    max_matches = matches
-                    best_axis = cand_u
-            c3_axis = best_axis
-
-        # 2. Select reflection normal (sigma_v)
-        if reflection_normal is not None:
-            sv_norm = np.asarray(reflection_normal, dtype=float)
-            sv_norm = sv_norm / np.linalg.norm(sv_norm)
-        else:
-            candidate_normals = []
-            # Try mirror planes defined by atoms not on the axis
-            for i in range(num_atoms):
-                r_i = cart_centered[i]
-                proj = np.dot(r_i, c3_axis)
-                r_perp = r_i - proj * c3_axis
-                norm_p = np.linalg.norm(r_perp)
-                if norm_p > 0.2:
-                    n_cand = np.cross(c3_axis, r_perp)
-                    norm_n = np.linalg.norm(n_cand)
-                    if norm_n > 1e-4:
-                        candidate_normals.append(n_cand / norm_n)
-                    candidate_normals.append(r_perp / norm_p)
-
-            # Standard cubic perpendicular directions as fallbacks
-            for ref in ([1, -1, 0], [1, 0, -1], [0, 1, -1], [1, 1, -2], [1, 0, 0], [0, 1, 0]):
-                ref_arr = np.array(ref, dtype=float)
-                ref_perp = ref_arr - np.dot(ref_arr, c3_axis) * c3_axis
-                norm_r = np.linalg.norm(ref_perp)
-                if norm_r > 1e-4:
-                    candidate_normals.append(ref_perp / norm_r)
-
-            best_norm = candidate_normals[0] if candidate_normals else np.array([1.0, 0.0, 0.0])
-            max_sv_matches = -1
-            for cand in candidate_normals:
-                R_sv_test = MathUtils.reflection_matrix(cand)
-                _, matches = _get_mapping(R_sv_test)
-                if matches > max_sv_matches:
-                    max_sv_matches = matches
-                    best_norm = cand
-            sv_norm = best_norm
-
-        # 3. Build symmetry operations and atom mappings
-        R_C3 = MathUtils.rotation_around_symmetry_axis(c3_axis, order=3)
-        R_sv = MathUtils.reflection_matrix(sv_norm)
-
-        map_C3, _ = _get_mapping(R_C3)
-        map_sv, _ = _get_mapping(R_sv)
-
-        # 4. Classify modes by frequency clusters (doublets vs singlets)
-        sym_list = ["A1"] * n_modes
-        eigs = self.eigenvectors
+        symbols = np.array(self.atom_symbols)
         freqs = self.frequencies_mev
+        eigs = self.eigenvectors
+        lattice = self.lattice
 
-        i = 0
-        while i < n_modes:
-            # Check if mode i is part of a degenerate doublet (i, i+1)
-            is_doublet = False
-            if i + 1 < n_modes and abs(freqs[i + 1] - freqs[i]) < deg_thresh_mev:
-                chi_C3_i = np.sum(eigs[i, map_C3] * (eigs[i] @ R_C3.T))
-                chi_C3_ip1 = np.sum(eigs[i + 1, map_C3] * (eigs[i + 1] @ R_C3.T))
-                tr_C3_2d = chi_C3_i + chi_C3_ip1
+        if "Si" in symbols and "Cl" in symbols:
+            principal_axis = [0, 0, 1]
+            reflection_normal = [1, 0, 0]
+        elif "C" in symbols and "N" in symbols:
+            principal_axis = [1, 1, 1]
+            reflection_normal = [1, -1, 0]
+        else:
+            principal_axis = [0, 0, 1]
+            reflection_normal = [1, 0, 0]
 
-                # For an E representation, theoretical tr(C3) = -1.0
-                if tr_C3_2d < 0.0:
-                    is_doublet = True
-                    e1 = eigs[i]
-                    e2 = eigs[i + 1]
+        R_C3 = MathUtils.rotation_around_symmetry_axis(principal_axis, 3)
+        R_sv = MathUtils.reflection_matrix(reflection_normal)
 
-                    # Build 2x2 reflection matrix S in {e1, e2}
-                    R_sv_e1 = e1 @ R_sv.T
-                    R_sv_e2 = e2 @ R_sv.T
-                    S11 = np.sum(e1[map_sv] * R_sv_e1)
-                    S12 = np.sum(e1[map_sv] * R_sv_e2)
-                    S21 = np.sum(e2[map_sv] * R_sv_e1)
-                    S22 = np.sum(e2[map_sv] * R_sv_e2)
-                    S = np.array([[S11, S12], [S21, S22]])
-                    S = (S + S.T) / 2.0
+        inv_lat = np.linalg.inv(lattice)
+        num_atoms = frac_atoms.shape[0]
+        num_modes = eigs.shape[0]
+        cart_atoms = frac_atoms @ lattice
 
-                    eigvals, V = np.linalg.eigh(S)
-                    idx_plus = int(np.argmax(eigvals))
-                    idx_minus = int(np.argmin(eigvals))
+        def get_mapping(R):
+            mapping = np.zeros(num_atoms, dtype=int)
+            rotated_cart = cart_atoms @ R.T
+            rot_frac = np.mod(rotated_cart @ inv_lat, 1.0)
+            orig_frac = np.mod(frac_atoms, 1.0)
 
-                    e_Ex = V[0, idx_plus] * e1 + V[1, idx_plus] * e2
-                    norm_x = np.linalg.norm(e_Ex)
-                    if norm_x > 1e-12:
-                        e_Ex /= norm_x
+            for i in range(num_atoms):
+                diffs = np.mod(orig_frac - rot_frac[i] + 0.5, 1.0) - 0.5
+                dists = np.linalg.norm(diffs @ lattice, axis=1)
+                valid_indices = np.where(symbols == symbols[i])[0]
+                if len(valid_indices) == 0:
+                    mapping[i] = i
+                else:
+                    mapping[i] = valid_indices[np.argmin(dists[valid_indices])]
+            return mapping
 
-                    e_Ey = V[0, idx_minus] * e1 + V[1, idx_minus] * e2
-                    norm_y = np.linalg.norm(e_Ey)
-                    if norm_y > 1e-12:
-                        e_Ey /= norm_y
+        map_C3 = get_mapping(R_C3)
+        map_sv = get_mapping(R_sv)
 
-                    # Update eigenvectors to symmetry-adapted basis
-                    self.eigenvectors[i] = e_Ex
-                    self.eigenvectors[i + 1] = e_Ey
-                    sym_list[i] = "Ex"
-                    sym_list[i + 1] = "Ey"
-                    i += 2
-                    continue
+        results_dict = {"idx": [], "freqs": [], "sym": [], "char_C3": [], "char_sv": []}
 
-            # Singlet mode
-            eig = eigs[i]
-            chi_C3 = np.sum(eig[map_C3] * (eig @ R_C3.T))
-            chi_sv = np.sum(eig[map_sv] * (eig @ R_sv.T))
+        for m in range(num_modes):
+            eig = eigs[m]
+            char_C3 = np.trace(np.dot(eig[map_C3], R_C3 @ eig.T))
+            char_sv = np.trace(np.dot(eig[map_sv], R_sv @ eig.T))
 
-            if chi_C3 > 0.5:
-                sym_list[i] = "A1" if chi_sv >= 0.0 else "A2"
+            if char_C3 > 0.8:
+                sym = "A1" if char_sv > 0.0 else "A2"
             else:
-                sym_list[i] = "Ex" if chi_sv >= 0.0 else "Ey"
-            i += 1
+                sym = "Ex" if char_sv > 0.0 else "Ey"
 
-        self.symmetries = [str(s) for s in sym_list]
+            results_dict["idx"].append(m)
+            results_dict["freqs"].append(freqs[m])
+            results_dict["sym"].append(sym)
+            results_dict["char_C3"].append(char_C3)
+            results_dict["char_sv"].append(char_sv)
+
+        sort_indices = np.argsort(results_dict["idx"])
+        output_dict = {key: np.array(value)[sort_indices] for key, value in results_dict.items()}
+
+        self.symmetries = [str(s) for s in output_dict["sym"]]
         return self.symmetries
 
     def get_phonon_pert(
