@@ -432,7 +432,7 @@ class PhononSpectrum:
             for freq, omega in zip(self.frequencies_mev, omega_rads)
         ]
         freqs_j = self.frequencies_to_unit("J")
-        iprs = self.iprs if self.iprs is not None else np.zeros(self.n_modes)
+        iprs = self.get_ipr()
         syms = self.symmetries if self.symmetries is not None else ["A1"] * self.n_modes
 
         return {
@@ -442,6 +442,19 @@ class PhononSpectrum:
             "ipr": iprs,
             "eigs": self.eigenvectors,
         }
+
+    def calc_ipr(self) -> np.ndarray:
+        """Calculates and caches the Inverse Participation Ratio (IPR) for all phonon modes."""
+        from beyblade.utils import MathUtils
+        if self.iprs is None:
+            self.iprs = MathUtils.calc_ipr(self.eigenvectors)
+        return self.iprs
+
+    def get_ipr(self) -> np.ndarray:
+        """Returns the IPR array, computing it if not already present."""
+        if self.iprs is None:
+            return self.calc_ipr()
+        return self.iprs
 
     def save(self, out_path: Union[str, Path]) -> str:
         """Saves spectrum to .npz file with explicit frequency unit tag."""
