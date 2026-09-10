@@ -178,11 +178,14 @@ class PhononSpectrum:
     lattice: np.ndarray                     # Shape (3, 3)
     symmetries: Optional[list[str]] = None  # Length N_modes
     iprs: Optional[np.ndarray] = None       # Shape (N_modes,)
+    e_pair_complete: Optional[list[bool]] = None  # Length N_modes
     frequency_unit: str = "meV"
 
     def __post_init__(self):
         if self.symmetries is None and self.eigenvectors is not None and len(self.eigenvectors) > 0:
             self.analyze_c3v_symmetry()
+        if self.e_pair_complete is None and self.symmetries is not None and len(self.frequencies_mev) > 0:
+            self.check_e_pair_completeness()
 
     @property
     def n_modes(self) -> int:
@@ -191,6 +194,91 @@ class PhononSpectrum:
     @property
     def n_atoms(self) -> int:
         return len(self.atom_symbols)
+
+    def check_e_pair_completeness(self, tol_mev: float = 0.05) -> list[bool]:
+        """
+        Determines whether each vibrational mode has both Ex and Ey pairs in the dataset.
+        For A1 and A2 modes, the value is False.
+        For E modes (Ex or Ey), it is True if a matching partner of opposite symmetry
+        exists within frequency tolerance tol_mev, otherwise False.
+        """
+        if self.symmetries is None or len(self.frequencies_mev) == 0:
+            self.e_pair_complete = None
+            return []
+
+        n = len(self.frequencies_mev)
+        completeness = [False] * n
+        matched = set()
+
+        for i in range(n):
+            sym_i = self.symmetries[i]
+            if sym_i not in ("Ex", "Ey"):
+                continue
+
+            target_sym = "Ey" if sym_i == "Ex" else "Ex"
+            freq_i = self.frequencies_mev[i]
+
+            best_j = None
+            min_diff = float("inf")
+            for j in range(n):
+                if j == i or j in matched:
+                    continue
+                if self.symmetries[j] == target_sym:
+                    diff = abs(self.frequencies_mev[j] - freq_i)
+                    if diff < tol_mev and diff < min_diff:
+                        min_diff = diff
+                        best_j = j
+
+            if best_j is not None:
+                completeness[i] = True
+                completeness[best_j] = True
+                matched.add(i)
+                matched.add(best_j)
+
+        self.e_pair_complete = completeness
+        return completeness
+
+    def expand_missing_e_pairs(self) -> PhononSpectrum:
+        """
+        Returns a new PhononSpectrum where any E modes lacking their degenerate partner
+        (e_pair_complete == False) are duplicated with the partner symmetry (Ex <-> Ey),
+        expanding the total modes towards 3 * N_atoms.
+        """
+        if self.e_pair_complete is None:
+            self.check_e_pair_completeness()
+
+        new_freqs = list(self.frequencies_mev)
+        new_eigs = list(self.eigenvectors)
+        new_syms = list(self.symmetries) if self.symmetries is not None else None
+        new_iprs = list(self.iprs) if self.iprs is not None else None
+        new_complete = list(self.e_pair_complete) if self.e_pair_complete is not None else None
+
+        for i in range(len(self.frequencies_mev)):
+            sym = self.symmetries[i] if self.symmetries is not None else None
+            is_complete = self.e_pair_complete[i] if self.e_pair_complete is not None else True
+
+            if sym in ("Ex", "Ey") and not is_complete:
+                partner_sym = "Ey" if sym == "Ex" else "Ex"
+                new_freqs.append(float(self.frequencies_mev[i]))
+                new_eigs.append(self.eigenvectors[i].copy())
+                if new_syms is not None:
+                    new_syms.append(partner_sym)
+                if new_iprs is not None:
+                    new_iprs.append(float(self.iprs[i]))
+                if new_complete is not None:
+                    new_complete.append(True)
+
+        return PhononSpectrum(
+            frequencies_mev=np.array(new_freqs, dtype=float),
+            eigenvectors=np.array(new_eigs, dtype=float),
+            atom_frac_coords=self.atom_frac_coords.copy(),
+            atom_symbols=list(self.atom_symbols),
+            atomic_masses=self.atomic_masses.copy(),
+            lattice=self.lattice.copy(),
+            symmetries=new_syms,
+            iprs=np.array(new_iprs, dtype=float) if new_iprs is not None else None,
+            e_pair_complete=new_complete,
+        )
 
     def get_mode(self, idx: int) -> PhononMode:
         sym = self.symmetries[idx] if self.symmetries is not None else None
@@ -373,6 +461,7 @@ class PhononSpectrum:
             lattice=self.lattice,
             symmetries=self.symmetries,
             iprs=self.iprs,
+            e_pair_complete=self.e_pair_complete,
         )
         return path
 
@@ -386,6 +475,7 @@ class PhononSpectrum:
 
         syms = list(data["symmetries"]) if "symmetries" in data and data["symmetries"] is not None else None
         iprs = data["iprs"] if "iprs" in data else None
+        e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"] is not None else None
 
         return cls(
             frequencies_mev=freqs_mev,
@@ -397,6 +487,7 @@ class PhononSpectrum:
             symmetries=syms,
             iprs=iprs,
             frequency_unit="meV",
+            e_pair_complete=e_pair_complete,
         )
 
 

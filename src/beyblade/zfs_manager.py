@@ -30,9 +30,24 @@ class ZFSManager:
     ):
         # spectrum is the primary dataclass; phonon_manager is accepted for legacy compatibility
         if spectrum is not None:
-            self.spectrum = spectrum
+            # Expand missing degenerate E pairs to 3*N_atoms modes for derivative calculation
+            if spectrum.e_pair_complete is None:
+                spectrum.check_e_pair_completeness()
+            if any(not c for c in (spectrum.e_pair_complete or [])):
+                self.spectrum = spectrum.expand_missing_e_pairs()
+            else:
+                self.spectrum = spectrum
         elif phonon_manager is not None:
-            self.spectrum = getattr(phonon_manager, "spectrum", None)
+            spec = getattr(phonon_manager, "spectrum", None)
+            if spec is not None:
+                if spec.e_pair_complete is None:
+                    spec.check_e_pair_completeness()
+                if any(not c for c in (spec.e_pair_complete or [])):
+                    self.spectrum = spec.expand_missing_e_pairs()
+                else:
+                    self.spectrum = spec
+            else:
+                self.spectrum = None
         else:
             self.spectrum = None
 
