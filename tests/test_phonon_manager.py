@@ -1,12 +1,12 @@
+import warnings
 import pytest
 import numpy as np
-from beyblade.phonon_manager import PhononManager
 from beyblade.models import PhononSpectrum
 from beyblade.utils import MathUtils
 
-class TestPhononManager:
+class TestPhononSpectrumProperties:
     @pytest.fixture
-    def sample_manager(self):
+    def sample_spectrum(self):
         n_modes = 6
         n_atoms = 4
         # Create normalized eigenvectors: sum_i (e_i)^2 == 1 for each mode
@@ -14,7 +14,7 @@ class TestPhononManager:
         norms = np.linalg.norm(raw_eigs.reshape(n_modes, -1), axis=1)[:, None, None]
         normalized_eigs = raw_eigs / norms
 
-        spectrum = PhononSpectrum(
+        return PhononSpectrum(
             frequencies_mev=np.array([10.0, 20.0, 20.0, 40.0, 50.0, 50.0]),
             eigenvectors=normalized_eigs,
             atom_frac_coords=np.array([[0.0, 0.0, 0.0], [0.25, 0.25, 0.25], [0.5, 0.5, 0.5], [0.75, 0.75, 0.75]]),
@@ -24,20 +24,19 @@ class TestPhononManager:
             symmetries=["A1", "Ex", "Ey", "A1", "Ex", "Ey"],
             iprs=np.full(n_modes, 0.5),
         )
-        return PhononManager(spectrum=spectrum)
 
-    def test_manager_properties(self, sample_manager):
-        assert sample_manager.nmodes == 6
-        assert sample_manager.cell_size == 4
-        assert len(sample_manager.get_freqs()) == 6
+    def test_spectrum_properties(self, sample_spectrum):
+        assert sample_spectrum.n_modes == 6
+        assert sample_spectrum.n_atoms == 4
+        assert len(sample_spectrum.frequencies_mev) == 6
 
-    def test_translate_defect_to_origin(self, sample_manager):
-        shifted_frac, defect_pos = sample_manager.translate_defect_to_origin()
+    def test_translate_defect_to_origin(self, sample_spectrum):
+        shifted_frac, defect_pos = sample_spectrum.translate_defect_to_origin()
         # N is at index 0, so shifted position of atom 0 should be at origin (0, 0, 0)
         assert np.allclose(shifted_frac[0], [0.0, 0.0, 0.0])
 
-    def test_get_phonon_pert(self, sample_manager):
-        pert = sample_manager.get_phonon_pert(perturbation_scale=0.01)
+    def test_get_phonon_pert(self, sample_spectrum):
+        pert = sample_spectrum.get_phonon_pert(perturbation_scale=0.01)
         assert "sym" in pert
         assert "eigs" in pert
         assert "freqs" in pert
@@ -79,8 +78,8 @@ class TestIPRCalculation:
         ipr = MathUtils.calc_ipr(eigs)
         assert np.isclose(ipr[0], 0.5)
 
-    def test_ipr_via_phonon_manager(self):
-        """Verifies that PhononManager.calc_ipr() computes and stores IPR on PhononSpectrum."""
+    def test_ipr_via_spectrum(self):
+        """Verifies that PhononSpectrum.calc_ipr() computes and stores IPR directly on PhononSpectrum."""
         n_modes = 4
         n_atoms = 8
         eigs = np.zeros((n_modes, n_atoms, 3))
@@ -105,13 +104,12 @@ class TestIPRCalculation:
             iprs=None,  # not computed yet
         )
 
-        mgr = PhononManager(spectrum=spectrum)
         assert spectrum.iprs is None
 
-        computed_iprs = mgr.calc_ipr()
+        computed_iprs = spectrum.calc_ipr()
         assert np.allclose(computed_iprs, [1.0, 0.5, 0.25, 0.125])
         assert spectrum.iprs is not None
-        assert np.allclose(mgr.get_ipr(), [1.0, 0.5, 0.25, 0.125])
+        assert np.allclose(spectrum.get_ipr(), [1.0, 0.5, 0.25, 0.125])
 
 
 class TestC3vSymmetryClassification:
@@ -186,13 +184,6 @@ class TestC3vSymmetryClassification:
         )
 
         assert spectrum.symmetries == ["A1", "Ex", "Ey"]
-
-        # Also verify via PhononManager
-        mgr = PhononManager(spectrum=spectrum)
-        syms_mgr = mgr.analyze_c3v_symmetry()
-        assert syms_mgr == ["A1", "Ex", "Ey"]
-        assert "sym" in mgr.symmetry_data
-        assert np.array_equal(mgr.symmetry_data["sym"], ["A1", "Ex", "Ey"])
 
     def test_locality_weight(self):
         """Verifies spatial defect-neighbourhood locality calculation."""
