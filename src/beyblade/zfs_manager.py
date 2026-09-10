@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, Optional, Union
 import numpy as np
@@ -10,7 +11,6 @@ from beyblade.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
 )
-from beyblade.phonon_manager import PhononManager
 from beyblade.utils import MathUtils
 
 
@@ -28,7 +28,17 @@ class ZFSManager:
         phonon_manager: Optional[Any] = None,
         debug: bool = False,
     ):
-        # spectrum is the primary dataclass; phonon_manager is accepted for legacy compatibility
+        if phonon_manager is not None:
+            warnings.warn(
+                "Passing phonon_manager to ZFSManager is deprecated and will be removed in a future release. "
+                "Please pass spectrum (PhononSpectrum) directly instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if spectrum is None:
+                spectrum = getattr(phonon_manager, "spectrum", None)
+
+        # spectrum is the primary dataclass
         if spectrum is not None:
             # Expand missing degenerate E pairs to 3*N_atoms modes for derivative calculation
             if spectrum.e_pair_complete is None:
@@ -37,21 +47,9 @@ class ZFSManager:
                 self.spectrum = spectrum.expand_missing_e_pairs()
             else:
                 self.spectrum = spectrum
-        elif phonon_manager is not None:
-            spec = getattr(phonon_manager, "spectrum", None)
-            if spec is not None:
-                if spec.e_pair_complete is None:
-                    spec.check_e_pair_completeness()
-                if any(not c for c in (spec.e_pair_complete or [])):
-                    self.spectrum = spec.expand_missing_e_pairs()
-                else:
-                    self.spectrum = spec
-            else:
-                self.spectrum = None
         else:
             self.spectrum = None
 
-        self.phonon_manager = phonon_manager
         self.raw_data = raw_data
 
         # Defect metadata
@@ -98,22 +96,16 @@ class ZFSManager:
     def nmodes(self) -> int:
         if self.spectrum is not None:
             return self.spectrum.n_modes
-        if self.phonon_manager is not None:
-            return self.phonon_manager.nmodes
         return 0
 
     def get_phonon_frequencies(self) -> np.ndarray:
         if self.spectrum is not None:
             return self.spectrum.frequencies_mev
-        if self.phonon_manager is not None:
-            return self.phonon_manager.get_freqs()
         return np.array([])
 
     def get_phonon_pert(self, pert_scale_si: float) -> Optional[dict[str, Any]]:
         if self.spectrum is not None:
             return self.spectrum.get_phonon_pert(pert_scale_si)
-        if self.phonon_manager is not None:
-            return self.phonon_manager.get_phonon_pert(pert_scale_si)
         return None
 
     def _ingest_raw_data(self, raw: RawZFSData):

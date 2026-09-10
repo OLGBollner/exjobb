@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, Optional, Union
 import numpy as np
@@ -14,6 +15,9 @@ from beyblade.utils import MathUtils
 class PhononManager:
     """
     Manages phonon spectra, C3v symmetry classification, defect recentering, and IPR calculations.
+
+    .. deprecated::
+        PhononManager is legacy. Use PhononSpectrum and functions in beyblade.parsers instead.
     """
 
     def __init__(
@@ -21,6 +25,12 @@ class PhononManager:
         data_path: Optional[Union[str, Path]] = None,
         spectrum: Optional[PhononSpectrum] = None,
     ):
+        warnings.warn(
+            "PhononManager is deprecated and will be removed in a future release. "
+            "Please use PhononSpectrum and parsers (parse_phonon_npz, parse_phonopy_yaml) directly instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.spectrum: Optional[PhononSpectrum] = spectrum
         self.symmetry_data: Optional[dict[str, np.ndarray]] = None
         self._defect_shift: Optional[np.ndarray] = None
@@ -177,26 +187,3 @@ class PhononManager:
             save_phonon_npz(new_spectrum, filename)
 
         return new_spectrum
-
-    def get_phonon_pert(self, perturbation_scale: float) -> dict[str, Any]:
-        if self.spectrum is None:
-            raise ValueError("No phonon data loaded.")
-        if self.symmetry_data is None:
-            self.analyze_c3v_symmetry()
-
-        Q = [np.sqrt(np.sum(mode**2)) for mode in self.spectrum.eigenvectors]
-        if not np.allclose(Q, 1.0):
-            raise ValueError("Phonon modes not normalized correctly.")
-
-        eigs_pert = np.array([
-            perturbation_scale * np.sqrt(2 * CONSTANTS["meV2rads"] * freq / Cn.hbar) if freq > 0 else None
-            for freq in self.spectrum.frequencies_mev
-        ])
-
-        return {
-            "sym": self.symmetry_data["sym"],
-            "idx": self.symmetry_data["idx"],
-            "eigs": eigs_pert,
-            "freqs": self.spectrum.frequencies_mev * CONSTANTS["meV2J"],
-            "ipr": self.get_ipr(),
-        }
