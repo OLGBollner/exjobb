@@ -4,9 +4,7 @@ import warnings
 from pathlib import Path
 from typing import Any, Optional, Union
 import numpy as np
-from scipy import constants as Cn
 
-from beyblade.constants import CONSTANTS
 from beyblade.models import PhononSpectrum
 from beyblade.parsers import parse_phonopy_yaml, parse_phonon_npz, save_phonon_npz
 from beyblade.utils import MathUtils
