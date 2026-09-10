@@ -162,11 +162,21 @@ def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
     eigs = data["eigs"] if "eigs" in data else data["eigenvectors"]
     atoms = data["atoms"] if "atoms" in data else data["atom_frac_coords"]
     symbols = list(data["atom_symbols"])
-    masses = data["masses"] if "masses" in data else data["atomic_masses"]
+    if "masses" in data:
+        masses = data["masses"]
+    elif "atomic_masses" in data:
+        masses = data["atomic_masses"]
+    else:
+        try:
+            from pymatgen.core import Element
+            masses = np.array([Element(s).atomic_mass for s in symbols], dtype=float)
+        except Exception:
+            masses = np.ones(len(symbols), dtype=float)
     lattice = data["lattice"]
 
-    symmetries = list(data["symmetries"]) if "symmetries" in data else None
-    iprs = data["iprs"] if "iprs" in data else None
+    symmetries = list(data["symmetries"]) if "symmetries" in data else (list(data["sym"]) if "sym" in data else None)
+    iprs = data["iprs"] if "iprs" in data else (data["ipr"] if "ipr" in data else None)
+    e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data else None
 
     return PhononSpectrum(
         frequencies_mev=np.asarray(freqs, dtype=float),
@@ -177,6 +187,7 @@ def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
         lattice=np.asarray(lattice, dtype=float),
         symmetries=symmetries,
         iprs=np.asarray(iprs, dtype=float) if iprs is not None else None,
+        e_pair_complete=e_pair_complete,
     )
 
 
