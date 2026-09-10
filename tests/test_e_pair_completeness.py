@@ -36,21 +36,41 @@ def test_e_pair_completeness_flagging():
 
 
 def test_clv_128_lonely_e_modes_expansion():
-    path = "/rool-drive/exjobb/ClV_128/phonon_data_sym_n254.npz"
-    spec = parse_phonon_npz(path)
+    # Synthetic spectrum mimicking the lonely Ex mode case (e.g. 2 atoms -> 6 total modes, 4 present: 2 A1 + 2 lonely Ex)
+    n_atoms = 3
+    # 3 atoms -> 3 * 3 = 9 modes total.
+    # Suppose we have 2 A1 modes and 2 Ex modes without Ey partners (total 4 modes present)
+    freqs = np.array([10.0, 15.0, 25.0, 35.0])
+    syms = ["A1", "A1", "Ex", "Ex"]
+    eigs = np.zeros((4, n_atoms, 3))
+    atoms = np.zeros((n_atoms, 3))
+    masses = np.ones(n_atoms) * 12.0
+    lat = np.eye(3)
 
-    assert spec.n_modes == 254
-    assert spec.n_atoms == 127
-    # In this file, all Ex modes are lonely (no Ey present)
-    assert len(spec.e_pair_complete) == 254
+    spec = PhononSpectrum(
+        frequencies_mev=freqs,
+        eigenvectors=eigs,
+        atom_frac_coords=atoms,
+        atom_symbols=["C"] * n_atoms,
+        atomic_masses=masses,
+        lattice=lat,
+        symmetries=syms,
+    )
+
+    assert spec.n_modes == 4
+    assert spec.n_atoms == 3
+    # All modes are either A1 (False) or lonely Ex (False)
+    assert len(spec.e_pair_complete) == 4
     assert all(c is False for c in spec.e_pair_complete)
 
-    # When passed to ZFSManager, spectrum should expand to 3 * 127 = 381 modes
+    # When passed to ZFSManager, the 2 lonely Ex modes should be duplicated to create Ey partners
+    # bringing total modes from 4 -> 6 (2 A1 + 2 Ex + 2 Ey)
     mgr = ZFSManager(spectrum=spec)
-    assert mgr.nmodes == 381
-    assert mgr.spectrum.n_modes == 381
-    # Original spectrum object remains unexpanded with 254 modes!
-    assert spec.n_modes == 254
+    assert mgr.nmodes == 6
+    assert mgr.spectrum.n_modes == 6
+    assert mgr.spectrum.symmetries == ["A1", "A1", "Ex", "Ex", "Ey", "Ey"]
+    # Original spectrum object remains unexpanded with 4 modes!
+    assert spec.n_modes == 4
 
 
 def test_save_and_load_preserves_e_pair_complete(tmp_path):
