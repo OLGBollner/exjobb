@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 from beyblade.zfs_manager import ZFSManager
-from beyblade.phonon_manager import PhononManager
+from beyblade.parsers import parse_phonon_npz
 from beyblade.plotter import ZFSPlotter
 
 def main():
@@ -56,9 +56,9 @@ def main():
             if not path_to_phonon.exists():
                 raise FileNotFoundError(f"Default phonon file not found at {path_to_phonon}. Please provide a valid phonon data file.")
 
-        phonon_manager = PhononManager(data_path=path_to_phonon)
+        spectrum = parse_phonon_npz(path_to_phonon)
         zfs_manager = ZFSManager(
-            phonon_manager=phonon_manager,
+            spectrum=spectrum,
             debug=args.debug
         )
 
@@ -77,8 +77,8 @@ def main():
 
     elif args.raw_zfs_file:
         try:
-            phonon_manager = PhononManager(data_path=args.phonon_file)
-            zfs_manager = ZFSManager(phonon_manager=phonon_manager, debug=args.debug)
+            spectrum = parse_phonon_npz(args.phonon_file)
+            zfs_manager = ZFSManager(spectrum=spectrum, debug=args.debug)
 
             zfs_manager.load_outcar_zfs_data(raw_data_path=args.raw_zfs_file)
         except Exception as e:

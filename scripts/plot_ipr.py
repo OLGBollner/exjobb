@@ -4,7 +4,8 @@ from matplotlib.lines import Line2D
 from matplotlib.colors import Normalize
 from matplotlib import ticker
 from argparse import ArgumentParser as Parser
-from beyblade.phonon_manager import PhononManager
+from beyblade.models import PhononSpectrum
+from beyblade.parsers import parse_phonon_npz
 from beyblade.constants import CONSTANTS
 
 if __name__ == "__main__":
@@ -18,10 +19,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    phonon_mgr = PhononManager(args.phonon_data)
-    ipr = phonon_mgr.get_ipr()
+    spectrum = parse_phonon_npz(args.phonon_data)
+    ipr = spectrum.get_ipr()
     
-    freqs_mev = phonon_mgr.get_freqs()
+    freqs_mev = spectrum.frequencies_mev
 
     coupling_data = np.load(args.data)
 
