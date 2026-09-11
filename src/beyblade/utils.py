@@ -211,7 +211,7 @@ class MathUtils:
             Mass-weighted phonon eigenvectors.
         frac_coords : array_like, shape (n_atoms, 3)
             Fractional atomic coordinates (already shifted so the defect
-            is at the origin, e.g. from PhononManager.translate_defect_to_origin).
+            is at the origin, e.g. from PhononSpectrum.translate_defect_to_origin).
         lattice : array_like, shape (3, 3)
             Lattice vectors as rows.
         defect_pos : array_like, shape (3,), optional

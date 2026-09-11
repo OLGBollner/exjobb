@@ -1,5 +1,5 @@
 import sys
-from beyblade.phonon_manager import PhononManager
+from beyblade.parsers import parse_phonon_npz, save_phonon_npz
 
-phonon_mgr = PhononManager(sys.argv[1])
-phonon_mgr.save_data()
+spectrum = parse_phonon_npz(sys.argv[1])
+save_phonon_npz(spectrum)
