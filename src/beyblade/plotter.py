@@ -256,7 +256,12 @@ def plot_t1_relaxation(
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    label_suffix = f" ({defect} {cell_size})" if defect else ""
+    label_suffix = f" ({defect} {cell_size}" if defect else " ("
+    if calc_method:
+        label_suffix += f", {calc_method}"
+    if init_state:
+        label_suffix += f", {init_state}"
+    label_suffix += ")"
     if t1_fit is not None:
         valid = np.isfinite(t1_fit) & (t1_fit > 0)
         ax.plot(temperatures[valid], t1_fit[valid], "o-", color="#1f77b4", linewidth=2, markersize=5, label=f"$T_1$ ODE fit{label_suffix}")
@@ -270,7 +275,11 @@ def plot_t1_relaxation(
     ax.set_yscale("log")
     ax.grid(True, which="both", linestyle=":", alpha=0.6)
     ax.tick_params(axis="both", which="both", direction="in")
-    ax.set_title(r"$T_1$ Spin Relaxation Time vs Temperature", fontsize=15)
+    title_meta = " ".join(x for x in (defect, cell_size, calc_method) if x)
+    title = r"$T_1$ Spin Relaxation Time vs Temperature"
+    if title_meta:
+        title += f" — {title_meta}"
+    ax.set_title(title, fontsize=15)
     ax.legend(frameon=True, fontsize=12)
     fig.tight_layout()
 
