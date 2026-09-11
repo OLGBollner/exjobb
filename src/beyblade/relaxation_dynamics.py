@@ -3,7 +3,6 @@ from scipy.integrate import odeint
 from scipy.optimize import curve_fit
 import scipy.constants as Cn
 
-from beyblade.constants import CONSTANTS
 
 class RelaxationDynamics:
   def __init__(self, init_state, rates_data):

@@ -1,8 +1,7 @@
 import numpy as np
 import pytest
-from beyblade.models import PhononSpectrum, RawZFSData, PerturbationEntry, ZFSTensor
+from beyblade.models import PhononSpectrum
 from beyblade.zfs_manager import ZFSManager
-from beyblade.parsers import parse_phonon_npz
 
 
 def test_e_pair_completeness_flagging():

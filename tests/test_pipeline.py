@@ -1,10 +1,9 @@
 import json
-import tempfile
 from pathlib import Path
 import numpy as np
 import pytest
 
-from beyblade.models import PhononMode, PhononSpectrum, RawZFSData, SpinPhononCouplingData, ZFSTensor
+from beyblade.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData, ZFSTensor
 from beyblade.pipeline import get_unique_run_dir, run_full_pipeline
 
 
