@@ -411,10 +411,22 @@ class ZFSManager:
                 V_p_m[i] = 0.5 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
                 V_0_pm[i] = np.sqrt(dD_dq[0, 2]**2 + dD_dq[1, 2]**2) / np.sqrt(2)
 
-            # No first-order pair inheritance: with a complete phonon file both
-            # twins of a degenerate E-pair carry their own tensors, and they are
-            # not equal (Ex yields V_0pm, Ey yields V_pm). Overwriting would
-            # destroy the partner's contribution.
+            # Inherit V-coefficients for the degenerate twin via pair_id.
+            # The spectrum owns the pairing (strict involution); no frequency guessing.
+            # Fill-only: never overwrite a twin's own non-zero coefficients (Ex
+            # yields V_pm, Ey yields V_0pm; both are real data on a complete file).
+            spectrum = self.spectrum
+            if (
+                len(self.treated_modes) < n_modes
+                and spectrum is not None
+                and spectrum.pair_ids is not None
+                and spectrum.pair_ids[i] < spectrum.n_modes
+            ):
+                twin = int(spectrum.pair_ids[i])
+                if twin != i:
+                    V_0_pm[twin] = np.where(V_0_pm[twin] == 0, V_0_pm[i], V_0_pm[twin])
+                    V_p_m[twin] = np.where(V_p_m[twin] == 0, V_p_m[i], V_p_m[twin])
+
             if self.debug:
                 self._debug_derivs(
                     dD_dq / CONSTANTS["MHz2J"],
