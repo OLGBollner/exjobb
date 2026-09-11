@@ -238,18 +238,9 @@ class ZFSManager:
 
         if raw.second_order:
             self.second_order = {}
-            # q0 = pert_amplitude^2 / (2*f) is uniform across the perturbation run;
-            # estimate it from matched modes so orphaned entries' frequencies can be
-            # recovered and matched to the spectrum by physics rather than by index.
-            q0_est = self._estimate_q0()
             for (i, j), entry in raw.second_order.items():
                 si, sj = remap(i), remap(j)
                 if si is None or sj is None:
-                    # The 2D run perturbs only one twin per degenerate E-pair; if the
-                    # spectrum kept the other twin, there is no valid index here.
-                    # V-coefficients are equal across the pair, but the pair_id
-                    # inheritance in calculate_second_order_derivatives handles that:
-                    # skip here rather than guessing an anchor.
                     continue
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
@@ -359,7 +350,6 @@ class ZFSManager:
         """
         print("Calculating first-order derivatives...")
         n_modes = self.nmodes
-        phonon_energies = self.get_phonon_frequencies()
 
         zfs_deriv = np.zeros((n_modes, 3, 3))
         V_0_0 = np.zeros(n_modes)
