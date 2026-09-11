@@ -12,16 +12,17 @@ from beyblade.constants import CONSTANTS
 class TestFullIntegration:
     def test_full_pipeline_workflow(self):
         # 1. Create and serialize phonon spectrum
-        n_modes = 8
+        n_modes = 9
         n_atoms = 4
         orig_spectrum = PhononSpectrum(
-            frequencies_mev=np.linspace(10.0, 80.0, n_modes),
+        # Degenerate Ex/Ey pairs (0.01 meV apart) so e-pair completeness passes
+        frequencies_mev=np.array([10.0, 20.0, 20.01, 30.0, 40.0, 40.01, 50.0, 60.0, 60.01]),
             eigenvectors=np.random.randn(n_modes, n_atoms, 3),
             atom_frac_coords=np.zeros((n_atoms, 3)),
             atom_symbols=["C"] * n_atoms,
             atomic_masses=np.full(n_atoms, 12.011),
             lattice=np.eye(3) * 3.56,
-            symmetries=["A1", "Ex", "Ey", "A1", "Ex", "Ey", "A1", "Ex"],
+            symmetries=["A1", "Ex", "Ey", "A1", "Ex", "Ey", "A1", "Ex", "Ey"],
             iprs=np.ones(n_modes) * 0.4,
         )
 

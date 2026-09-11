@@ -40,13 +40,25 @@ class ZFSManager:
 
         # spectrum is the primary dataclass
         if spectrum is not None:
-            # Expand missing degenerate E pairs to 3*N_atoms modes for derivative calculation
+            # An incomplete spectrum (missing degenerate E twins) must be rejected:
+            # the ZFS pipeline needs all 3*N_atoms modes. Regenerate the phonon npz
+            # from the full calculation instead.
             if spectrum.e_pair_complete is None:
                 spectrum.check_e_pair_completeness()
-            if any(not c for c in (spectrum.e_pair_complete or [])):
-                self.spectrum = spectrum.expand_missing_e_pairs()
-            else:
-                self.spectrum = spectrum
+            incomplete = [
+                i for i, ok in enumerate(spectrum.e_pair_complete or [])
+                if not ok and spectrum.symmetries[i] in ("Ex", "Ey")
+            ]
+            if incomplete:
+                raise ValueError(
+                    f"Phonon spectrum is missing the degenerate partners of "
+                    f"{len(incomplete)} E modes (positions {incomplete[:10]}"
+                    f"{'...' if len(incomplete) > 10 else ''}). The ZFS pipeline "
+                    f"requires a complete phonon file with all 3*N_atoms modes; "
+                    f"regenerate it from the full calculation (e.g. phonon_data.npz) "
+                    f"rather than the symmetry-adapted subset."
+                )
+            self.spectrum = spectrum
             # pair_ids must be a strict symmetric involution; chains fail loudly.
             if self.spectrum.pair_ids is None:
                 self.spectrum.build_pair_ids()
@@ -399,19 +411,10 @@ class ZFSManager:
                 V_p_m[i] = 0.5 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
                 V_0_pm[i] = np.sqrt(dD_dq[0, 2]**2 + dD_dq[1, 2]**2) / np.sqrt(2)
 
-            # Degenerate mode handling: inherit V-coefficients via pair_id.
-            # The spectrum owns the pairing (strict involution); no frequency guessing.
-            spectrum = self.spectrum
-            if (
-                len(self.treated_modes) < n_modes
-                and spectrum is not None
-                and spectrum.pair_ids is not None
-                and spectrum.pair_ids[i] < spectrum.n_modes
-            ):
-                twin = int(spectrum.pair_ids[i])
-                V_0_pm[twin] = V_0_pm[i]
-                V_p_m[twin] = V_p_m[i]
-
+            # No first-order pair inheritance: with a complete phonon file both
+            # twins of a degenerate E-pair carry their own tensors, and they are
+            # not equal (Ex yields V_0pm, Ey yields V_pm). Overwriting would
+            # destroy the partner's contribution.
             if self.debug:
                 self._debug_derivs(
                     dD_dq / CONSTANTS["MHz2J"],

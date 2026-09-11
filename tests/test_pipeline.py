@@ -160,6 +160,8 @@ def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
     # Build dummy phonon spectrum
     freqs = np.linspace(10.0, 40.0, n_modes)
     syms = ["A1", "Ex", "Ey", "A1"][:n_modes]
+    # Make the Ex/Ey pair degenerate so the spectrum passes e-pair completeness
+    freqs[1] = freqs[2] = 30.0
     spec = PhononSpectrum(
         frequencies_mev=freqs,
         symmetries=syms,
