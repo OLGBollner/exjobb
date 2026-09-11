@@ -226,9 +226,18 @@ class ZFSManager:
 
         if raw.second_order:
             self.second_order = {}
+            # q0 = pert_amplitude^2 / (2*f) is uniform across the perturbation run;
+            # estimate it from matched modes so orphaned entries' frequencies can be
+            # recovered and matched to the spectrum by physics rather than by index.
+            q0_est = self._estimate_q0()
             for (i, j), entry in raw.second_order.items():
                 si, sj = remap(i), remap(j)
                 if si is None or sj is None:
+                    # The 2D run perturbs only one twin per degenerate E-pair; if the
+                    # spectrum kept the other twin, there is no valid index here.
+                    # V-coefficients are equal across the pair, but the pair_id
+                    # inheritance in calculate_second_order_derivatives handles that:
+                    # skip here rather than guessing an anchor.
                     continue
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
@@ -272,6 +281,31 @@ class ZFSManager:
             )
 
         self.treated_modes = self._get_symmetry_factor()
+
+    def _estimate_q0(self) -> Optional[float]:
+        """Estimate the uniform q0 = amp^2 / (2*f) from modes present in both the
+        raw 1D data and the spectrum (their original indices)."""
+        if self.spectrum is None or self.spectrum.original_indices is None:
+            return None
+        freqs = np.asarray(self.spectrum.frequencies_mev)
+        oas = np.asarray(self.spectrum.original_indices, int)
+        vals = []
+        for sp, entry in self.first_order.items():
+            if sp >= len(freqs):
+                continue
+            pert = entry.get("pert")
+            if pert is None:
+                pert = getattr(self.raw_data.first_order.get(int(oas[sp]), None), "pert", None) if hasattr(self, "raw_data") else None
+            if pert is None:
+                continue
+            amp = pert[0] if isinstance(pert, (list, tuple, np.ndarray)) else pert
+            if amp is None or amp == 0:
+                continue
+            vals.append(float(amp) ** 2 / (2.0 * freqs[sp]))
+        if not vals:
+            return None
+        vals = np.array(vals)
+        return float(np.median(vals))
 
     def load_outcar_zfs_data(self, **kwargs):
         """
