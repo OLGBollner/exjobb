@@ -47,6 +47,10 @@ class ZFSManager:
                 self.spectrum = spectrum.expand_missing_e_pairs()
             else:
                 self.spectrum = spectrum
+            # pair_ids must be a strict symmetric involution; chains fail loudly.
+            if self.spectrum.pair_ids is None:
+                self.spectrum.build_pair_ids()
+            self.spectrum.validate_pair_ids()
         else:
             self.spectrum = None
 
@@ -122,27 +126,79 @@ class ZFSManager:
             if "approx" in self.calc_method:
                 self.zfs_relaxed *= 1.5
 
-        pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
-        phonon_pert = self.get_phonon_pert(pert_SI)
         # eigen_rotation columns are the ground-state principal-frame eigenvectors,
         # so rotating into that frame is R.T @ tensor @ R (NOT R @ tensor @ R.T).
         eigen_rot = self.eigen_rotation if self.eigen_rotation is not None else np.eye(3)
         eigen_rot_t = eigen_rot.T
 
+        pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
+        phonon_pert = self.get_phonon_pert(pert_SI)
+        # Remap raw perturbation indices (full DFT-run indexing) to spectrum positions.
+        # The spectrum owns mode identity: original_indices records which DFT modes were kept.
+        spectrum = self.spectrum
+        # Legacy fallback: if raw indices clearly exceed the spectrum and the spectrum
+        # has no recorded original_indices, infer the mapping from perturbation amplitudes
+        # vs frequencies. This replaces the old silent index truncation (raw idx >= n_modes
+        # were dropped or misaligned) with an explicit, validated remap.
+        raw_idx_set = set(raw.first_order.keys()) | {i for i, j in raw.second_order.keys()}
+        identity = (
+            spectrum is not None
+            and spectrum.original_indices is not None
+            and np.array_equal(spectrum.original_indices, np.arange(spectrum.n_modes))
+        )
+        if (
+            spectrum is not None
+            and raw_idx_set
+            and max(raw_idx_set) >= spectrum.n_modes
+            and (spectrum.original_indices is None or identity)
+        ):
+            pert_amps = {}
+            for idx, entry in list(raw.first_order.items()) + list(
+                (k[0], v) for k, v in raw.second_order.items()
+            ):
+                pert = entry.get("pert") if isinstance(entry, dict) else None
+                if pert is None:
+                    continue
+                amp = pert[0] if isinstance(pert, (list, tuple, np.ndarray)) else pert
+                if amp is not None:
+                    pert_amps[idx] = float(amp)
+            if pert_amps and spectrum.infer_original_indices(pert_amps):
+                spectrum.validate_pair_ids()
+        remap_needed = (
+            spectrum is not None
+            and spectrum.original_indices is not None
+            and not np.array_equal(spectrum.original_indices, np.arange(spectrum.n_modes))
+        )
+        n_phon = spectrum.n_modes if spectrum is not None else None
+        dropped = []
+
+        def remap(idx: int) -> Optional[int]:
+            """Raw DFT index -> spectrum position; logs and returns None if dropped."""
+            if not remap_needed:
+                return idx if n_phon is None or idx < n_phon else None
+            mapped = spectrum.index_of_original(idx)
+            if mapped is None:
+                dropped.append(idx)
+            return mapped
+
         if raw.first_order:
             self.first_order = {}
             for idx, entry in raw.first_order.items():
+                sp = remap(idx)
+                if sp is None:
+                    continue
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
                     if "approx" in self.calc_method:
                         tensor_j *= 1.5
-                    self.first_order[idx] = {
+                    self.first_order[sp] = {
                         "tensor": tensor_j,
-                        "symmetry": phonon_pert["sym"][idx] if phonon_pert else None,
-                        "pert": phonon_pert["disp"][idx] if phonon_pert else None,
-                        "ipr": phonon_pert["ipr"][idx] if phonon_pert else None,
+                        "symmetry": phonon_pert["sym"][sp] if phonon_pert else None,
+                        "pert": phonon_pert["disp"][sp] if phonon_pert else None,
+                        "ipr": phonon_pert["ipr"][sp] if phonon_pert else None,
+                        "original_index": idx,
                     }
                 elif isinstance(entry, dict):
                     # Loaded from saved raw_zfs_data .npz: rotate into the defect
@@ -159,28 +215,33 @@ class ZFSManager:
                     # so that mode-dependent SI displacements q_i = q0 * sqrt(2*omega/hbar)
                     # are used for derivatives instead of a raw pert_scale.
                     if phonon_pert is not None:
-                        if phonon_pert.get("sym") is not None and idx < len(phonon_pert["sym"]):
-                            enriched["symmetry"] = phonon_pert["sym"][idx]
-                        if phonon_pert.get("disp") is not None and idx < len(phonon_pert["disp"]):
-                            enriched["pert"] = phonon_pert["disp"][idx]
-                        if phonon_pert.get("ipr") is not None and idx < len(phonon_pert["ipr"]):
-                            enriched["ipr"] = phonon_pert["ipr"][idx]
-                    self.first_order[idx] = enriched
+                        if phonon_pert.get("sym") is not None and sp < len(phonon_pert["sym"]):
+                            enriched["symmetry"] = phonon_pert["sym"][sp]
+                        if phonon_pert.get("disp") is not None and sp < len(phonon_pert["disp"]):
+                            enriched["pert"] = phonon_pert["disp"][sp]
+                        if phonon_pert.get("ipr") is not None and sp < len(phonon_pert["ipr"]):
+                            enriched["ipr"] = phonon_pert["ipr"][sp]
+                    enriched["original_index"] = idx
+                    self.first_order[sp] = enriched
 
         if raw.second_order:
             self.second_order = {}
             for (i, j), entry in raw.second_order.items():
+                si, sj = remap(i), remap(j)
+                if si is None or sj is None:
+                    continue
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
                     if "approx" in self.calc_method:
                         tensor_j *= 1.5
-                    self.second_order[(i, j)] = {
+                    self.second_order[(si, sj)] = {
                         "tensor": tensor_j,
-                        "symmetry": (phonon_pert["sym"][i], phonon_pert["sym"][j]) if phonon_pert else None,
-                        "pert": (phonon_pert["disp"][i], phonon_pert["disp"][j]) if phonon_pert else None,
-                        "ipr": (phonon_pert["ipr"][i], phonon_pert["ipr"][j]) if phonon_pert else None,
+                        "symmetry": (phonon_pert["sym"][si], phonon_pert["sym"][sj]) if phonon_pert else None,
+                        "pert": (phonon_pert["disp"][si], phonon_pert["disp"][sj]) if phonon_pert else None,
+                        "ipr": (phonon_pert["ipr"][si], phonon_pert["ipr"][sj]) if phonon_pert else None,
+                        "original_index": (i, j),
                     }
                 elif isinstance(entry, dict):
                     # Loaded from saved raw_zfs_data .npz: rotate into the defect
@@ -193,13 +254,22 @@ class ZFSManager:
                         rotated *= 1.5
                     enriched["tensor"] = rotated
                     if phonon_pert is not None:
-                        if phonon_pert.get("sym") is not None and i < len(phonon_pert["sym"]) and j < len(phonon_pert["sym"]):
-                            enriched["symmetry"] = (phonon_pert["sym"][i], phonon_pert["sym"][j])
-                        if phonon_pert.get("disp") is not None and i < len(phonon_pert["disp"]) and j < len(phonon_pert["disp"]):
-                            enriched["pert"] = (phonon_pert["disp"][i], phonon_pert["disp"][j])
-                        if phonon_pert.get("ipr") is not None and i < len(phonon_pert["ipr"]) and j < len(phonon_pert["ipr"]):
-                            enriched["ipr"] = (phonon_pert["ipr"][i], phonon_pert["ipr"][j])
-                    self.second_order[(i, j)] = enriched
+                        if phonon_pert.get("sym") is not None and si < len(phonon_pert["sym"]) and sj < len(phonon_pert["sym"]):
+                            enriched["symmetry"] = (phonon_pert["sym"][si], phonon_pert["sym"][sj])
+                        if phonon_pert.get("disp") is not None and si < len(phonon_pert["disp"]) and sj < len(phonon_pert["disp"]):
+                            enriched["pert"] = (phonon_pert["disp"][si], phonon_pert["disp"][sj])
+                        if phonon_pert.get("ipr") is not None and si < len(phonon_pert["ipr"]) and sj < len(phonon_pert["ipr"]):
+                            enriched["ipr"] = (phonon_pert["ipr"][si], phonon_pert["ipr"][sj])
+                    enriched["original_index"] = (i, j)
+                    self.second_order[(si, sj)] = enriched
+
+        if dropped:
+            print(
+                f"Note: {len(dropped)} raw mode indices have no partner in the "
+                f"phonon spectrum ({n_phon} modes kept) and were skipped: "
+                f"{sorted(set(dropped))[:10]}{'...' if len(set(dropped)) > 10 else ''}. "
+                "Their V-coefficients will be inherited via degenerate pair_ids where available."
+            )
 
         self.treated_modes = self._get_symmetry_factor()
 
@@ -295,14 +365,18 @@ class ZFSManager:
                 V_p_m[i] = 0.5 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
                 V_0_pm[i] = np.sqrt(dD_dq[0, 2]**2 + dD_dq[1, 2]**2) / np.sqrt(2)
 
-            # Degenerate mode handling
-            if len(self.treated_modes) < n_modes and len(phonon_energies) == n_modes:
-                if i + 1 < n_modes and np.isclose(phonon_energies[i], phonon_energies[i + 1]):
-                    V_0_pm[i + 1] = V_0_pm[i]
-                    V_p_m[i + 1] = V_p_m[i]
-                elif i > 0 and np.isclose(phonon_energies[i], phonon_energies[i - 1]):
-                    V_0_pm[i - 1] = V_0_pm[i]
-                    V_p_m[i - 1] = V_p_m[i]
+            # Degenerate mode handling: inherit V-coefficients via pair_id.
+            # The spectrum owns the pairing (strict involution); no frequency guessing.
+            spectrum = self.spectrum
+            if (
+                len(self.treated_modes) < n_modes
+                and spectrum is not None
+                and spectrum.pair_ids is not None
+                and spectrum.pair_ids[i] < spectrum.n_modes
+            ):
+                twin = int(spectrum.pair_ids[i])
+                V_0_pm[twin] = V_0_pm[i]
+                V_p_m[twin] = V_p_m[i]
 
             if self.debug:
                 self._debug_derivs(
@@ -380,15 +454,20 @@ class ZFSManager:
                 V_p_m_2nd[i, j] = 0.5 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
 
             if len(self.treated_modes) < n_modes and len(phonon_energies) == n_modes and i == j:
-                freq_i = phonon_energies[i]
-                if i + 1 < n_modes and np.isclose(freq_i, phonon_energies[i + 1]):
-                    V_0_0_2nd[i + 1, j + 1] = V_0_0_2nd[i, j]
-                    V_0_pm_2nd[i + 1, j + 1] = V_0_pm_2nd[i, j]
-                    V_p_m_2nd[i + 1, j + 1] = V_p_m_2nd[i, j]
-                elif i > 0 and np.isclose(freq_i, phonon_energies[i - 1]):
-                    V_0_0_2nd[i - 1, j - 1] = V_0_0_2nd[i, j]
-                    V_0_pm_2nd[i - 1, j - 1] = V_0_pm_2nd[i, j]
-                    V_p_m_2nd[i - 1, j - 1] = V_p_m_2nd[i, j]
+                # Inherit V-coefficients for the degenerate twin via pair_id.
+                # The spectrum owns the pairing (strict involution); no frequency guessing.
+                spectrum = self.spectrum
+                if spectrum is not None and spectrum.pair_ids is not None and spectrum.pair_ids[i] < spectrum.n_modes:
+                    twin = int(spectrum.pair_ids[i])
+                    if twin != j:  # avoid overwriting an (i,j) cross-coupling with the pair copy
+                        V_0_0_2nd[twin, twin] = V_0_0_2nd[i, j]
+                        V_0_pm_2nd[twin, twin] = V_0_pm_2nd[i, j]
+                        V_p_m_2nd[twin, twin] = V_p_m_2nd[i, j]
+                    else:
+                        # Twin IS j: copy the (i,i) pair coefficients to (j,j)
+                        V_0_0_2nd[j, j] = V_0_0_2nd[i, j]
+                        V_0_pm_2nd[j, j] = V_0_pm_2nd[i, j]
+                        V_p_m_2nd[j, j] = V_p_m_2nd[i, j]
 
             V_0_0_2nd[j, i] = V_0_0_2nd[i, j]
             V_p_m_2nd[j, i] = V_p_m_2nd[i, j]

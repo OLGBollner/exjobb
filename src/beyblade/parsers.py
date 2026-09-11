@@ -177,6 +177,13 @@ def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
     symmetries = list(data["symmetries"]) if "symmetries" in data else (list(data["sym"]) if "sym" in data else None)
     iprs = data["iprs"] if "iprs" in data else (data["ipr"] if "ipr" in data else None)
     e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data else None
+    # Legacy files store the original DFT-run mode indices under "idx"; the spectrum
+    # owns mode identity, so this must not be dropped on load.
+    original_indices = None
+    if "original_indices" in data and data["original_indices"] is not None:
+        original_indices = np.asarray(data["original_indices"], dtype=int)
+    elif "idx" in data and data["idx"] is not None:
+        original_indices = np.asarray(data["idx"], dtype=int) - 1  # folders are 1-based
 
     return PhononSpectrum(
         frequencies_mev=np.asarray(freqs, dtype=float),
@@ -188,6 +195,7 @@ def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
         symmetries=symmetries,
         iprs=np.asarray(iprs, dtype=float) if iprs is not None else None,
         e_pair_complete=e_pair_complete,
+        original_indices=original_indices,
     )
 
 

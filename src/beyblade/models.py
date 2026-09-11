@@ -157,6 +157,8 @@ class PhononMode:
     eigenvector: np.ndarray  # Shape (N_atoms, 3)
     symmetry: Optional[str] = None
     ipr: Optional[float] = None
+    pair_id: int = -1              # index of degenerate partner mode; -1 = unknown (no spectrum)
+    original_index: int = -1       # mode index in the full DFT run; -1 = unknown
 
     @property
     def frequency_thz(self) -> float:
@@ -179,6 +181,8 @@ class PhononSpectrum:
     symmetries: Optional[list[str]] = None  # Length N_modes
     iprs: Optional[np.ndarray] = None       # Shape (N_modes,)
     e_pair_complete: Optional[list[bool]] = None  # Length N_modes
+    pair_ids: Optional[np.ndarray] = None   # Shape (N_modes,): degenerate partner index, n_modes if unpaired (out-of-bounds sentinel)
+    original_indices: Optional[np.ndarray] = None  # Shape (N_modes,): mode index in the full DFT run
     frequency_unit: str = "meV"
 
     def __post_init__(self):
@@ -186,6 +190,11 @@ class PhononSpectrum:
             self.analyze_c3v_symmetry()
         if self.e_pair_complete is None and self.symmetries is not None and len(self.frequencies_mev) > 0:
             self.check_e_pair_completeness()
+        if self.pair_ids is None and self.e_pair_complete is not None:
+            # Backfill pair_ids from e_pair_complete matching (legacy files)
+            self.build_pair_ids()
+        if self.original_indices is None:
+            self.original_indices = np.arange(self.n_modes, dtype=int)
 
     @property
     def n_modes(self) -> int:
@@ -238,6 +247,147 @@ class PhononSpectrum:
         self.e_pair_complete = completeness
         return completeness
 
+    def build_pair_ids(self, tol_mev: float = 0.05) -> np.ndarray:
+        """
+        Builds the symmetric pair_ids mapping between degenerate E-mode partners.
+
+        pair_ids[i] is the index of mode i's degenerate partner (Ex <-> Ey within
+        tol_mev), or n_modes if unpaired — the sentinel is deliberately out of bounds
+        so that unguarded indexing (e.g. freqs[pair_ids[i]]) raises IndexError instead
+        of silently wrapping around to the last element (as -1 would).
+        The relation must be a strict involution:
+        pair_ids[i] = j implies pair_ids[j] = i. Degenerate chains (a mode whose
+        partner is already paired with a different mode) raise ValueError loudly.
+        """
+        if self.symmetries is None:
+            self.pair_ids = np.full(self.n_modes, self.n_modes, dtype=int)
+            return self.pair_ids
+
+        n = self.n_modes
+        pair_ids = np.full(n, n, dtype=int)
+
+        for i in range(n):
+            sym_i = self.symmetries[i]
+            if sym_i not in ("Ex", "Ey") or pair_ids[i] != n:
+                continue
+
+            target_sym = "Ey" if sym_i == "Ex" else "Ex"
+            freq_i = self.frequencies_mev[i]
+
+            best_j = None
+            min_diff = float("inf")
+            for j in range(n):
+                if j == i or pair_ids[j] != n:
+                    continue
+                if self.symmetries[j] == target_sym:
+                    diff = abs(self.frequencies_mev[j] - freq_i)
+                    if diff < tol_mev and diff < min_diff:
+                        min_diff = diff
+                        best_j = j
+
+            if best_j is not None:
+                # Strict involution: best_j must be unpaired here because of the
+                # pair_ids[j] != n guard above, so no chains can form.
+                pair_ids[i] = best_j
+                pair_ids[best_j] = i
+
+        self.pair_ids = pair_ids
+        return self.pair_ids
+
+    def validate_pair_ids(self) -> None:
+        """
+        Raises ValueError if pair_ids is not a strict symmetric involution
+        (pair_ids[i] = j implies pair_ids[j] = i). Chains fail loudly.
+        """
+        if self.pair_ids is None:
+            return
+        n = len(self.pair_ids)
+        for i, j in enumerate(self.pair_ids):
+            if j >= n:
+                continue
+            if self.pair_ids[j] != i:
+                raise ValueError(
+                    f"Invalid pair_ids: mode {i} pairs with {j}, but mode {j} "
+                    f"pairs with {self.pair_ids[j]}. "
+                    "pair_ids must be a strict symmetric involution (no degenerate chains)."
+                )
+
+    def index_of_original(self, original_index: int) -> Optional[int]:
+        """
+        Maps a mode index from the full DFT run (original indexing) to its
+        position in this spectrum. Returns None if the mode was dropped.
+        """
+        if self.original_indices is None:
+            return original_index if 0 <= original_index < self.n_modes else None
+        hits = np.where(self.original_indices == original_index)[0]
+        return int(hits[0]) if len(hits) else None
+
+    def infer_original_indices(self, raw_perturbations: dict[int, float], tol_rel: float = 0.05) -> bool:
+        """
+        Legacy fallback: reconstructs original_indices by matching raw perturbation
+        amplitudes to phonon frequencies. Since q = q0 * sqrt(2*omega/hbar), the
+        perturbation amplitude squared is proportional to the mode frequency, so a
+        rank matching (sorted pert^2 vs sorted frequency) recovers the mapping.
+
+        Only runs when the raw index set clearly exceeds this spectrum's modes
+        (i.e. the phonon file dropped modes without recording which). Returns True
+        if a consistent mapping was found, False otherwise.
+
+        Assumes degenerate E pairs share a frequency; ties are matched in index order.
+        """
+        n_raw = max(raw_perturbations) + 1 if raw_perturbations else 0
+        if n_raw <= self.n_modes:
+            return False
+
+        # Fit the proportionality constant q0^2 from rank matching
+        raw_sorted = sorted(raw_perturbations.items(), key=lambda kv: kv[1])
+        freq_pos = np.argsort(self.frequencies_mev)
+        if len(raw_sorted) != self.n_modes:
+            print(
+                f"Warning: raw ZFS data covers {len(raw_sorted)} modes but spectrum has "
+                f"{self.n_modes}; cannot infer original_indices by rank matching. "
+                "Modes will be dropped loudly instead of silently mismatched."
+            )
+            return False
+
+        # Check proportionality quality first
+        p2 = np.array([p for _, p in raw_sorted]) ** 2
+        f = self.frequencies_mev[freq_pos]
+        valid = f > 0
+        if valid.sum() < 2:
+            return False
+        c = np.corrcoef(p2[valid], f[valid])[0, 1]
+        if c < 1 - tol_rel:
+            print(
+                f"Warning: perturbation-frequency correlation is only {c:.4f}; "
+                "refusing to infer original_indices from a dubious match."
+            )
+            return False
+
+        q0_2 = float(np.median(p2[valid] / f[valid]))
+        residuals = np.abs(p2 - q0_2 * f) / (q0_2 * f + 1e-30)
+        bad = int(np.sum(residuals[valid] > tol_rel))
+        if bad > 0:
+            print(
+                f"Warning: {bad} modes deviate > {tol_rel:.0%} from the fitted "
+                f"q0^2 = {q0_2:.3e}; inferred original_indices may be unreliable."
+            )
+
+        original_indices = np.full(self.n_modes, -1, dtype=int)
+        # Raw indices are 1-based folders minus 1; they map in sorted-perturbation order
+        # to sorted-frequency positions. Degenerate twins (same frequency) are matched
+        # in raw-index order, mirroring how the perturbation folders were generated.
+        for pos, (raw_idx, _) in zip(freq_pos, raw_sorted):
+            original_indices[pos] = raw_idx
+
+        self.original_indices = original_indices
+        print(
+            f"Inferred original_indices for legacy phonon file by amplitude-frequency "
+            f"rank matching (corr={c:.5f}, q0^2={q0_2:.3e}). "
+            "Regenerate the phonon npz with explicit original_indices for a principled mapping."
+        )
+        return True
+
     def expand_missing_e_pairs(self) -> PhononSpectrum:
         """
         Returns a new PhononSpectrum where any E modes lacking their degenerate partner
@@ -247,11 +397,16 @@ class PhononSpectrum:
         if self.e_pair_complete is None:
             self.check_e_pair_completeness()
 
+        if self.pair_ids is None:
+            self.build_pair_ids()
+
         new_freqs = list(self.frequencies_mev)
         new_eigs = list(self.eigenvectors)
         new_syms = list(self.symmetries) if self.symmetries is not None else None
         new_iprs = list(self.iprs) if self.iprs is not None else None
         new_complete = list(self.e_pair_complete) if self.e_pair_complete is not None else None
+        new_pair_ids = list(self.pair_ids) if self.pair_ids is not None else None
+        new_orig = list(self.original_indices) if self.original_indices is not None else list(range(self.n_modes))
 
         for i in range(len(self.frequencies_mev)):
             sym = self.symmetries[i] if self.symmetries is not None else None
@@ -259,6 +414,7 @@ class PhononSpectrum:
 
             if sym in ("Ex", "Ey") and not is_complete:
                 partner_sym = "Ey" if sym == "Ex" else "Ex"
+                twin_pos = len(new_freqs)
                 new_freqs.append(float(self.frequencies_mev[i]))
                 new_eigs.append(self.eigenvectors[i].copy())
                 if new_syms is not None:
@@ -267,8 +423,15 @@ class PhononSpectrum:
                     new_iprs.append(float(self.iprs[i]))
                 if new_complete is not None:
                     new_complete.append(True)
+                if new_pair_ids is not None:
+                    # Marker: expanded modes need fresh pair_ids (rebuilt below).
+                    new_pair_ids.append(-2)
+                new_orig.append(self.original_indices[i] if self.original_indices is not None else i)
 
-        return PhononSpectrum(
+        # pair_ids are rebuilt from symmetry+frequency on the expanded spectrum:
+        # appended twins carry identical frequencies and the partner symmetry, so
+        # build_pair_ids() recovers the full (old + new) involution consistently.
+        expanded = PhononSpectrum(
             frequencies_mev=np.array(new_freqs, dtype=float),
             eigenvectors=np.array(new_eigs, dtype=float),
             atom_frac_coords=self.atom_frac_coords.copy(),
@@ -278,17 +441,25 @@ class PhononSpectrum:
             symmetries=new_syms,
             iprs=np.array(new_iprs, dtype=float) if new_iprs is not None else None,
             e_pair_complete=new_complete,
+            original_indices=np.array(new_orig, dtype=int),
         )
+        if new_pair_ids is not None:
+            expanded.build_pair_ids()
+        return expanded
 
     def get_mode(self, idx: int) -> PhononMode:
         sym = self.symmetries[idx] if self.symmetries is not None else None
         ipr_val = float(self.iprs[idx]) if self.iprs is not None else None
+        pair = int(self.pair_ids[idx]) if self.pair_ids is not None else -1  # -1 = unknown (no spectrum attached)
+        orig = int(self.original_indices[idx]) if self.original_indices is not None else idx
         return PhononMode(
             index=idx,
             frequency_mev=float(self.frequencies_mev[idx]),
             eigenvector=self.eigenvectors[idx],
             symmetry=sym,
-            ipr=ipr_val
+            ipr=ipr_val,
+            pair_id=pair,
+            original_index=orig,
         )
 
     def filter_by_energy(self, min_mev: float = -np.inf, max_mev: float = np.inf) -> np.ndarray:
@@ -475,6 +646,8 @@ class PhononSpectrum:
             symmetries=self.symmetries,
             iprs=self.iprs,
             e_pair_complete=self.e_pair_complete,
+            pair_ids=self.pair_ids,
+            original_indices=self.original_indices,
         )
         return path
 
@@ -489,6 +662,8 @@ class PhononSpectrum:
         syms = list(data["symmetries"]) if "symmetries" in data and data["symmetries"] is not None else None
         iprs = data["iprs"] if "iprs" in data else None
         e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"] is not None else None
+        pair_ids = np.asarray(data["pair_ids"], dtype=int) if "pair_ids" in data and data["pair_ids"] is not None else None
+        original_indices = np.asarray(data["original_indices"], dtype=int) if "original_indices" in data and data["original_indices"] is not None else None
 
         return cls(
             frequencies_mev=freqs_mev,
@@ -501,6 +676,8 @@ class PhononSpectrum:
             iprs=iprs,
             frequency_unit="meV",
             e_pair_complete=e_pair_complete,
+            pair_ids=pair_ids,
+            original_indices=original_indices,
         )
 
 
