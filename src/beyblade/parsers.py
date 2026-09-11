@@ -183,7 +183,9 @@ def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
     if "original_indices" in data and data["original_indices"] is not None:
         original_indices = np.asarray(data["original_indices"], dtype=int)
     elif "idx" in data and data["idx"] is not None:
-        original_indices = np.asarray(data["idx"], dtype=int) - 1  # folders are 1-based
+        # idx is 0-based into the full 3N-mode run (verified: full_freqs[idx] ==
+        # sym_freqs and all symmetry labels agree at these indices for NV_512).
+        original_indices = np.asarray(data["idx"], dtype=int)
 
     return PhononSpectrum(
         frequencies_mev=np.asarray(freqs, dtype=float),
