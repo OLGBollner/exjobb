@@ -165,7 +165,7 @@ class PhononManager:
                             skip_indices.add(skip_idx)
                             break
 
-        mask = [i not in skip_indices for i in range(self.nmodes)]
+        mask = np.array([i not in skip_indices for i in range(self.nmodes)])
         new_spectrum = PhononSpectrum(
             frequencies_mev=self.spectrum.frequencies_mev[mask],
             eigenvectors=self.spectrum.eigenvectors[mask],
@@ -175,6 +175,9 @@ class PhononManager:
             lattice=self.spectrum.lattice,
             symmetries=[s for k, s in enumerate(self.spectrum.symmetries) if mask[k]] if self.spectrum.symmetries else None,
             iprs=self.spectrum.iprs[mask] if self.spectrum.iprs is not None else None,
+            # 0-based indices into the ORIGINAL (full) spectrum, so downstream
+            # code can map each reduced mode back to its source position.
+            original_indices=np.where(mask)[0],
         )
 
         if not save:
@@ -182,6 +185,25 @@ class PhononManager:
             self.analyze_c3v_symmetry()
         else:
             filename = f"phonon_data_sym_n{new_spectrum.n_modes}.npz"
-            save_phonon_npz(new_spectrum, filename)
+            saved_path = save_phonon_npz(new_spectrum, filename)
+            # Round-trip validation: reload and verify original_indices maps
+            # every reduced mode back to the correct full-spectrum entry.
+            reloaded = parse_phonon_npz(saved_path)
+            assert reloaded.original_indices is not None, "Saved sym file lacks original_indices"
+            full_freqs = self.spectrum.frequencies_mev
+            mapped = full_freqs[np.asarray(reloaded.original_indices)]
+            if not np.allclose(mapped, reloaded.frequencies_mev, rtol=0, atol=1e-9):
+                raise AssertionError(
+                    "Sym-file round-trip failed: original_indices do not map "
+                    "reduced frequencies back to the full spectrum."
+                )
+            if self.spectrum.symmetries is not None:
+                mapped_syms = [self.spectrum.symmetries[k] for k in reloaded.original_indices]
+                if mapped_syms != list(reloaded.symmetries):
+                    raise AssertionError(
+                        "Sym-file round-trip failed: symmetry labels disagree "
+                        "between the reduced file and the full spectrum."
+                    )
+            print(f"Round-trip validation passed for {filename}")
 
         return new_spectrum
