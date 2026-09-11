@@ -107,7 +107,7 @@ def main():
     if raw_files and len(raw_files) == 1:
         raw_files = raw_files[0]
 
-    res = run_full_pipeline(
+    _ = run_full_pipeline(
         sim_folder=sim_folders,
         raw_zfs_file=raw_files,
         raw_zfs_file_1d=args.raw_zfs_file_1d,

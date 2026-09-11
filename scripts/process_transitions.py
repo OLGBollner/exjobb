@@ -337,7 +337,7 @@ def plot_line_rates(data_files, orders_to_plot, log_scale, output_arg, show):
                    label=label))
 
     leg1 = ax.legend(loc="best")
-    leg2 = ax.legend(handles=style_handles, loc="upper center")
+    _ = ax.legend(handles=style_handles, loc="upper center")
     ax.add_artist(leg1)          # keep both legends
 
     ax.set_xlabel("Temperature (K)")

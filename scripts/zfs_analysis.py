@@ -67,7 +67,7 @@ def main():
 
         save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{zfs_manager.calc_method}_{order}d.npz"
 
-        raw_zfs_data = zfs_manager.save_data(save_name,
+        _ = zfs_manager.save_data(save_name,
                                              order=order,
                                              eigen_rotation=zfs_manager.eigen_rotation,
                                              zfs_relaxed=zfs_manager.zfs_relaxed,
