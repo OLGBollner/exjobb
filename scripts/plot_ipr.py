@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.colors import Normalize
-from matplotlib import ticker
 from argparse import ArgumentParser as Parser
 from beyblade.phonon_manager import PhononManager
 from beyblade.constants import CONSTANTS

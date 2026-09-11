@@ -21,5 +21,17 @@ dev = [
     "ruff",
 ]
 
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# Start focused: pyflakes (F) + genuine runtime errors (E7/E9).
+# Broader style rules (UP, I, B, ...) can be enabled incrementally.
+select = ["F", "E7", "E9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,4 +1,4 @@
-from typing import Union, Optional
+from typing import Union
 import numpy as np
 from scipy import constants as Cn
 from pathlib import Path
@@ -65,7 +65,7 @@ class TransitionRate:
   def load_data_2ph(self, filename: Union[str, Path]) -> None:
     self.data_2ph = np.load(str(filename), allow_pickle=True)
 
-  def load_data(self, filename: Union[str, Path, "SpinPhononCouplingData"]) -> None:
+  def load_data(self, filename: Union[str, Path]) -> None:
     from beyblade.models import SpinPhononCouplingData
     if isinstance(filename, SpinPhononCouplingData):
       # Export to dictionary representation matching npz format

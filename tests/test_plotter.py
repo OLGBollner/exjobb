@@ -1,12 +1,9 @@
-from _pytest.tmpdir import tmp_path
-import pytest
 import numpy as np
 import matplotlib.pyplot as plt
 from beyblade.plotter import (
     plot_1d_spectral_functions,
     plot_ipr_spectrum,
     plot_2d_spectral_density_map,
-    ZFSPlotter,
 )
 
 class TestPlotter:

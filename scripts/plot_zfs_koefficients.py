@@ -1,8 +1,6 @@
-from pathlib import Path
 from argparse import ArgumentParser as Parser
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy import constants as Cn
 from utils import smear_data
 
 if __name__ == "__main__":

@@ -264,10 +264,10 @@ def run_full_pipeline(
         order=order,
         run_name=run_name,
     )
-    print(f"\n========================================================")
+    print("\n========================================================")
     print(f"  Initialized run in: {run_dir}")
     print(f"  Defect: {defect} | Cell: {cell_size} | Method: {calc_method} | Order: {order}")
-    print(f"========================================================\n")
+    print("========================================================\n")
 
     # ── 4. Save Raw ZFS Data (if generated/loaded) ───────────────────────────
     raw_path = run_dir / "raw_zfs_data.npz"
@@ -521,10 +521,10 @@ def run_full_pipeline(
         except Exception as e:
             print(f"Warning: could not generate T1 plot: {e}")
 
-    print(f"\n========================================================")
-    print(f"  Run successfully completed!")
+    print("\n========================================================")
+    print("  Run successfully completed!")
     print(f"  All results stored in: {run_dir}")
-    print(f"========================================================\n")
+    print("========================================================\n")
 
     return {
         "run_dir": run_dir,

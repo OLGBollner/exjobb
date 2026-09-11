@@ -1,7 +1,6 @@
 import numpy as np
 from scipy import constants as Cn
-from scipy.ndimage import convolve
-from typing import Tuple, Dict, Any
+from typing import Tuple
 
 class MathUtils:
 

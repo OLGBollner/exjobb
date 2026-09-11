@@ -1,4 +1,3 @@
-import warnings
 import pytest
 import numpy as np
 from beyblade.models import PhononSpectrum

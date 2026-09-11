@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from beyblade.models import ZFSTensor, PhononMode, PhononSpectrum, PerturbationEntry, RawZFSData
+from beyblade.models import ZFSTensor, PhononMode, PhononSpectrum
 from beyblade.constants import CONSTANTS
 
 
