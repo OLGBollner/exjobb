@@ -589,6 +589,15 @@ class PhononSpectrum:
             e_pair_complete=self.e_pair_complete,
             pair_ids=self.pair_ids,
             original_indices=self.original_indices,
+            # Legacy aliases consumed by the supercomputer VASP scripts:
+            #   scripts/get_n_modes.py reads 'idx' (0-based, printed +1 as
+            #   VASP folder numbers) and 'freqs';
+            #   scripts/create_combined_phonon_struct.py reads 'eigs' and
+            #   'masses'. Keep these keys in sync with the modern ones.
+            eigs=self.eigenvectors,
+            masses=self.atomic_masses,
+            idx=self.original_indices if self.original_indices is not None else np.arange(self.n_modes),
+            freqs=self.frequencies_mev,
         )
         return path
 
