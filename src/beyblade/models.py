@@ -388,65 +388,6 @@ class PhononSpectrum:
         )
         return True
 
-    def expand_missing_e_pairs(self) -> PhononSpectrum:
-        """
-        Returns a new PhononSpectrum where any E modes lacking their degenerate partner
-        (e_pair_complete == False) are duplicated with the partner symmetry (Ex <-> Ey),
-        expanding the total modes towards 3 * N_atoms.
-        """
-        if self.e_pair_complete is None:
-            self.check_e_pair_completeness()
-
-        if self.pair_ids is None:
-            self.build_pair_ids()
-
-        new_freqs = list(self.frequencies_mev)
-        new_eigs = list(self.eigenvectors)
-        new_syms = list(self.symmetries) if self.symmetries is not None else None
-        new_iprs = list(self.iprs) if self.iprs is not None else None
-        new_complete = list(self.e_pair_complete) if self.e_pair_complete is not None else None
-        new_pair_ids = list(self.pair_ids) if self.pair_ids is not None else None
-        new_orig = list(self.original_indices) if self.original_indices is not None else list(range(self.n_modes))
-
-        for i in range(len(self.frequencies_mev)):
-            sym = self.symmetries[i] if self.symmetries is not None else None
-            is_complete = self.e_pair_complete[i] if self.e_pair_complete is not None else True
-
-            if sym in ("Ex", "Ey") and not is_complete:
-                partner_sym = "Ey" if sym == "Ex" else "Ex"
-                twin_pos = len(new_freqs)
-                new_freqs.append(float(self.frequencies_mev[i]))
-                new_eigs.append(self.eigenvectors[i].copy())
-                if new_syms is not None:
-                    new_syms.append(partner_sym)
-                if new_iprs is not None:
-                    new_iprs.append(float(self.iprs[i]))
-                if new_complete is not None:
-                    new_complete.append(True)
-                if new_pair_ids is not None:
-                    # Marker: expanded modes need fresh pair_ids (rebuilt below).
-                    new_pair_ids.append(-2)
-                new_orig.append(self.original_indices[i] if self.original_indices is not None else i)
-
-        # pair_ids are rebuilt from symmetry+frequency on the expanded spectrum:
-        # appended twins carry identical frequencies and the partner symmetry, so
-        # build_pair_ids() recovers the full (old + new) involution consistently.
-        expanded = PhononSpectrum(
-            frequencies_mev=np.array(new_freqs, dtype=float),
-            eigenvectors=np.array(new_eigs, dtype=float),
-            atom_frac_coords=self.atom_frac_coords.copy(),
-            atom_symbols=list(self.atom_symbols),
-            atomic_masses=self.atomic_masses.copy(),
-            lattice=self.lattice.copy(),
-            symmetries=new_syms,
-            iprs=np.array(new_iprs, dtype=float) if new_iprs is not None else None,
-            e_pair_complete=new_complete,
-            original_indices=np.array(new_orig, dtype=int),
-        )
-        if new_pair_ids is not None:
-            expanded.build_pair_ids()
-        return expanded
-
     def get_mode(self, idx: int) -> PhononMode:
         sym = self.symmetries[idx] if self.symmetries is not None else None
         ipr_val = float(self.iprs[idx]) if self.iprs is not None else None
