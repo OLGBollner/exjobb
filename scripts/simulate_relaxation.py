@@ -14,7 +14,6 @@ ms_states = {
 init_state = "ms_-1"
 
 plt.rcParams.update({
-  "axes.titlesize": 16,
   "axes.labelsize": 16,
   "xtick.labelsize": 12,
   "ytick.labelsize": 12,

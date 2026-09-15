@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 plt.rcParams.update({
-  "axes.titlesize": 16,
   "axes.labelsize": 16,
   "xtick.labelsize": 12,
   "ytick.labelsize": 12,

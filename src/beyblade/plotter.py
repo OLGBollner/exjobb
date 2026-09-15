@@ -203,10 +203,6 @@ def plot_transition_rates_stacked(
 
         ax.set_xlabel("Temperature (K)")
         ax.set_ylabel(r"Transition rate $\Gamma$ (s$^{-1}$)")
-        title_str = f"Transition rate {trans_title}"
-        if defect:
-            title_str += f" ({defect} {cell_size})"
-        ax.set_title(title_str)
         ax.grid(True, which="both", linestyle=":", alpha=0.5)
         ax.legend(loc="upper left", frameon=True)
         fig.tight_layout()
@@ -214,7 +210,12 @@ def plot_transition_rates_stacked(
         if output_path is not None:
             p = Path(output_path)
             stem = p.stem
-            out_file = p.parent / f"{stem}_{trans_key}{p.suffix}"
+            # Metadata belongs in the filename, not a figure title
+            meta = "_".join(x.replace(" ", "-") for x in (defect, cell_size) if x)
+            if meta:
+                out_file = p.parent / f"{stem}_{meta}_{trans_key}{p.suffix}"
+            else:
+                out_file = p.parent / f"{stem}_{trans_key}{p.suffix}"
             fig.savefig(out_file, dpi=300)
             print(f"Saved stacked rate figure to: {out_file}")
 
@@ -275,17 +276,16 @@ def plot_t1_relaxation(
     ax.set_yscale("log")
     ax.grid(True, which="both", linestyle=":", alpha=0.6)
     ax.tick_params(axis="both", which="both", direction="in")
-    title_meta = " ".join(x for x in (defect, cell_size, calc_method) if x)
-    title = r"$T_1$ Spin Relaxation Time vs Temperature"
-    if title_meta:
-        title += f" — {title_meta}"
-    ax.set_title(title, fontsize=15)
     ax.legend(frameon=True, fontsize=12)
     fig.tight_layout()
 
     if output_path is not None:
         p = Path(output_path)
         p.parent.mkdir(parents=True, exist_ok=True)
+        # Metadata belongs in the filename, not a figure title
+        meta = "_".join(x.replace(" ", "-") for x in (defect, cell_size, calc_method) if x)
+        if meta and meta not in p.stem:
+            p = p.with_name(f"{p.stem}_{meta}{p.suffix}")
         fig.savefig(p, dpi=300)
         print(f"Saved T1 figure to: {p}")
 
@@ -459,7 +459,6 @@ def compare_runs_t1(run_dirs: list[Path], out_dir: Path, fmt: str, dpi: int, sho
     ax.set_ylabel(r"$T_1$ (s)", fontsize=14)
     ax.set_yscale("log")
     ax.grid(True, which="both", linestyle=":", alpha=0.6)
-    ax.set_title(r"Comparison of $T_1$ Relaxation Times", fontsize=15)
     ax.legend(frameon=True, fontsize=11)
     fig.tight_layout()
 
@@ -476,7 +475,6 @@ class ZFSPlotter:
     def __init__(self, plot_config: Optional[dict[str, Any]] = None):
         self.config = plot_config or {}
         plt.rcParams.update({
-            "axes.titlesize": 16,
             "axes.labelsize": 16,
             "xtick.labelsize": 12,
             "ytick.labelsize": 12,

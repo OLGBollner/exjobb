@@ -73,7 +73,6 @@ SPIN_FORMALISM_LABELS = {
 def set_plot_style():
     """Apply rcParams so that line and stacked plots have the same appearance."""
     plt.rcParams.update({
-        "axes.titlesize": 16,
         "axes.labelsize": 16,
         "xtick.labelsize": 12,
         "ytick.labelsize": 12,
@@ -84,7 +83,7 @@ def set_plot_style():
 # -----------------------------------------------------------------------------
 #  Stacked filled area plot on log‑log axes
 # -----------------------------------------------------------------------------
-def plot_stacked_rates(T, rates, labels, title=None, ax=None):
+def plot_stacked_rates(T, rates, labels, ax=None):
     """
     Draw a stacked filled-area plot on log-log axes.
 
@@ -93,7 +92,6 @@ def plot_stacked_rates(T, rates, labels, title=None, ax=None):
     T      : 1-D array-like, temperature values (K)
     rates  : list of 1-D arrays, one per process, in bottom-to-top order
     labels : list of str, one per process
-    title  : str, axes title
     ax     : optional existing Axes; if None a new figure is created
 
     Returns
@@ -144,8 +142,6 @@ def plot_stacked_rates(T, rates, labels, title=None, ax=None):
 
     ax.set_xlabel("Temperature (K)")
     ax.set_ylabel(r"Relaxation rate $\ (\mathrm{s^{-1}})$")
-    if title:
-        ax.set_title(title)
 
     ax.legend(loc="upper left", framealpha=0.88, edgecolor="0.7")
     ax.grid(True, which="major", linestyle="--", linewidth=0.5, alpha=0.45)
