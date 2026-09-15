@@ -516,7 +516,7 @@ def run_full_pipeline(
         # T1 plot
         try:
             ft1_path = fig_dir / "t1_vs_temperature.png"
-            plot_t1_relaxation(t1_path, output_path=ft1_path)
+            plot_t1_relaxation(t1_path, output_path=ft1_path, plain_name=True)
             figures_saved.append(ft1_path)
         except Exception as e:
             print(f"Warning: could not generate T1 plot: {e}")

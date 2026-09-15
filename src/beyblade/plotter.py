@@ -231,6 +231,7 @@ def plot_t1_relaxation(
     t1_data: Union[str, Path, dict[str, Any]],
     output_path: Optional[Union[str, Path]] = None,
     show: bool = False,
+    plain_name: bool = False,
 ) -> tuple[plt.Figure, plt.Axes]:
     """
     Plots T_1 relaxation times versus temperature.
@@ -284,7 +285,7 @@ def plot_t1_relaxation(
         p.parent.mkdir(parents=True, exist_ok=True)
         # Metadata belongs in the filename, not a figure title
         meta = "_".join(x.replace(" ", "-") for x in (defect, cell_size, calc_method) if x)
-        if meta and meta not in p.stem:
+        if meta and meta not in p.stem and not plain_name:
             p = p.with_name(f"{p.stem}_{meta}{p.suffix}")
         fig.savefig(p, dpi=300)
         print(f"Saved T1 figure to: {p}")
@@ -420,7 +421,7 @@ def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
         return
 
     out_file = out_dir / f"t1_vs_temperature.{fmt}"
-    plot_t1_relaxation(t1_file, output_path=out_file)
+    plot_t1_relaxation(t1_file, output_path=out_file, plain_name=True)
     print(f"  [✓] Saved T1 plot -> {out_file}")
 
 
