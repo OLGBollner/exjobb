@@ -427,6 +427,80 @@ def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
     print(f"  [✓] Saved T1 plot -> {out_file}")
 
 
+def overlay_t1(npz_paths: list[Union[str, Path]], output_path: Optional[Union[str, Path]] = None, show: bool = False) -> tuple[plt.Figure, plt.Axes]:
+    """
+    Overlay T_1 curves from multiple T1 npz files in a single figure.
+    Labels and output filename are built from the npz metadata.
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+    colors = plt.cm.tab10.colors
+    plotted_any = False
+    meta_parts: list[str] = []
+
+    for idx, path in enumerate(npz_paths):
+        data = np.load(str(path), allow_pickle=True)
+        temperatures = np.asarray(data["temperatures"], dtype=float)
+        defect = str(data.get("defect", ""))
+        cell_size = str(data.get("cell_size", ""))
+        calc_method = str(data.get("calc_method", ""))
+        init_state = str(data.get("init_state", ""))
+
+        t1_fit = np.asarray(data["t1_fit"], dtype=float) if "t1_fit" in data else None
+        t1_eigenval = np.asarray(data["t1_eigenval"], dtype=float) if "t1_eigenval" in data else None
+        if t1_fit is None and "T1_times" in data:
+            t1_fit = np.asarray(data["T1_times"], dtype=float)
+        if t1_fit is None and "T1_range" in data:
+            t1_fit = np.asarray(data["T1_range"], dtype=float)
+
+        label_suffix = f" ({defect} {cell_size}" if defect else " ("
+        if calc_method:
+            label_suffix += f", {calc_method}"
+        if init_state:
+            label_suffix += f", {init_state}"
+        label_suffix += ")"
+
+        color = colors[idx % len(colors)]
+        if t1_fit is not None:
+            valid = np.isfinite(t1_fit) & (t1_fit > 0)
+            if np.any(valid):
+                ax.plot(temperatures[valid], t1_fit[valid], "o-", color=color, linewidth=2, markersize=5, label=f"$T_1$ ODE fit{label_suffix}")
+                plotted_any = True
+        if t1_eigenval is not None:
+            valid_eig = np.isfinite(t1_eigenval) & (t1_eigenval > 0)
+            if np.any(valid_eig):
+                ax.plot(temperatures[valid_eig], t1_eigenval[valid_eig], "--", color=color, linewidth=1.8, label=f"$T_1$ Eigenvalue{label_suffix}")
+                plotted_any = True
+
+        meta_parts.extend(x.replace(" ", "-") for x in (defect, cell_size, calc_method, init_state) if x)
+
+    if not plotted_any:
+        print("No valid T1 data found in the provided files.")
+        plt.close(fig)
+        return fig, ax
+
+    ax.set_xlabel("Temperature (K)", fontsize=14)
+    ax.set_ylabel(r"$T_1$ (s)", fontsize=14)
+    ax.set_yscale("log")
+    ax.grid(True, which="both", linestyle=":", alpha=0.6)
+    ax.tick_params(axis="both", which="both", direction="in")
+    ax.legend(frameon=True, fontsize=11)
+    fig.tight_layout()
+
+    if output_path is not None:
+        p = Path(output_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        meta = "_".join(dict.fromkeys(meta_parts))
+        if meta:
+            p = p.with_name(f"{p.stem}_{meta}{p.suffix}")
+        fig.savefig(p, dpi=300, bbox_inches="tight")
+        print(f"Saved T1 overlay figure to: {p}")
+
+    if show:
+        plt.show()
+
+    return fig, ax
+
+
 def compare_runs_t1(run_dirs: list[Path], out_dir: Path, fmt: str, dpi: int, show: bool):
     """Overlays T_1 curves from multiple runs for easy comparison."""
     fig, ax = plt.subplots(figsize=(8, 6))
