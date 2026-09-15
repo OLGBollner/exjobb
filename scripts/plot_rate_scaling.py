@@ -5,7 +5,6 @@ from scipy import constants as Cn
 import sys
 
 plt.rcParams.update({
-    "axes.titlesize": 16,
     "axes.labelsize": 16,
     "xtick.labelsize": 12,
     "ytick.labelsize": 12,

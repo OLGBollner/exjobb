@@ -21,7 +21,6 @@ if __name__ == "__main__":
   colors = iter(["red", "black", "blue", "orange", "green"])
 
   plt.rcParams.update({
-    "axes.titlesize": 16,
     "axes.labelsize": 16,
     "xtick.labelsize": 12,
     "ytick.labelsize": 12,
@@ -116,8 +115,6 @@ if __name__ == "__main__":
     else:
       ax.set_ylabel("Coupling coefficient (MHz)")
       ax.set_ylim(0, 200)
-
-    ax.set_title(f"Coupling strength for perturbation {pert_scale} Å")
 
     if args.bar:
       ax.set_xlabel("Mode index")
