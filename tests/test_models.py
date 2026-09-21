@@ -129,8 +129,8 @@ class TestPhononPert:
         assert displacements[2] is not None
         assert displacements[2] > displacements[1] > displacements[0]
 
-    def test_displacement_values_match_old_phonon_manager(self):
-        """Exact regression against the legacy PhononManager formula."""
+    def test_displacement_values_match_legacy_phonon_manager(self):
+        """Exact regression against the legacy PhononManager displacement formula (class removed; formula preserved here)."""
         from scipy import constants as Cn
         from beyblade.constants import CONSTANTS
 

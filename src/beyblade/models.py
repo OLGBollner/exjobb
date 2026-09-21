@@ -568,6 +568,48 @@ class PhononSpectrum:
             return self.calc_ipr()
         return self.iprs
 
+    def filter_sym_pairs(self, tol_mev: float = 0.01) -> "PhononSpectrum":
+        """
+        Removes redundant degenerate partner modes from Ex/Ey doublets.
+
+        For each Ex/Ey pair closer than ``tol_mev`` in frequency, keeps the Ex
+        twin and drops the Ey one. The reduced spectrum carries 0-based
+        ``original_indices`` pointing into the *full* spectrum, so downstream
+        code can map each reduced mode back to its source position.
+
+        Requires symmetry labels: computes them if not already present.
+        """
+        syms = self.symmetries if self.symmetries is not None else self.analyze_c3v_symmetry()
+        freqs = self.frequencies_mev
+        n = self.n_modes
+
+        skip_indices = set()
+        for i in range(n):
+            if i in skip_indices:
+                continue
+            if "E" in syms[i]:
+                for j in range(i + 1, n):
+                    if j not in skip_indices and "E" in syms[j]:
+                        if abs(freqs[j] - freqs[i]) < tol_mev:
+                            skip_idx = j if syms[i] == "Ex" else i
+                            skip_indices.add(skip_idx)
+                            break
+
+        mask = np.array([i not in skip_indices for i in range(n)])
+        return PhononSpectrum(
+            frequencies_mev=freqs[mask],
+            eigenvectors=self.eigenvectors[mask],
+            atom_frac_coords=self.atom_frac_coords,
+            atom_symbols=self.atom_symbols,
+            atomic_masses=self.atomic_masses,
+            lattice=self.lattice,
+            symmetries=[s for k, s in enumerate(syms) if mask[k]],
+            iprs=self.iprs[mask] if self.iprs is not None else None,
+            # 0-based indices into the ORIGINAL (full) spectrum, so downstream
+            # code can map each reduced mode back to its source position.
+            original_indices=np.where(mask)[0],
+        )
+
     def save(self, out_path: Union[str, Path]) -> str:
         """Saves spectrum to .npz file with explicit frequency unit tag."""
         path = str(out_path)

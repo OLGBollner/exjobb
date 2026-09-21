@@ -1,5 +1,5 @@
 from argparse import ArgumentParser as Parser
-from beyblade.phonon_manager import PhononManager
+from beyblade.parsers import parse_phonon_npz, save_phonon_npz
 
 if __name__ == "__main__":
   parser = Parser("Determine symmetry of phonon modes.")
@@ -7,7 +7,7 @@ if __name__ == "__main__":
 
   args = parser.parse_args()
 
-  phonon_mgr = PhononManager(args.phonon_path)
-  phonon_mgr.analyze_c3v_symmetry()
-  phonon_mgr.filter_sym_pairs(save=True, debug=True)
-
+  spectrum = parse_phonon_npz(args.phonon_path)
+  spectrum.analyze_c3v_symmetry()
+  filtered = spectrum.filter_sym_pairs()
+  save_phonon_npz(filtered)
