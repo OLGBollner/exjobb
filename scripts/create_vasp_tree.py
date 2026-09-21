@@ -4,20 +4,16 @@
 Input: a prepared directory (e.g. <path-to-data>/<defect>_<size>/) containing
 
     <input>/
-        data/       POSCAR, phonons.yaml (copied as-is)
-        template/   all files used by the run dirs (INCAR, KPOINTS, POTCAR, ...)
+        data/          POSCAR (or structure.vasp), phonons.yaml, ...
+        template/      relax/   INCAR, KPOINTS, POTCAR, run_vasp, ...
 
 Output: a tree like the one used on the cluster:
 
     <output>/
         data/               copy of <input>/data
-        templates/          copy of <input>/template
-        relaxation_data/    ready-to-submit run dir for the relaxed structure
-        ZFS_hyp/            ZFS calculation (method 1), same files as relax
-        ZFS_occup/          ZFS calculation (method 2), same files as relax
-
-Each run dir gets all files from template/ plus a copy of the pristine
-POSCAR (or structure.vasp, copied as POSCAR).
+        relaxation_data/    files from template/relax + pristine POSCAR
+        ZFS_hyp/            files from template/relax + pristine POSCAR
+        ZFS_occup/          files from template/relax + pristine POSCAR
 
 Usage:
     python create_vasp_tree.py --input <path-to-data>/<defect>_<size>/
@@ -30,50 +26,40 @@ from pathlib import Path
 RUN_STAGES = ("relaxation_data", "ZFS_hyp", "ZFS_occup")
 
 
-def copy_tree(src: Path, dst: Path):
-    shutil.copytree(src, dst, dirs_exist_ok=True)
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--input", type=Path, required=True,
                     help="prepared input directory with data/ and template/")
     ap.add_argument("--run-dirs", nargs="+", default=list(RUN_STAGES),
-                    help="run directories to create, each seeded from template/")
+                    help="run directories to create, each seeded from template/relax")
     args = ap.parse_args()
 
     inp = args.input.resolve()
     data_src = inp / "data"
-    template_src = inp / "template"
-    if not template_src.is_dir():
-        template_src = inp / "templates"
-    if not data_src.is_dir() or not template_src.is_dir():
-        sys.exit(f"Error: {inp} must contain 'data/' and 'template/' (or 'templates/') subfolders.")
+    relax_src = inp / "template" / "relax"
+    if not data_src.is_dir() or not relax_src.is_dir():
+        sys.exit(f"Error: {inp} must contain 'data/' and 'template/relax/'.")
 
-    poscar = data_src / "POSCAR" if (data_src / "POSCAR").is_file() else False
-    structure_vasp = data_src / "structure.vasp" if (data_src / "structure.vasp").is_file() else False
+    poscar = data_src / "POSCAR"
+    struct_file = poscar if poscar.is_file() else data_src / "structure.vasp"
+    if not struct_file.is_file():
+        sys.exit(f"Error: no POSCAR or structure.vasp in {data_src}.")
 
-    struct_file = poscar or structure_vasp
-    if not struct_file:
-        sys.exit("Error: POSCAR not found.")
-
-    name = inp.name
-    out = Path(name)
+    out = Path(inp.name)
     if out.exists():
         sys.exit(f"Error: output directory {out} already exists, refusing to overwrite.")
 
     print(f"Creating {out}/ from {inp}")
-    copy_tree(data_src, out / "data")
-    copy_tree(template_src, out / "templates")
+    shutil.copytree(data_src, out / "data")
 
     for stage in args.run_dirs:
         dst = out / stage
-        copy_tree(template_src, dst)
+        shutil.copytree(relax_src, dst)
         shutil.copy2(struct_file, dst / "POSCAR")
-        print(f"  {stage}/  <- template/ + POSCAR")
+        print(f"  {stage}/  <- template/relax + POSCAR")
 
-    print("Done. Edit INCAR/KPOINTS in the ZFS folders manually before submitting.")
+    print("Done.")
 
 
 if __name__ == "__main__":
