@@ -50,8 +50,10 @@ def main():
     inp = args.input.resolve()
     data_src = inp / "data"
     template_src = inp / "template"
+    if not template_src.is_dir():
+        template_src = inp / "templates"
     if not data_src.is_dir() or not template_src.is_dir():
-        sys.exit(f"Error: {inp} must contain 'data/' and 'template/' subfolders.")
+        sys.exit(f"Error: {inp} must contain 'data/' and 'template/' (or 'templates/') subfolders.")
 
     name = inp.name
     out = Path(name)
