@@ -5,7 +5,7 @@ Input: a prepared directory (e.g. <path-to-data>/<defect>_<size>/) containing
 
     <input>/
         data/       POSCAR, phonons.yaml (copied as-is)
-        template/   the relax template subfolder (all files used by the run dirs)
+        template/   all files used by the run dirs (INCAR, KPOINTS, POTCAR, ...)
 
 Output: a tree like the one used on the cluster:
 
@@ -16,7 +16,7 @@ Output: a tree like the one used on the cluster:
         ZFS_hyp/            ZFS calculation (method 1), same files as relax
         ZFS_occup/          ZFS calculation (method 2), same files as relax
 
-Each run dir gets all files from templates/relax plus a copy of the pristine
+Each run dir gets all files from template/ plus a copy of the pristine
 POSCAR (or structure.vasp, copied as POSCAR).
 
 Usage:
@@ -40,9 +40,7 @@ def main():
     ap.add_argument("--input", type=Path, required=True,
                     help="prepared input directory with data/ and template/")
     ap.add_argument("--run-dirs", nargs="+", default=list(RUN_STAGES),
-                    help="run directories to create, each seeded from templates/relax")
-    ap.add_argument("--seed-from", default="relax",
-                    help="template stage to seed the run dirs from (default: relax)")
+                    help="run directories to create, each seeded from template/")
     args = ap.parse_args()
 
     inp = args.input.resolve()
@@ -53,9 +51,6 @@ def main():
     if not data_src.is_dir() or not template_src.is_dir():
         sys.exit(f"Error: {inp} must contain 'data/' and 'template/' (or 'templates/') subfolders.")
 
-    seed_dir = template_src / args.seed_from
-    if not seed_dir.is_dir():
-        sys.exit(f"Error: template stage '{args.seed_from}' not found in {template_src}.")
     poscar = data_src / "POSCAR" if (data_src / "POSCAR").is_file() else False
     structure_vasp = data_src / "structure.vasp" if (data_src / "structure.vasp").is_file() else False
 
@@ -74,9 +69,9 @@ def main():
 
     for stage in args.run_dirs:
         dst = out / stage
-        copy_tree(seed_dir, dst)
+        copy_tree(template_src, dst)
         shutil.copy2(struct_file, dst / "POSCAR")
-        print(f"  {stage}/  <- {args.seed_from} template + POSCAR")
+        print(f"  {stage}/  <- template/ + POSCAR")
 
     print("Done. Edit INCAR/KPOINTS in the ZFS folders manually before submitting.")
 
