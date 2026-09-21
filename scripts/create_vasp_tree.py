@@ -5,8 +5,7 @@ Input: a prepared directory (e.g. <path-to-data>/<defect>_<size>/) containing
 
     <input>/
         data/       POSCAR, phonons.yaml (copied as-is)
-        template/   one subfolder per calculation stage (e.g. relax/),
-                    each with INCAR, KPOINTS, POTCAR, run_vasp, ...
+        template/   the relax template subfolder (all files used by the run dirs)
 
 Output: a tree like the one used on the cluster:
 
@@ -17,9 +16,8 @@ Output: a tree like the one used on the cluster:
         ZFS_hyp/            ZFS calculation (method 1), same files as relax
         ZFS_occup/          ZFS calculation (method 2), same files as relax
 
-Each run dir gets the template files plus a copy of the pristine POSCAR.
-INCAR/KPOINTS for the ZFS folders are meant to be modified manually afterwards;
-perturbed mode runs are created later by the run_vasp script itself.
+Each run dir gets all files from templates/relax plus a copy of the pristine
+POSCAR (or structure.vasp, copied as POSCAR).
 
 Usage:
     python create_vasp_tree.py --input <path-to-data>/<defect>_<size>/
