@@ -89,6 +89,8 @@ def patch_incar(text: str, n_up: int, n_dn: int, nbands: int) -> str:
             continue  # dropped, re-added below
         if tag == "ISYM" and parse_tag(text, "ISYM") == "2":
             line = re.sub(r"ISYM\s*=\s*2", "ISYM = 3", line)  # 2 -> 3
+        if tag == "ICHARG" and parse_tag(text, "ICHARG") == "2":
+            line = re.sub(r"ISYM\s*=\s*2", "ICHARG = 1", line)  # 2 -> 1
         body_lines.append(line)
 
     additions = f"""
@@ -159,7 +161,7 @@ def prepare(relax: Path, zfs: Path) -> None:
     # ---- patched INCAR ----------------------------------------------------- #
     (zfs / "INCAR").write_text(patch_incar(incar_text, n_up, n_dn, nbands))
     print(f"  wrote INCAR with NUPDOWN={n_up - n_dn}, "
-          f"DOCCUP={n_up}*1.0 {nbands - n_up}*0.0, DOCCDO likewise")
+          f"DOCCUP={n_up}*1.0 {nbands - n_up}*0.0, DOCCDO={n_dn}*1.0 {nbands - n_dn}*0.0")
 
     # ---- summary ----------------------------------------------------------- #
     if FAILURES:
