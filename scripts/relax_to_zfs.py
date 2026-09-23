@@ -90,7 +90,7 @@ def patch_incar(text: str, n_up: int, n_dn: int, nbands: int) -> str:
         if tag == "ISYM" and parse_tag(text, "ISYM") == "2":
             line = re.sub(r"ISYM\s*=\s*2", "ISYM = 3", line)  # 2 -> 3
         if tag == "ICHARG" and parse_tag(text, "ICHARG") == "2":
-            line = re.sub(r"ISYM\s*=\s*2", "ICHARG = 1", line)  # 2 -> 1
+            line = re.sub(r"ICHARG\s*=\s*2", "ICHARG = 1", line)  # 2 -> 1
         body_lines.append(line)
 
     additions = f"""
