@@ -56,7 +56,7 @@ def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int]:
     """
     lines = eigenval.read_text().splitlines()
     # header: line 2 holds (nelect, kpts, bands, ...)
-    header = lines[4].split()
+    header = lines[5].split()
     nkpts, nbands = int(header[1]), int(header[2])
     # data blocks: after the 6-line header, first block is kpoint line then
     # nbands lines of  "band  E_up  occ_up  E_dn  occ_dn"
