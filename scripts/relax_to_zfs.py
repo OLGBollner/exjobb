@@ -77,7 +77,7 @@ def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int]:
 # INCAR patching
 # --------------------------------------------------------------------------- #
 REMOVE_TAGS = ("NSW", "IBRION", "LDMATRIX", "DOCCUP", "DOCCDO", "NUPDOWN",
-               "DOCC", "LDAPMINUS")  # never kept verbatim; rebuilt below
+               "DOCC", "LDAPMINUS", "NBANDS", "KPAR")  # never kept verbatim; rebuilt below
 
 
 def patch_incar(text: str, n_up: int, n_dn: int, nbands: int) -> str:
