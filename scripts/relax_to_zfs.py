@@ -80,6 +80,28 @@ REMOVE_TAGS = ("NSW", "IBRION", "LDMATRIX", "DOCCUP", "DOCCDO", "NUPDOWN",
                "DOCC", "LDAPMINUS", "NBANDS", "KPAR")  # never kept verbatim; rebuilt below
 
 
+def kpoints_is_gamma_only(text: str) -> bool:
+    """True if a KPOINTS file describes a Gamma-only mesh."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) < 4:
+        return False
+    # explicit list mode
+    if lines[1].startswith("0"):
+        return lines[2].lower().startswith("g")
+    # automatic mesh: (divisions, shift) must be 1 1 1 and 0 0 0
+    div = lines[3].split()
+    shift = lines[4].split() if len(lines) > 4 else ["0"] * 3
+    gamma = lines[2].lower().startswith("g")
+    return gamma and all(int(d) == 1 for d in div[:3]) and all(float(s) == 0 for s in shift[:3])
+
+
+GAMMA_KPOINTS = """Gamma point only (rewritten by relax_to_zfs.py)
+0
+Gamma
+0 0 0 0
+"""
+
+
 def patch_incar(text: str, n_up: int, n_dn: int, nbands: int) -> str:
     body_lines = []
     for line in text.splitlines():
@@ -126,8 +148,16 @@ def prepare(relax: Path, zfs: Path) -> None:
     shutil.copy2(relax / "CONTCAR", zfs / "POSCAR")
     shutil.copy2(relax / "CHGCAR", zfs / "CHGCAR")
     shutil.copy2(relax / "POTCAR", zfs / "POTCAR")
-    shutil.copy2(relax / "KPOINTS", zfs / "KPOINTS")
-    print("  copied CONTCAR->POSCAR, CHGCAR, POTCAR, KPOINTS")
+    kpts_text = (relax / "KPOINTS").read_text()
+    if kpoints_is_gamma_only(kpts_text):
+        shutil.copy2(relax / "KPOINTS", zfs / "KPOINTS")
+        print("  KPOINTS already Gamma-only; copied as-is")
+    else:
+        (zfs / "KPOINTS").write_text(GAMMA_KPOINTS)
+        warn("KPOINTS was not Gamma-only; ZFS run needs the full k-point grid "
+             "of the relaxation -- wrote a Gamma-only KPOINTS into the ZFS dir "
+             "instead of copying")
+    print("  copied CONTCAR->POSCAR, CHGCAR, POTCAR (+ KPOINTS as Gamma-only)")
 
     # ---- guard against stale WAVECAR in the ZFS dir ------------------------ #
     if (zfs / "WAVECAR").exists():
