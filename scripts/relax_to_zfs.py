@@ -60,7 +60,7 @@ def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int]:
     nkpts, nbands = int(header[1]), int(header[2])
     # data blocks: after the 6-line header, first block is kpoint line then
     # nbands lines of  "band  E_up  occ_up  E_dn  occ_dn"
-    data = lines[6:] if nkpts == 1 else lines[6 : 6 + nbands + 1]
+    data = lines[8:] if nkpts == 1 else lines[8 : 8 + nbands + 1]
     n_up = n_dn = 0
     for line in data[1:]:
         parts = line.split()
