@@ -57,7 +57,7 @@ def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int]:
     lines = eigenval.read_text().splitlines()
     # header: line 2 holds (nelect, kpts, bands, ...)
     header = lines[1].split()
-    nelect, nkpts, nbands = int(header[0]), int(header[1]), int(header[2])
+    nkpts, nbands = int(header[1]), int(header[2])
     # data blocks: after the 6-line header, first block is kpoint line then
     # nbands lines of  "band  E_up  occ_up  E_dn  occ_dn"
     data = lines[6:] if nkpts == 1 else lines[6 : 6 + nbands + 1]
@@ -125,7 +125,7 @@ def prepare(relax: Path, zfs: Path) -> None:
     shutil.copy2(relax / "CHGCAR", zfs / "CHGCAR")
     shutil.copy2(relax / "POTCAR", zfs / "POTCAR")
     shutil.copy2(relax / "KPOINTS", zfs / "KPOINTS")
-    print(f"  copied CONTCAR->POSCAR, CHGCAR, POTCAR, KPOINTS")
+    print("  copied CONTCAR->POSCAR, CHGCAR, POTCAR, KPOINTS")
 
     # ---- guard against stale WAVECAR in the ZFS dir ------------------------ #
     if (zfs / "WAVECAR").exists():
