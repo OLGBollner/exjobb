@@ -98,7 +98,8 @@ def kpoints_is_gamma_only(text: str) -> bool:
 GAMMA_KPOINTS = """Gamma point only (rewritten by relax_to_zfs.py)
 0
 Gamma
-0 0 0 0
+1 1 1
+0 0 0
 """
 
 
