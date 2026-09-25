@@ -182,17 +182,24 @@ class PhononSpectrum:
     iprs: Optional[np.ndarray] = None       # Shape (N_modes,)
     e_pair_complete: Optional[list[bool]] = None  # Length N_modes
     pair_ids: Optional[np.ndarray] = None   # Shape (N_modes,): degenerate partner index, n_modes if unpaired (out-of-bounds sentinel)
+    deg_groups: Optional[list] = None       # Lists of mode indices forming complete irrep component sets
     original_indices: Optional[np.ndarray] = None  # Shape (N_modes,): mode index in the full DFT run
     frequency_unit: str = "meV"
 
     def __post_init__(self):
+        # Symmetry labels + degeneracy groups come from the general symmetry module.
+        # Stored labels are trusted; classification only runs when labels are absent.
         if self.symmetries is None and self.eigenvectors is not None and len(self.eigenvectors) > 0:
-            self.analyze_c3v_symmetry()
+            try:
+                from .symmetry import classify_and_pair
+                self.symmetries, self.deg_groups = classify_and_pair(self)
+            except Exception:
+                # General detection unavailable (no table, or structure too
+                # degenerate for spglib, e.g. synthetic test data); fall back
+                # to the legacy pattern-based C3v analyzer.
+                self.analyze_c3v_symmetry()
         if self.e_pair_complete is None and self.symmetries is not None and len(self.frequencies_mev) > 0:
             self.check_e_pair_completeness()
-        if self.pair_ids is None and self.e_pair_complete is not None:
-            # Backfill pair_ids from e_pair_complete matching (legacy files)
-            self.build_pair_ids()
         if self.original_indices is None:
             self.original_indices = np.arange(self.n_modes, dtype=int)
 
@@ -248,6 +255,7 @@ class PhononSpectrum:
         return completeness
 
     def build_pair_ids(self, tol_mev: float = 0.05) -> np.ndarray:
+        """Deprecated: use beyblade.symmetry.classify_and_pair (deg_groups)."""
         """
         Builds the symmetric pair_ids mapping between degenerate E-mode partners.
 
@@ -265,6 +273,16 @@ class PhononSpectrum:
 
         n = self.n_modes
         pair_ids = np.full(n, n, dtype=int)
+        # General path: use degeneracy groups from the symmetry module when present.
+        if self.deg_groups is not None:
+            for group in self.deg_groups:
+                if len(group) == 2:
+                    i, j = int(group[0]), int(group[1])
+                    pair_ids[i] = j
+                    pair_ids[j] = i
+                # groups of 1 or >2 stay unpaired (n sentinel); chains impossible by construction
+            self.pair_ids = pair_ids
+            return self.pair_ids
 
         for i in range(n):
             sym_i = self.symmetries[i]
@@ -622,8 +640,8 @@ class PhononSpectrum:
 
         syms = list(data["symmetries"]) if "symmetries" in data and data["symmetries"] is not None else None
         iprs = data["iprs"] if "iprs" in data else None
-        e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"] is not None else None
-        pair_ids = np.asarray(data["pair_ids"], dtype=int) if "pair_ids" in data and data["pair_ids"] is not None else None
+        e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"].ndim > 0 else None
+        pair_ids = np.asarray(data["pair_ids"], dtype=int) if "pair_ids" in data and data["pair_ids"].ndim > 0 else None
         original_indices = np.asarray(data["original_indices"], dtype=int) if "original_indices" in data and data["original_indices"] is not None else None
 
         return cls(

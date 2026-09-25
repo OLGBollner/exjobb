@@ -75,7 +75,7 @@ class PhononManager:
             raise ValueError(f"Unsupported file format: {path.suffix}. Use .yaml or .npz")
 
         if self.spectrum.symmetries is None:
-            syms = classify_modes(self.spectrum)
+            syms, _ = classify_modes(self.spectrum)
             self.symmetry_data = {
                 "idx": np.arange(self.spectrum.n_modes),
                 "freqs": self.spectrum.frequencies_mev,
@@ -143,7 +143,7 @@ class PhononManager:
         if self.spectrum is None:
             raise ValueError("No phonon data loaded.")
 
-        syms = classify_modes(self.spectrum)
+        syms, _ = classify_modes(self.spectrum)
         self.symmetry_data = {
             "idx": np.arange(self.spectrum.n_modes),
             "freqs": self.spectrum.frequencies_mev,
@@ -156,7 +156,7 @@ class PhononManager:
         Removes redundant degenerate partner modes from Ex/Ey doublets.
         """
         if self.symmetry_data is None:
-            syms = classify_modes(self.spectrum)
+            syms, _ = classify_modes(self.spectrum)
             self.symmetry_data = {
                 "idx": np.arange(self.spectrum.n_modes),
                 "freqs": self.spectrum.frequencies_mev,
@@ -193,7 +193,7 @@ class PhononManager:
 
         if not save:
             self.spectrum = new_spectrum
-            syms = classify_modes(self.spectrum)
+            syms, _ = classify_modes(self.spectrum)
             self.symmetry_data = {
                 "idx": np.arange(self.spectrum.n_modes),
                 "freqs": self.spectrum.frequencies_mev,

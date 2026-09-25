@@ -116,6 +116,60 @@ def classify_modes(spectrum, tol_mev: float = 0.01, symprec: float = 1e-3) -> tu
     return labels, deg_groups
 
 
+def classify_and_pair(
+    spectrum,
+    tol_mev: float = 0.01,
+    symprec: float = 1e-3,
+    force: bool = False,
+) -> tuple[list[str], list[list[int]]]:
+    """Classify modes and build degeneracy groups, trusting stored labels by default.
+
+    Returns (labels, deg_groups). If the spectrum already carries symmetry
+    labels, they are trusted and only deg_groups are (re)built; pass
+    force=True to re-derive labels via the general projection method.
+    """
+    if spectrum.symmetries is not None and not force:
+        labels = list(spectrum.symmetries)
+        deg_groups = _build_groups_from_labels(spectrum, labels, tol_mev)
+    else:
+        labels, deg_groups = classify_modes(spectrum, tol_mev=tol_mev, symprec=symprec)
+        spectrum.symmetries = labels
+    return labels, deg_groups
+
+
+def _build_groups_from_labels(spectrum, labels, tol_mev):
+    """Build degeneracy groups from stored labels without re-deriving."""
+    from collections import defaultdict
+
+    parent_of = {
+        sub: parent for parent, entry in CHARACTER_TABLES["3m"].items()
+        if isinstance(entry, dict) for sub in entry["sublabels"]
+    }
+    freqs = spectrum.frequencies_mev
+    by_key: dict[tuple[str, float], list[int]] = defaultdict(list)
+    for i, lab in enumerate(labels):
+        if lab is None:
+            continue
+        key = (parent_of.get(lab, lab), round(freqs[i] / tol_mev))
+        by_key[key].append(i)
+    groups = []
+    for (parent, _), idxs in by_key.items():
+        # one group per complete set: split idxs by sublabel count
+        remaining = list(idxs)
+        while remaining:
+            seed = remaining.pop(0)
+            group = [seed]
+            seen = {labels[seed]}
+            for j in remaining:
+                if labels[j] not in seen:
+                    seen.add(labels[j])
+                    group.append(j)
+            for j in group[1:]:
+                remaining.remove(j)
+            groups.append(group)
+    return groups
+
+
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
@@ -303,3 +357,21 @@ def _match_irreps(spectrum, chars, table, tol_mev):
                 remaining.remove(j)
             deg_groups.append(group)
     return labels, deg_groups
+
+
+def group_of(deg_groups: list[list[int]] | None, i: int) -> list[int] | None:
+    """Return the degeneracy group containing mode i, or None."""
+    if deg_groups is None:
+        return None
+    for g in deg_groups:
+        if i in g:
+            return g
+    return None
+
+
+def twin_of(deg_groups, i: int) -> int | None:
+    """Return the degenerate partner of mode i (Ex<->Ey etc.), or None."""
+    g = group_of(deg_groups, i)
+    if g is None or len(g) < 2:
+        return None
+    return next(j for j in g if j != i)
