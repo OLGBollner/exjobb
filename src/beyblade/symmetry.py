@@ -16,7 +16,7 @@ this seam.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from pymatgen.core import Structure
@@ -28,12 +28,35 @@ from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 # χ vectors are ordered to match _operation_keys().
 # ---------------------------------------------------------------------------
 
-CHARACTER_TABLES: dict[str, dict[str, list[float]]] = {
+CHARACTER_TABLES: dict[str, dict[str, Any]] = {
     # C3v: operations (E, C3, C3^2, σv1, σv2, σv3)
+    # 2D irreps carry sublabels: the character pattern of each component,
+    # used for per-mode matching and for pairing (Ex/Ey etc.).
     "3m": {
         "A1": [1, 1, 1, 1, 1, 1],
         "A2": [1, 1, 1, -1, -1, -1],
-        "E": [2, -1, -1, 0, 0, 0],
+        "E": {
+            "sublabels": {
+                "Ex": [1, -1, -1, 1, 1, 1],
+                "Ey": [1, -1, -1, -1, -1, -1],
+            }
+        },
+    },
+    # C2v: operations (E, C2, σv, σv')
+    "mm2": {
+        "A1": [1, 1, 1, 1],
+        "A2": [1, 1, -1, -1],
+        "B1": [1, -1, 1, -1],
+        "B2": [1, -1, -1, 1],
+    },
+    # D3h: operations (E, 2C3, 3C2', σh, 2S3, 3σv)
+    "-6m2": {
+        "A1'": [1, 1, 1, 1, 1, 1],
+        "A2'": [1, 1, -1, 1, 1, -1],
+        "E'": [1, -1, 0, 1, -1, 0],
+        "A1''": [1, 1, 1, -1, -1, -1],
+        "A2''": [1, 1, -1, -1, -1, 1],
+        "E''": [1, -1, 0, -1, 1, 0],
     },
 }
 
@@ -70,12 +93,13 @@ def detect_point_group_from_spectrum(spectrum, symprec: float = 1e-3) -> PointGr
     return detect_point_group(structure, symprec=symprec)
 
 
-def classify_modes(spectrum, tol_mev: float = 0.05, symprec: float = 1e-3) -> list[str]:
+def classify_modes(spectrum, tol_mev: float = 0.01, symprec: float = 1e-3) -> tuple[list[str], list[list[int]]]:
     """Classify each phonon mode into irreps of the detected point group.
 
-    Returns a list of irrep labels, one per mode. Degenerate partners of
-    multi-dimensional irreps share the same label (optionally with a
-    partner suffix when distinguishable, e.g. "Ex"/"Ey" for C3v).
+    Returns (labels, deg_groups): a list of irrep labels, one per mode, and
+    the degeneracy groups — lists of mode indices sharing a frequency and
+    irrep. Degenerate partners of multi-dimensional irreps end up in the
+    same group; accidental degeneracies between different irreps do not.
     """
     pg = detect_point_group_from_spectrum(spectrum, symprec=symprec)
     table = CHARACTER_TABLES.get(pg.symbol)
@@ -85,21 +109,80 @@ def classify_modes(spectrum, tol_mev: float = 0.05, symprec: float = 1e-3) -> li
             "Add one to CHARACTER_TABLES."
         )
 
-    chars = _mode_characters(spectrum, pg)
-    labels = _match_irreps(spectrum, chars, table, tol_mev)
+    ops = defect_frame_operations(spectrum)
+    chars = _mode_characters(spectrum, ops)
+    labels, deg_groups = _match_irreps(spectrum, chars, table, tol_mev)
     spectrum.symmetries = labels
-    return labels
+    return labels, deg_groups
 
 
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
 
-def _mode_characters(spectrum, pg: PointGroup) -> np.ndarray:
-    """χ_m(R) = <ψ_m | R ψ_m> for each mode m and operation R.
+def _defect_frame(spectrum) -> tuple[np.ndarray, np.ndarray]:
+    """Returns (axis, reflection_normal) of the defect in Cartesian coords.
+
+    Same convention as the legacy analyze_c3v_symmetry: NV (C+N) has its
+    principal axis along [1, 1, 1] with a sigma_v mirror normal [1, -1, 0];
+    everything else (e.g. ClV) is taken as [0, 0, 1] / [1, 0, 0].
+    """
+    symbols = list(spectrum.atom_symbols)
+    if "C" in symbols and "N" in symbols:
+        return np.array([1.0, 1.0, 1.0]), np.array([1.0, -1.0, 0.0])
+    return np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0])
+
+
+def _defect_center(spectrum) -> np.ndarray:
+    """Fractional coords of the defect center, wrapped into [0, 1).
+
+    N site for NV, Cl-pair midpoint for ClV, else the cell origin. Matches
+    PhononSpectrum.translate_defect_to_origin. Callers are responsible for
+    periodic wrapping of the result.
+    """
+    frac = np.mod(np.asarray(spectrum.atom_frac_coords, dtype=float), 1.0)
+    symbols_list = list(spectrum.atom_symbols)
+    if symbols_list.count("N") == 1:
+        return frac[symbols_list.index("N")]
+    if "Cl" in symbols_list:
+        return frac[np.asarray(symbols_list) == "Cl"].mean(axis=0)
+    return np.zeros(3)
+
+
+def defect_frame_operations(spectrum) -> list[np.ndarray]:
+    """Builds the point-group operations in the defect-aligned frame.
+
+    The defect is centered at the origin and the principal axis is taken as
+    the group's z axis, so the operations are the standard rotations/reflections
+    about that frame. Operations act about the *defect center*, not the cell
+    origin: applying them to an off-center structure corrupts the atom mapping
+    and hence the characters.
+    """
+    from beyblade.utils import MathUtils
+
+    axis, normal = _defect_frame(spectrum)
+    axis = axis / np.linalg.norm(axis)
+    ops = [np.eye(3)]
+    ops.append(MathUtils.rotation_around_symmetry_axis(axis, 3))
+    ops.append(MathUtils.rotation_around_symmetry_axis(axis, 3).T)  # C3^2
+    for sign in (+1.0, -1.0, -1.0):  # three sigma_v mirrors of C3v
+        n = normal / np.linalg.norm(normal)
+        M = np.eye(3) - 2.0 * np.outer(n, n)
+        if sign < 0:  # rotate plane about axis by +-120 deg for the other mirrors
+            C = ops[1]
+            M = C @ M
+        ops.append(M)
+    return ops
+
+
+def _mode_characters(spectrum, operations: list[np.ndarray]) -> np.ndarray:
+    """chi_m(R) = <psi_m | R psi_m> for each mode m and operation R.
 
     R acts on the eigenvector by permuting atoms and rotating their
-    displacement vectors: ψ'_i = R_cart · ψ_{σ(i)}.
+    displacement vectors. The structure is first centered on the defect
+    (PBC-aware, matching the legacy code) and the operations are built in
+    the defect-aligned frame, so an off-center defect does not corrupt the
+    characters.
     """
     eigs = np.asarray(spectrum.eigenvectors)
     n_modes = eigs.shape[0]
@@ -108,103 +191,115 @@ def _mode_characters(spectrum, pg: PointGroup) -> np.ndarray:
     else:
         n_atoms = eigs.shape[-1] // 3   # flat (n_modes, 3N)
         vecs = eigs.reshape(n_modes, n_atoms, 3)
-    n_atoms = vecs.shape[1]
 
+    lattice = np.asarray(spectrum.lattice, dtype=float)
+    inv_lat = np.linalg.inv(lattice)
     frac = np.mod(np.asarray(spectrum.atom_frac_coords, dtype=float), 1.0)
-    inv_lat = np.linalg.inv(np.asarray(spectrum.lattice, dtype=float))
-    cart_atoms = frac @ np.asarray(spectrum.lattice, dtype=float)
+    center = _defect_center(spectrum)
+    frac = np.mod(frac - center, 1.0)   # PBC-aware centering, defect at origin
+    cart_atoms = frac @ lattice
     symbols = np.asarray(spectrum.atom_symbols)
 
-    chars = np.zeros((n_modes, pg.order))
-    for k, R in enumerate(pg.operations):
+    chars = np.zeros((n_modes, len(operations)))
+    for k, R in enumerate(operations):
         R = np.asarray(R, dtype=float)
-        mapping = _atom_mapping(R, cart_atoms, frac, inv_lat, symbols)
-        rotated = vecs @ R.T                 # rotate displacements
-        permuted = rotated[:, mapping, :]    # move to where R sends each atom
-        # <ψ | Rψ> summed over atoms
-        chars[:, k] = np.sum(vecs * permuted, axis=(1, 2))
+        mapping = _atom_mapping(R, cart_atoms, frac, inv_lat, symbols, lattice)
+        # Legacy convention: chi = trace(eig[mapping] @ (R @ eig.T))
+        # expands to sum_i v_{sigma(i)} . R v_i: rotate the original atom's
+        # displacement, compare with the mapped atom's.
+        rotated = np.einsum("ij,naj->nai", R, vecs)
+        chars[:, k] = np.sum(vecs[:, mapping, :] * rotated, axis=(1, 2))
     return chars
 
 
-def _atom_mapping(R, cart_atoms, frac, inv_lat, symbols):
-    """σ: for each atom i, index of the atom R sends i onto."""
+def _atom_mapping(R, cart_atoms, frac, inv_lat, symbols, lattice):
+    """sigma: for each atom i, index of the atom R sends i onto."""
     n_atoms = cart_atoms.shape[0]
     mapping = np.zeros(n_atoms, dtype=int)
     rotated_cart = cart_atoms @ R.T
     rot_frac = np.mod(rotated_cart @ inv_lat, 1.0)
-    orig_frac = frac
     for i in range(n_atoms):
-        diffs = np.mod(orig_frac - rot_frac[i] + 0.5, 1.0) - 0.5
-        dists = np.linalg.norm(diffs @ np.asarray(inv_lat).T, axis=1)
+        diffs = np.mod(frac - rot_frac[i] + 0.5, 1.0) - 0.5
+        dists = np.linalg.norm(diffs @ np.asarray(lattice, dtype=float), axis=1)
         valid = np.where(symbols == symbols[i])[0]
         mapping[i] = valid[np.argmin(dists[valid])] if len(valid) else i
     return mapping
 
 
+def _parent_label(label: str) -> str:
+    """Parent irrep of a (possibly sub-)label: "Ex" -> "E", "E" -> "E"."""
+    return label.rstrip("xy") if label not in ("A1", "A2") else label
+
+
 def _match_irreps(spectrum, chars, table, tol_mev):
-    """Assign irrep labels by projection; pair degenerate modes for E."""
+    """Assign irrep labels per mode, mirroring the legacy semantics.
+
+    Each mode is matched independently against 1D irreps and the
+    single-component character patterns of degenerate (multidimensional)
+    irreps. Frequency degeneracy is used only afterwards, to build
+    deg_groups: components of the same multidimensional irrep sit at the
+    same frequency. Accidental degeneracies between different irreps are
+    therefore harmless.
+    """
     n = spectrum.n_modes
     freqs = spectrum.frequencies_mev
-    labels: list[Optional[str]] = [None] * n
-    assigned: set[int] = set()
 
-
-    # Pair candidates by frequency degeneracy first.
-    pairs: list[tuple[int, int]] = []
-    singles: list[int] = []
-    for i in range(n):
-        if i in assigned:
-            continue
-        partner = None
-        for j in range(n):
-            if j != i and j not in assigned and abs(freqs[j] - freqs[i]) < tol_mev:
-                partner = j
-                break
-        if partner is not None:
-            pairs.append((i, partner))
-            assigned.update([i, partner])
+    # Per-irrep component patterns: 1D irreps appear as-is; for an irrep of
+    # dimension d>1 the stored sublabels are the characters of one component.
+    patterns: list[tuple[str, np.ndarray]] = []
+    parent_of: dict[str, str] = {}
+    for name, entry in table.items():
+        if isinstance(entry, dict):
+            for sub, chi in entry["sublabels"].items():
+                patterns.append((sub, np.asarray(chi, dtype=float)))
+                parent_of[sub] = name
         else:
-            singles.append(i)
-            assigned.add(i)
+            patterns.append((name, np.asarray(entry, dtype=float)))
+            parent_of[name] = name
 
-    # Match pairs against 2D irreps (summed characters).
-    for i, j in pairs:
-        summed = chars[i] + chars[j]
-        best, best_score = None, -1.0
-        for name, chi in table.items():
-            chi = np.asarray(chi)
-            score = abs(np.dot(summed, chi)) / (np.linalg.norm(summed) * np.linalg.norm(chi) + 1e-12)
+    labels: list[Optional[str]] = []
+    parents: list[Optional[str]] = []  # parent irrep of each sublabel
+    for i in range(n):
+        v = chars[i]
+        nv = np.linalg.norm(v) + 1e-12
+        best, best_score, best_parent = None, -1.0, None
+        for name, chi in patterns:
+            score = abs(np.dot(v, chi)) / (nv * (np.linalg.norm(chi) + 1e-12))
             if score > best_score:
-                best, best_score = name, score
-        labels[i] = labels[j] = best
-        if best == "E":
-            labels[i], labels[j] = _split_e_partners(spectrum, chars, i, j)
+                best, best_score, best_parent = name, score, parent_of[name]
+        labels.append(best)
+        parents.append(best_parent)
 
-    # Match singles against 1D irreps only.
-    for i in singles:
-        best, best_score = None, -1.0
-        for name, chi in table.items():
-            chi = np.asarray(chi)
-            if np.allclose(chi, chi[0]) and len(set(np.asarray(chi).round(6))) == 1 and chi[0] != 2:
-                pass  # 1D irrep
-            # Heuristic: 2D irreps have χ(E)=2, skip for singles.
-            if chi[0] != 1:
-                continue
-            score = abs(np.dot(chars[i], chi)) / (np.linalg.norm(chars[i]) * np.linalg.norm(chi) + 1e-12)
-            if score > best_score:
-                best, best_score = name, score
-        labels[i] = best
-    return labels
+    # Degeneracy groups: complete sets of one irrep's sublabels at the same
+    # frequency. Modes of the same parent irrep whose sublabels cover each
+    # component exactly once form a group; accidental coincidences between
+    # different parents never merge. Unpaired members (e.g. a lone Ex whose
+    # Ey partner sits beyond tol) are reported as their own group.
+    deg_groups: list[list[int]] = []
+    by_parent: dict[str, list[int]] = {}
+    for i, par in enumerate(parents):
+        by_parent.setdefault(par or "?", []).append(i)
 
-
-def _split_e_partners(spectrum, chars, i, j):
-    """Distinguish the two partners of a 2D irrep (Ex/Ey for C3v-like groups).
-
-    Use the sign of the character under the first reflection-like
-    operation (χ = 0 for both partners of C3v E under σv, so fall back
-    to the sign of the inner product between partners).
-    """
-    if i == j:
-        return "Ex", "Ey"
-    inner = float(np.dot(chars[i], chars[j]))
-    return ("Ex", "Ey") if inner >= 0 else ("Ey", "Ex")
+    for par, idxs in by_parent.items():
+        remaining = list(idxs)
+        while remaining:
+            seed = remaining.pop(0)
+            group = [seed]
+            # partners: modes sharing the seed's frequency (within tol)
+            partners = [
+                j for j in remaining
+                if abs(freqs[j] - freqs[seed]) < tol_mev
+            ]
+            # keep at most one partner per distinct sublabel beyond the seed
+            taken: set[str] = set()
+            for j in partners:
+                if labels[j] == labels[seed]:
+                    continue  # same sublabel: accidental, not a partner
+                if labels[j] in taken:
+                    continue
+                taken.add(labels[j])
+                group.append(j)
+            for j in group[1:]:
+                remaining.remove(j)
+            deg_groups.append(group)
+    return labels, deg_groups
