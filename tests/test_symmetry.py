@@ -12,7 +12,6 @@ from pymatgen.core import Structure
 from beyblade.symmetry import (
     detect_point_group,
     classify_modes,
-    PointGroup,
 )
 from beyblade.parsers import parse_phonon_npz
 
@@ -54,7 +53,7 @@ def test_matches_legacy_c3v_labels(path):
     spec = parse_phonon_npz(path)
     labels = classify_modes(spec)
     assert spec.symmetries is not None
-    match = sum(l == s for l, s in zip(labels, spec.symmetries))
+    match = sum(lab == s for lab, s in zip(labels, spec.symmetries))
     assert match / len(labels) > 0.95, f"only {match}/{len(labels)} labels match"
 
 
@@ -62,4 +61,4 @@ def test_e_pairs_are_detected_as_degenerate():
     spec = parse_phonon_npz(NV_PATH)
     labels = classify_modes(spec)
     # In C3v, E modes come in degenerate pairs; check at least some E labels
-    assert sum(l.startswith("E") for l in labels) > 0
+    assert sum(lab.startswith("E") for lab in labels) > 0

@@ -148,7 +148,7 @@ def _match_irreps(spectrum, chars, table, tol_mev):
     labels: list[Optional[str]] = [None] * n
     assigned: set[int] = set()
 
-    ops_sorted = np.argsort(-np.abs(chars[:, 0]))  # noop, keep op order
+
     # Pair candidates by frequency degeneracy first.
     pairs: list[tuple[int, int]] = []
     singles: list[int] = []
