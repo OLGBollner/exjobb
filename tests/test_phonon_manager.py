@@ -181,7 +181,11 @@ class TestC3vSymmetryClassification:
             symmetries=None,  # triggers automatic C3v classification
         )
 
-        assert spectrum.symmetries == ["A1", "Ex", "Ey"]
+        # Ex/Ey ordering within the degenerate pair is convention-dependent
+        # (depends on which sigma_v plane the alignment picks); both members
+        # must be present, A1 first.
+        assert spectrum.symmetries[0] == "A1"
+        assert set(spectrum.symmetries[1:]) == {"Ex", "Ey"}
 
     def test_locality_weight(self):
         """Verifies spatial defect-neighbourhood locality calculation."""
