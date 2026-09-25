@@ -40,13 +40,13 @@ def report(path: str, labels: list[str | None], ref: list[str] | None) -> int:
     if len(ref) != n:
         print(f"  WARNING: reference length {len(ref)} != {n}; skipping comparison")
         return 1
-    match = sum(l == r for l, r in zip(labels, ref))
+    match = sum(got == want for got, want in zip(labels, ref))
     print(f"  reference match: {match}/{n} ({100.0 * match / n:.2f}%)")
-    mismatches = [(i, l, r) for i, (l, r) in enumerate(zip(labels, ref)) if l != r]
+    mismatches = [(i, got, want) for i, (got, want) in enumerate(zip(labels, ref)) if got != want]
     if mismatches:
         print(f"  mismatches ({len(mismatches)}):")
-        for i, l, r in mismatches[:20]:
-            print(f"    mode {i}: classified {l!r}, stored {r!r}")
+        for i, got, want in mismatches[:20]:
+            print(f"    mode {i}: classified {got!r}, stored {want!r}")
         if len(mismatches) > 20:
             print(f"    ... and {len(mismatches) - 20} more")
     return 0
