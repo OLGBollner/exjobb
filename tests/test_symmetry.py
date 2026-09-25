@@ -1,4 +1,4 @@
-"""Tests for the generalized symmetry pipeline (ADR-001).
+"""Tests for the generalized symmetry pipeline.
 
 Validation strategy: the general pipeline must reproduce the legacy
 C3v hard-coded classification on real NV/ClV phonon data, plus unit

@@ -1,4 +1,4 @@
-"""Generalized phonon-mode symmetry classification (ADR-001).
+"""Generalized phonon-mode symmetry classification.
 
 Pipeline:
 1. Detect the point group of the defect structure via pymatgen's
@@ -10,7 +10,7 @@ Pipeline:
    characters (2D irreps).
 
 The analytic selection of coupling coefficients from the ZFS matrix
-remains a per-group mapping table (ADR-001); only irrep labels cross
+remains a per-group mapping table; only irrep labels cross
 this seam.
 """
 from __future__ import annotations
