@@ -56,17 +56,17 @@ def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int]:
     """
     lines = eigenval.read_text().splitlines()
     # header: line 2 holds (nelect, kpts, bands, ...)
-    header = lines[1].split()
+    header = lines[5].split()
     nkpts, nbands = int(header[1]), int(header[2])
     # data blocks: after the 6-line header, first block is kpoint line then
     # nbands lines of  "band  E_up  occ_up  E_dn  occ_dn"
-    data = lines[6:] if nkpts == 1 else lines[6 : 6 + nbands + 1]
+    data = lines[7:] if nkpts == 1 else lines[7 : 7 + nbands + 1]
     n_up = n_dn = 0
     for line in data[1:]:
         parts = line.split()
         if len(parts) < 3:
             continue
-        if float(parts[2]) > 0.5:
+        if float(parts[3]) > 0.5:
             n_up += 1
         if len(parts) >= 5 and float(parts[4]) > 0.5:
             n_dn += 1
@@ -77,7 +77,30 @@ def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int]:
 # INCAR patching
 # --------------------------------------------------------------------------- #
 REMOVE_TAGS = ("NSW", "IBRION", "LDMATRIX", "DOCCUP", "DOCCDO", "NUPDOWN",
-               "DOCC", "LDAPMINUS")  # never kept verbatim; rebuilt below
+               "DOCC", "LDAPMINUS", "NBANDS", "KPAR")  # never kept verbatim; rebuilt below
+
+
+def kpoints_is_gamma_only(text: str) -> bool:
+    """True if a KPOINTS file describes a Gamma-only mesh."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) < 4:
+        return False
+    # explicit list mode
+    if lines[1].startswith("0"):
+        return lines[2].lower().startswith("g")
+    # automatic mesh: (divisions, shift) must be 1 1 1 and 0 0 0
+    div = lines[3].split()
+    shift = lines[4].split() if len(lines) > 4 else ["0"] * 3
+    gamma = lines[2].lower().startswith("g")
+    return gamma and all(int(d) == 1 for d in div[:3]) and all(float(s) == 0 for s in shift[:3])
+
+
+GAMMA_KPOINTS = """Gamma point only (rewritten by relax_to_zfs.py)
+0
+Gamma
+1 1 1
+0 0 0
+"""
 
 
 def patch_incar(text: str, n_up: int, n_dn: int, nbands: int) -> str:
@@ -89,6 +112,8 @@ def patch_incar(text: str, n_up: int, n_dn: int, nbands: int) -> str:
             continue  # dropped, re-added below
         if tag == "ISYM" and parse_tag(text, "ISYM") == "2":
             line = re.sub(r"ISYM\s*=\s*2", "ISYM = 3", line)  # 2 -> 3
+        if tag == "ICHARG" and parse_tag(text, "ICHARG") == "2":
+            line = re.sub(r"ICHARG\s*=\s*2", "ICHARG = 1", line)  # 2 -> 1
         body_lines.append(line)
 
     additions = f"""
@@ -124,8 +149,16 @@ def prepare(relax: Path, zfs: Path) -> None:
     shutil.copy2(relax / "CONTCAR", zfs / "POSCAR")
     shutil.copy2(relax / "CHGCAR", zfs / "CHGCAR")
     shutil.copy2(relax / "POTCAR", zfs / "POTCAR")
-    shutil.copy2(relax / "KPOINTS", zfs / "KPOINTS")
-    print("  copied CONTCAR->POSCAR, CHGCAR, POTCAR, KPOINTS")
+    kpts_text = (relax / "KPOINTS").read_text()
+    if kpoints_is_gamma_only(kpts_text):
+        shutil.copy2(relax / "KPOINTS", zfs / "KPOINTS")
+        print("  KPOINTS already Gamma-only; copied as-is")
+    else:
+        (zfs / "KPOINTS").write_text(GAMMA_KPOINTS)
+        warn("KPOINTS was not Gamma-only; ZFS run needs the full k-point grid "
+             "of the relaxation -- wrote a Gamma-only KPOINTS into the ZFS dir "
+             "instead of copying")
+    print("  copied CONTCAR->POSCAR, CHGCAR, POTCAR (+ KPOINTS as Gamma-only)")
 
     # ---- guard against stale WAVECAR in the ZFS dir ------------------------ #
     if (zfs / "WAVECAR").exists():
@@ -159,7 +192,7 @@ def prepare(relax: Path, zfs: Path) -> None:
     # ---- patched INCAR ----------------------------------------------------- #
     (zfs / "INCAR").write_text(patch_incar(incar_text, n_up, n_dn, nbands))
     print(f"  wrote INCAR with NUPDOWN={n_up - n_dn}, "
-          f"DOCCUP={n_up}*1.0 {nbands - n_up}*0.0, DOCCDO likewise")
+          f"DOCCUP={n_up}*1.0 {nbands - n_up}*0.0, DOCCDO={n_dn}*1.0 {nbands - n_dn}*0.0")
 
     # ---- summary ----------------------------------------------------------- #
     if FAILURES:
