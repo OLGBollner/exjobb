@@ -451,7 +451,18 @@ class PhononSpectrum:
     def analyze_c3v_symmetry(self) -> list[str]:
         """
         Analyzes C3v point group symmetry representations (A1, A2, Ex, Ey) for each phonon mode.
+
+        Deprecated: use beyblade.symmetry.classify_modes, which detects the
+        point group and classifies via general projection (ADR-001). This
+        legacy method is kept as a validation reference only.
         """
+        import warnings
+        warnings.warn(
+            "analyze_c3v_symmetry is deprecated; use beyblade.symmetry.classify_modes "
+            "(general projection, ADR-001). Kept as a validation reference.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from beyblade.utils import MathUtils
 
         try:

@@ -8,6 +8,7 @@ import numpy as np
 from beyblade.models import PhononSpectrum
 from beyblade.parsers import parse_phonopy_yaml, parse_phonon_npz, save_phonon_npz
 from beyblade.utils import MathUtils
+from beyblade.symmetry import classify_modes
 
 
 class PhononManager:
@@ -74,7 +75,12 @@ class PhononManager:
             raise ValueError(f"Unsupported file format: {path.suffix}. Use .yaml or .npz")
 
         if self.spectrum.symmetries is None:
-            self.analyze_c3v_symmetry()
+            syms = classify_modes(self.spectrum)
+            self.symmetry_data = {
+                "idx": np.arange(self.spectrum.n_modes),
+                "freqs": self.spectrum.frequencies_mev,
+                "sym": np.array(syms),
+            }
         else:
             self.symmetry_data = {
                 "sym": np.array(self.spectrum.symmetries),
@@ -150,7 +156,12 @@ class PhononManager:
         Removes redundant degenerate partner modes from Ex/Ey doublets.
         """
         if self.symmetry_data is None:
-            self.analyze_c3v_symmetry()
+            syms = classify_modes(self.spectrum)
+            self.symmetry_data = {
+                "idx": np.arange(self.spectrum.n_modes),
+                "freqs": self.spectrum.frequencies_mev,
+                "sym": np.array(syms),
+            }
 
         skip_indices = set()
         for i in range(self.nmodes):
@@ -182,7 +193,12 @@ class PhononManager:
 
         if not save:
             self.spectrum = new_spectrum
-            self.analyze_c3v_symmetry()
+            syms = classify_modes(self.spectrum)
+            self.symmetry_data = {
+                "idx": np.arange(self.spectrum.n_modes),
+                "freqs": self.spectrum.frequencies_mev,
+                "sym": np.array(syms),
+            }
         else:
             filename = f"phonon_data_sym_n{new_spectrum.n_modes}.npz"
             saved_path = save_phonon_npz(new_spectrum, filename)
