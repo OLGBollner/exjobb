@@ -143,7 +143,7 @@ class PhononManager:
         if self.spectrum is None:
             raise ValueError("No phonon data loaded.")
 
-        syms = self.spectrum.analyze_c3v_symmetry()
+        syms = classify_modes(self.spectrum)
         self.symmetry_data = {
             "idx": np.arange(self.spectrum.n_modes),
             "freqs": self.spectrum.frequencies_mev,
