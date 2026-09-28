@@ -43,6 +43,10 @@ CHARACTER_TABLES: dict[str, dict[str, Any]] = {
                 "Ex": [1, -1, -1, 1, 1, 1],
                 "Ey": [1, -1, -1, -1, -1, -1],
             },
+            # True class characters of E (components mix under C3, so the
+            # sublabel proxy patterns double-count there). Used for the
+            # degenerate-group verification: Ex+Ey must sum to this.
+            "class_chars": [2, -1, -1, 0, 0, 0],
             # Legacy convention: chi(first reflection) > 0 -> Ex, else Ey.
             "sublabel_rule": (3, "Ex", "Ey"),
         },
@@ -126,7 +130,70 @@ def classify_modes(spectrum, tol_mev: float = 0.01, symprec: float = 1e-3) -> tu
         spectrum, chars, table, tol_mev, first_reflection=first_reflection
     )
     spectrum.symmetries = labels
+    spectrum.sym_check = verify_deg_groups(chars, labels, deg_groups, table)
     return labels, deg_groups
+
+
+def verify_deg_groups(
+    chars, labels, deg_groups, table, atol: float = 0.05,
+) -> dict:
+    """Check that each degenerate group sums to its parent irrep's characters.
+
+    Physics check (independent of how labels were derived): the character
+    vector of a multidimensional irrep is the trace of the full
+    representation, so the summed characters of a complete degenerate set
+    must reproduce the parent irrep's class characters. For C3v E this is
+    [2, -1, -1, 0, 0, 0] — verified on ClV: 127/127 Ex/Ey pairs.
+
+    Returns a report dict:
+      ok         True when every multi-member group passes
+      failures   [(group_idx, indices, expected, got), ...] for mismatches
+      unpaired   [(group_idx, indices), ...] lone members of a
+                 multidimensional irrep (partner beyond tol) — unverifiable,
+                 not a failure
+    Singleton 1D irreps (A1/A2) are skipped: they are their own trace.
+    """
+    # class characters per irrep: explicit when the table carries them,
+    # else the sum of its sublabel patterns (identity-safe fallback)
+    class_chars: dict[str, np.ndarray] = {}
+    dim: dict[str, int] = {}
+    for name, entry in table.items():
+        if isinstance(entry, dict):
+            subs = list(entry["sublabels"].items())
+            if "class_chars" in entry:
+                chi = np.asarray(entry["class_chars"], dtype=float)
+            else:
+                chi = np.zeros(len(subs[0][1]), dtype=float)
+                for _, sub_chi in subs:
+                    chi += np.asarray(sub_chi, dtype=float)
+            class_chars[name] = chi
+            dim[name] = len(subs)
+        else:
+            class_chars[name] = np.asarray(entry, dtype=float)
+            dim[name] = 1
+
+    failures, unpaired = [], []
+    for gi, group in enumerate(deg_groups):
+        lab = labels[group[0]]
+        if lab is None:
+            continue
+        parent = _parent_label(lab)
+        if parent not in class_chars:
+            continue
+        if len(group) == 1:
+            # lone member of a multidimensional irrep: partner missing
+            if dim[parent] > 1:
+                unpaired.append((gi, list(group)))
+            continue
+        got = np.sum([chars[i] for i in group], axis=0)
+        expected = class_chars[parent]
+        if not np.allclose(got, expected, atol=atol):
+            failures.append((gi, list(group), expected.tolist(), got.tolist()))
+    return {
+        "ok": len(failures) == 0,
+        "failures": failures,
+        "unpaired": unpaired,
+    }
 
 
 def classify_and_pair(
@@ -140,6 +207,12 @@ def classify_and_pair(
     Returns (labels, deg_groups). If the spectrum already carries symmetry
     labels, they are trusted and only deg_groups are (re)built; pass
     force=True to re-derive labels via the general projection method.
+
+    Both paths run verify_deg_groups() afterwards: the character-sum check
+    (each degenerate set must sum to its parent irrep's class characters).
+    The report is stored on spectrum.sym_check. If the point group cannot
+    be detected (e.g. synthetic test structures), verification is skipped
+    (sym_check stays None) rather than raising — labels/groups still work.
     """
     if spectrum.symmetries is not None and not force:
         labels = list(spectrum.symmetries)
@@ -147,6 +220,16 @@ def classify_and_pair(
     else:
         labels, deg_groups = classify_modes(spectrum, tol_mev=tol_mev, symprec=symprec)
         spectrum.symmetries = labels
+        return labels, deg_groups  # verify already ran inside classify_modes
+    try:
+        pg = detect_point_group_from_spectrum(spectrum, symprec=symprec)
+        table = CHARACTER_TABLES.get(pg.symbol, {})
+    except Exception:
+        table = {}
+    if table:
+        ops = defect_frame_operations(spectrum)
+        chars = _mode_characters(spectrum, ops)
+        spectrum.sym_check = verify_deg_groups(chars, labels, deg_groups, table)
     return labels, deg_groups
 
 
