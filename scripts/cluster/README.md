@@ -21,4 +21,4 @@ Variables: `DEFECT`, `BINARY`, `CREATE_STRUCT`, `GET_N_MODES`, `PHONON_PATH`,
 
 Both skip run dirs whose OUTCAR already contains a complete
 spin-spin ZFS tensor block, so restarts resume where they stopped.
-- `create_perturbation_dirs.py` -- build ready-to-go perturbed run trees (`first_order`/`second_order` x `all_bands`/`defect_band_approx` x pert scales) from a completed pristine ZFS run; derives unpaired-band DOCCUP/DOCCDO from EIGENVAL and prefills the SLURM scripts.
+- `create_perturbation_dirs.py` -- build ready-to-go perturbed run trees (`first_order`/`second_order` x `all_bands`/`defect_band_approx` x pert scales). Defect name is read from the --output folder; input files are copied verbatim from `<output>/ZFS_hyp` (all_bands) and `<output>/ZFS_occup` (defect_band_approx); both must exist or the script aborts. Existing pert_<scale> folders are never overwritten.
