@@ -8,3 +8,6 @@ runs/
 
 # Thesis drafts stay local
 Thesis/
+
+# Stray pasted scratch files
+pasted-text-*.txt
