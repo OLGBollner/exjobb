@@ -1,7 +1,6 @@
-
 import numpy as np
 from scipy import constants as Cn
-
+from typing import Tuple
 
 class MathUtils:
 
@@ -14,7 +13,7 @@ class MathUtils:
         return delta
 
     @staticmethod
-    def expand_data(freqs: np.ndarray, values: np.ndarray, res: float, sigma: float) -> tuple[np.ndarray, np.ndarray]:
+    def expand_data(freqs: np.ndarray, values: np.ndarray, res: float, sigma: float) -> Tuple[np.ndarray, np.ndarray]:
         freqs = np.array(freqs)
         values = np.array(values)
         f_min = 0
@@ -30,7 +29,7 @@ class MathUtils:
         return x_grid, y_dense
 
     @staticmethod
-    def smear_data(freqs: np.ndarray, values: np.ndarray, res: float, sigma: float) -> tuple[np.ndarray, np.ndarray]:
+    def smear_data(freqs: np.ndarray, values: np.ndarray, res: float, sigma: float) -> Tuple[np.ndarray, np.ndarray]:
         x_grid, y_dense = MathUtils.expand_data(freqs, values, res, sigma)
 
         x_kernel = np.arange(-4 * sigma, 4 * sigma + res, res)
@@ -211,7 +210,7 @@ class MathUtils:
             Mass-weighted phonon eigenvectors.
         frac_coords : array_like, shape (n_atoms, 3)
             Fractional atomic coordinates (already shifted so the defect
-            is at the origin, e.g. from PhononSpectrum.translate_defect_to_origin).
+            is at the origin, e.g. from PhononManager.translate_defect_to_origin).
         lattice : array_like, shape (3, 3)
             Lattice vectors as rows.
         defect_pos : array_like, shape (3,), optional

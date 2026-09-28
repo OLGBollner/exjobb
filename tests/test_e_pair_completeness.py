@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-
 from beyblade.models import PhononSpectrum
 from beyblade.zfs_manager import ZFSManager
 

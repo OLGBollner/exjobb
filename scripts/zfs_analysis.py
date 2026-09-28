@@ -1,10 +1,9 @@
 import argparse
 from pathlib import Path
 
+from beyblade.zfs_manager import ZFSManager
 from beyblade.parsers import parse_phonon_npz
 from beyblade.plotter import ZFSPlotter
-from beyblade.zfs_manager import ZFSManager
-
 
 def main():
     parser = argparse.ArgumentParser(description="Manage and analyze ZFS phonon derivatives and plot the results.")
@@ -68,7 +67,7 @@ def main():
 
         save_name = f"{zfs_manager.defect}_{zfs_manager.cell_size}_raw_zfs_data_{zfs_manager.calc_method}_{order}d.npz"
 
-        zfs_manager.save_data(save_name,
+        _ = zfs_manager.save_data(save_name,
                                              order=order,
                                              eigen_rotation=zfs_manager.eigen_rotation,
                                              zfs_relaxed=zfs_manager.zfs_relaxed,
@@ -100,7 +99,9 @@ def main():
     if args.data_files and zfs_manager is None:
         files_to_plot = args.data_files
     elif zfs_manager is not None:
-        if args.order == 1 and args.data_files or args.order == 2 and not generated_files:
+        if args.order == 1 and args.data_files:
+            files_to_plot = args.data_files
+        elif args.order == 2 and not generated_files:
             files_to_plot = args.data_files
         else:
             files_to_plot = generated_files

@@ -1,12 +1,10 @@
-from argparse import ArgumentParser as Parser
-
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import Normalize
+import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-
-from beyblade.constants import CONSTANTS
+from matplotlib.colors import Normalize
+from argparse import ArgumentParser as Parser
 from beyblade.parsers import parse_phonon_npz
+from beyblade.constants import CONSTANTS
 
 if __name__ == "__main__":
     parser = Parser("Plots IPR.")
@@ -27,7 +25,6 @@ if __name__ == "__main__":
     coupling_data = np.load(args.data)
 
     plt.rcParams.update({
-        "axes.titlesize": 16,
         "axes.labelsize": 16,
         "xtick.labelsize": 12,
         "ytick.labelsize": 12,

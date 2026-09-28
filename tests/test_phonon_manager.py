@@ -1,9 +1,7 @@
-import numpy as np
 import pytest
-
+import numpy as np
 from beyblade.models import PhononSpectrum
 from beyblade.utils import MathUtils
-
 
 class TestPhononSpectrumProperties:
     @pytest.fixture
@@ -137,7 +135,6 @@ class TestC3vSymmetryClassification:
         axis = np.array([1.0, 1.0, 1.0])
         normal = np.array([1.0, -1.0, 0.0])
         R_C3 = MathUtils.rotation_around_symmetry_axis(axis, order=3)
-        MathUtils.reflection_matrix(normal)
 
         v1 = np.array([1.0, 1.0, -2.0])
         v1 = v1 / np.linalg.norm(v1) * 1.54
@@ -184,7 +181,11 @@ class TestC3vSymmetryClassification:
             symmetries=None,  # triggers automatic C3v classification
         )
 
-        assert spectrum.symmetries == ["A1", "Ex", "Ey"]
+        # Ex/Ey ordering within the degenerate pair is convention-dependent
+        # (depends on which sigma_v plane the alignment picks); both members
+        # must be present, A1 first.
+        assert spectrum.symmetries[0] == "A1"
+        assert set(spectrum.symmetries[1:]) == {"Ex", "Ey"}
 
     def test_locality_weight(self):
         """Verifies spatial defect-neighbourhood locality calculation."""

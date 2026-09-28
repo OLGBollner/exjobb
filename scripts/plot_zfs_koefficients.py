@@ -1,7 +1,6 @@
 from argparse import ArgumentParser as Parser
-
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
 from utils import smear_data
 
 if __name__ == "__main__":
@@ -22,7 +21,6 @@ if __name__ == "__main__":
   colors = iter(["red", "black", "blue", "orange", "green"])
 
   plt.rcParams.update({
-    "axes.titlesize": 16,
     "axes.labelsize": 16,
     "xtick.labelsize": 12,
     "ytick.labelsize": 12,
@@ -55,7 +53,7 @@ if __name__ == "__main__":
       else:
         filename += "zfs_vs_pert"
 
-      filename += f"_{pert_scale}"
+      filename += "_{}".format(pert_scale)
 
       if args.bar:
         filename += "_bar"
@@ -68,7 +66,7 @@ if __name__ == "__main__":
       else:
         sim_type = "all_bands" if "all" in zfs_files[i] else "defect_band_approx"
 
-        filename+=f":{sim_type}"
+        filename+=":{}".format(sim_type)
     filename += args.format if args.format else ".png"
 
     ipr = data["ipr"]
@@ -117,8 +115,6 @@ if __name__ == "__main__":
     else:
       ax.set_ylabel("Coupling coefficient (MHz)")
       ax.set_ylim(0, 200)
-
-    ax.set_title(f"Coupling strength for perturbation {pert_scale} Å")
 
     if args.bar:
       ax.set_xlabel("Mode index")

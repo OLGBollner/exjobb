@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
-
+from typing import Any, Optional, Sequence, Union
 import numpy as np
 from scipy import constants as Cn
 
@@ -20,7 +18,7 @@ class EnergyUnit(str, Enum):
     THZ = "THz"
 
 
-def convert_energy(values: float | np.ndarray, from_unit: str, to_unit: str) -> float | np.ndarray:
+def convert_energy(values: Union[float, np.ndarray], from_unit: str, to_unit: str) -> Union[float, np.ndarray]:
     """
     Converts energy / frequency values between MHz, J, meV, GHz, and THz.
     """
@@ -157,8 +155,8 @@ class PhononMode:
     index: int
     frequency_mev: float
     eigenvector: np.ndarray  # Shape (N_atoms, 3)
-    symmetry: str | None = None
-    ipr: float | None = None
+    symmetry: Optional[str] = None
+    ipr: Optional[float] = None
     pair_id: int = -1              # index of degenerate partner mode; -1 = unknown (no spectrum)
     original_index: int = -1       # mode index in the full DFT run; -1 = unknown
 
@@ -180,21 +178,28 @@ class PhononSpectrum:
     atom_symbols: list[str]                 # Length N_atoms
     atomic_masses: np.ndarray               # Shape (N_atoms,)
     lattice: np.ndarray                     # Shape (3, 3)
-    symmetries: list[str] | None = None  # Length N_modes
-    iprs: np.ndarray | None = None       # Shape (N_modes,)
-    e_pair_complete: list[bool] | None = None  # Length N_modes
-    pair_ids: np.ndarray | None = None   # Shape (N_modes,): degenerate partner index, n_modes if unpaired (out-of-bounds sentinel)
-    original_indices: np.ndarray | None = None  # Shape (N_modes,): mode index in the full DFT run
+    symmetries: Optional[list[str]] = None  # Length N_modes
+    iprs: Optional[np.ndarray] = None       # Shape (N_modes,)
+    e_pair_complete: Optional[list[bool]] = None  # Length N_modes
+    pair_ids: Optional[np.ndarray] = None   # Shape (N_modes,): degenerate partner index, n_modes if unpaired (out-of-bounds sentinel)
+    deg_groups: Optional[list] = None       # Lists of mode indices forming complete irrep component sets
+    original_indices: Optional[np.ndarray] = None  # Shape (N_modes,): mode index in the full DFT run
     frequency_unit: str = "meV"
 
     def __post_init__(self):
+        # Symmetry labels + degeneracy groups come from the general symmetry module.
+        # Stored labels are trusted; classification only runs when labels are absent.
         if self.symmetries is None and self.eigenvectors is not None and len(self.eigenvectors) > 0:
-            self.analyze_c3v_symmetry()
+            try:
+                from .symmetry import classify_and_pair
+                self.symmetries, self.deg_groups = classify_and_pair(self)
+            except Exception:
+                # General detection unavailable (no table, or structure too
+                # degenerate for spglib, e.g. synthetic test data); fall back
+                # to the legacy pattern-based C3v analyzer.
+                self.analyze_c3v_symmetry()
         if self.e_pair_complete is None and self.symmetries is not None and len(self.frequencies_mev) > 0:
             self.check_e_pair_completeness()
-        if self.pair_ids is None and self.e_pair_complete is not None:
-            # Backfill pair_ids from e_pair_complete matching (legacy files)
-            self.build_pair_ids()
         if self.original_indices is None:
             self.original_indices = np.arange(self.n_modes, dtype=int)
 
@@ -250,6 +255,7 @@ class PhononSpectrum:
         return completeness
 
     def build_pair_ids(self, tol_mev: float = 0.05) -> np.ndarray:
+        """Deprecated: use beyblade.symmetry.classify_and_pair (deg_groups)."""
         """
         Builds the symmetric pair_ids mapping between degenerate E-mode partners.
 
@@ -267,6 +273,16 @@ class PhononSpectrum:
 
         n = self.n_modes
         pair_ids = np.full(n, n, dtype=int)
+        # General path: use degeneracy groups from the symmetry module when present.
+        if self.deg_groups is not None:
+            for group in self.deg_groups:
+                if len(group) == 2:
+                    i, j = int(group[0]), int(group[1])
+                    pair_ids[i] = j
+                    pair_ids[j] = i
+                # groups of 1 or >2 stay unpaired (n sentinel); chains impossible by construction
+            self.pair_ids = pair_ids
+            return self.pair_ids
 
         for i in range(n):
             sym_i = self.symmetries[i]
@@ -314,7 +330,7 @@ class PhononSpectrum:
                     "pair_ids must be a strict symmetric involution (no degenerate chains)."
                 )
 
-    def index_of_original(self, original_index: int) -> int | None:
+    def index_of_original(self, original_index: int) -> Optional[int]:
         """
         Maps a mode index from the full DFT run (original indexing) to its
         position in this spectrum. Returns None if the mode was dropped.
@@ -421,7 +437,7 @@ class PhononSpectrum:
         return convert_energy(self.frequencies_mev, "meV", target_unit)
 
     def translate_defect_to_origin(
-        self, defect_pos: np.ndarray | None = None, wrap: bool = False
+        self, defect_pos: Optional[np.ndarray] = None, wrap: bool = False
     ) -> tuple[np.ndarray, np.ndarray]:
         frac_atoms = self.atom_frac_coords
         lattice = self.lattice
@@ -453,7 +469,18 @@ class PhononSpectrum:
     def analyze_c3v_symmetry(self) -> list[str]:
         """
         Analyzes C3v point group symmetry representations (A1, A2, Ex, Ey) for each phonon mode.
+
+        Deprecated: use beyblade.symmetry.classify_modes, which detects the
+        point group and classifies via general projection. This
+        legacy method is kept as a validation reference only.
         """
+        import warnings
+        warnings.warn(
+            "analyze_c3v_symmetry is deprecated; use beyblade.symmetry.classify_modes "
+            "(general projection). Kept as a validation reference.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from beyblade.utils import MathUtils
 
         try:
@@ -531,7 +558,7 @@ class PhononSpectrum:
     def get_phonon_pert(
         self,
         perturbation_scale_si: float = 1.0,
-        perturbation_scale: float | None = None,
+        perturbation_scale: Optional[float] = None,
     ) -> dict[str, Any]:
         """
         Computes mass-weighted perturbation displacements (SI), frequencies (J), symmetries, and IPRs.
@@ -570,49 +597,7 @@ class PhononSpectrum:
             return self.calc_ipr()
         return self.iprs
 
-    def filter_sym_pairs(self, tol_mev: float = 0.01) -> PhononSpectrum:
-        """
-        Removes redundant degenerate partner modes from Ex/Ey doublets.
-
-        For each Ex/Ey pair closer than ``tol_mev`` in frequency, keeps the Ex
-        twin and drops the Ey one. The reduced spectrum carries 0-based
-        ``original_indices`` pointing into the *full* spectrum, so downstream
-        code can map each reduced mode back to its source position.
-
-        Requires symmetry labels: computes them if not already present.
-        """
-        syms = self.symmetries if self.symmetries is not None else self.analyze_c3v_symmetry()
-        freqs = self.frequencies_mev
-        n = self.n_modes
-
-        skip_indices = set()
-        for i in range(n):
-            if i in skip_indices:
-                continue
-            if "E" in syms[i]:
-                for j in range(i + 1, n):
-                    if j not in skip_indices and "E" in syms[j]:
-                        if abs(freqs[j] - freqs[i]) < tol_mev:
-                            skip_idx = j if syms[i] == "Ex" else i
-                            skip_indices.add(skip_idx)
-                            break
-
-        mask = np.array([i not in skip_indices for i in range(n)])
-        return PhononSpectrum(
-            frequencies_mev=freqs[mask],
-            eigenvectors=self.eigenvectors[mask],
-            atom_frac_coords=self.atom_frac_coords,
-            atom_symbols=self.atom_symbols,
-            atomic_masses=self.atomic_masses,
-            lattice=self.lattice,
-            symmetries=[s for k, s in enumerate(syms) if mask[k]],
-            iprs=self.iprs[mask] if self.iprs is not None else None,
-            # 0-based indices into the ORIGINAL (full) spectrum, so downstream
-            # code can map each reduced mode back to its source position.
-            original_indices=np.where(mask)[0],
-        )
-
-    def save(self, out_path: str | Path) -> str:
+    def save(self, out_path: Union[str, Path]) -> str:
         """Saves spectrum to .npz file with explicit frequency unit tag."""
         path = str(out_path)
         if not path.endswith(".npz"):
@@ -646,7 +631,7 @@ class PhononSpectrum:
         return path
 
     @classmethod
-    def load(cls, in_path: str | Path) -> PhononSpectrum:
+    def load(cls, in_path: Union[str, Path]) -> PhononSpectrum:
         """Loads spectrum from .npz file, converting frequencies using explicit unit tags."""
         data = np.load(str(in_path), allow_pickle=True)
         unit = str(data["frequency_unit"]) if "frequency_unit" in data else "meV"
@@ -655,8 +640,8 @@ class PhononSpectrum:
 
         syms = list(data["symmetries"]) if "symmetries" in data and data["symmetries"] is not None else None
         iprs = data["iprs"] if "iprs" in data else None
-        e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"] is not None else None
-        pair_ids = np.asarray(data["pair_ids"], dtype=int) if "pair_ids" in data and data["pair_ids"] is not None else None
+        e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"].ndim > 0 else None
+        pair_ids = np.asarray(data["pair_ids"], dtype=int) if "pair_ids" in data and data["pair_ids"].ndim > 0 else None
         original_indices = np.asarray(data["original_indices"], dtype=int) if "original_indices" in data and data["original_indices"] is not None else None
 
         return cls(
@@ -680,9 +665,9 @@ class PerturbationEntry:
     """Represents a single 1D or 2D perturbed calculation."""
     order: int  # 1 for 1D (dD/dq), 2 for 2D (d2D/dq_i dq_j)
     mode_indices: tuple[int, ...]
-    amplitude: float | tuple[float, float]
+    amplitude: Union[float, tuple[float, float]]
     zfs_tensor: ZFSTensor
-    energy: float | None = None
+    energy: Optional[float] = None
 
 
 @dataclass
@@ -691,12 +676,12 @@ class RawZFSData:
     defect: str
     cell_size: int
     pert_scale: float
-    calc_method: str | None = None
-    order: int | None = None
-    ground_state_zfs: ZFSTensor | None = None
-    eigen_rotation: np.ndarray | None = None
-    first_order: dict[int, PerturbationEntry | dict[str, Any]] = field(default_factory=dict)
-    second_order: dict[tuple[int, int], PerturbationEntry | dict[str, Any]] = field(default_factory=dict)
+    calc_method: Optional[str] = None
+    order: Optional[int] = None
+    ground_state_zfs: Optional[ZFSTensor] = None
+    eigen_rotation: Optional[np.ndarray] = None
+    first_order: dict[int, Union[PerturbationEntry, dict[str, Any]]] = field(default_factory=dict)
+    second_order: dict[tuple[int, int], Union[PerturbationEntry, dict[str, Any]]] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -743,7 +728,7 @@ class RawZFSData:
             raise ValueError(f"Cannot combine RawZFSData: pert_scale mismatch ({p1} != {p2}).")
 
         # 4. Verify calc_method
-        def _norm_method(m: str | None) -> str | None:
+        def _norm_method(m: Optional[str]) -> Optional[str]:
             if not m or m in ("None", ""):
                 return None
             if m in ("all", "all_bands"):
@@ -925,8 +910,8 @@ class RawZFSData:
 
     def save(
         self,
-        out_path: str | Path | None = None,
-        spectrum: PhononSpectrum | None = None,
+        out_path: Optional[Union[str, Path]] = None,
+        spectrum: Optional[PhononSpectrum] = None,
     ) -> str:
         """Saves RawZFSData to a .npz file with latest naming conventions and explicit unit metadata."""
         if spectrum is not None:
@@ -997,7 +982,7 @@ class RawZFSData:
         return path
 
     @classmethod
-    def load(cls, in_path: str | Path | Sequence[str | Path]) -> RawZFSData:
+    def load(cls, in_path: Union[str, Path, Sequence[Union[str, Path]]]) -> RawZFSData:
         """
         Loads RawZFSData from one or more .npz files.
         Maintains backward compatibility with legacy keys (zfs_tensors, zfs_tensors_2d, zfs_relaxed).
@@ -1098,25 +1083,25 @@ class SpinPhononCouplingData:
     defect: str
     cell_size: int
     pert_scale: float
-    calc_method: str | None = None
+    calc_method: Optional[str] = None
     frequencies: np.ndarray = field(default_factory=lambda: np.array([]))
     frequency_unit: str = "J"
     V_0_0: np.ndarray = field(default_factory=lambda: np.array([]))
     V_p_m: np.ndarray = field(default_factory=lambda: np.array([]))
     V_0_pm: np.ndarray = field(default_factory=lambda: np.array([]))
     coupling_unit: str = "J"
-    ground_state_zfs: ZFSTensor | None = None
-    zfs_derivs: np.ndarray | None = None
+    ground_state_zfs: Optional[ZFSTensor] = None
+    zfs_derivs: Optional[np.ndarray] = None
     derivs_unit: str = "J"
-    symmetries: list[str] | None = None
-    iprs: np.ndarray | None = None
+    symmetries: Optional[list[str]] = None
+    iprs: Optional[np.ndarray] = None
     metadata: dict[str, Any] = field(default_factory=dict)
     # Second-order (2D) coupling coefficients, optional — used when the run
     # combines first- and second-order data (1d + 2d perturbation sets).
-    V2_0_0: np.ndarray | None = None
-    V2_p_m: np.ndarray | None = None
-    V2_0_pm: np.ndarray | None = None
-    zfs_2nd_derivs: np.ndarray | None = None
+    V2_0_0: Optional[np.ndarray] = None
+    V2_p_m: Optional[np.ndarray] = None
+    V2_0_pm: Optional[np.ndarray] = None
+    zfs_2nd_derivs: Optional[np.ndarray] = None
 
     @property
     def has_second_order(self) -> bool:
@@ -1208,7 +1193,7 @@ class SpinPhononCouplingData:
             zfs_2nd_derivs=self.zfs_2nd_derivs.copy() if self.zfs_2nd_derivs is not None else None,
         )
 
-    def save(self, out_path: str | Path) -> str:
+    def save(self, out_path: Union[str, Path]) -> str:
         """Saves coupling data to .npz file with explicit unit metadata and legacy keys."""
         path = str(out_path)
         if not path.endswith(".npz"):
@@ -1256,7 +1241,7 @@ class SpinPhononCouplingData:
         return path
 
     @classmethod
-    def load(cls, in_path: str | Path) -> SpinPhononCouplingData:
+    def load(cls, in_path: Union[str, Path]) -> SpinPhononCouplingData:
         """Loads SpinPhononCouplingData from a .npz file, parsing explicit units."""
         data = np.load(str(in_path), allow_pickle=True)
 

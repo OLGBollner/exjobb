@@ -7,7 +7,6 @@ from scipy import constants as Cn
 from beyblade.relaxation_dynamics import RelaxationDynamics
 
 plt.rcParams.update({
-    "axes.titlesize": 16,
     "axes.labelsize": 16,
     "xtick.labelsize": 12,
     "ytick.labelsize": 12,

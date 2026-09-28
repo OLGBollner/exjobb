@@ -1,21 +1,16 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
-from typing import Any
-
+from typing import Any, Optional, Union
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.models import (
-    PerturbationEntry,
-    PhononSpectrum,
-    RawZFSData,
-    SpinPhononCouplingData,
-    ZFSTensor,
-)
+from beyblade.symmetry import twin_of, _build_groups_from_labels
+from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
 from beyblade.parsers import (
-    parse_zfs_dataset_npz,
     parse_zfs_simulation_dataset,
+    parse_zfs_dataset_npz,
 )
 from beyblade.utils import MathUtils
 
@@ -29,13 +24,62 @@ class ZFSManager:
 
     def __init__(
         self,
-        spectrum: PhononSpectrum | None = None,
-        raw_data: RawZFSData | None = None,
+        spectrum: Optional[PhononSpectrum] = None,
+        raw_data: Optional[RawZFSData] = None,
+        phonon_manager: Optional[Any] = None,
         debug: bool = False,
     ):
+        if phonon_manager is not None:
+            warnings.warn(
+                "Passing phonon_manager to ZFSManager is deprecated and will be removed in a future release. "
+                "Please pass spectrum (PhononSpectrum) directly instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if spectrum is None:
+                spectrum = getattr(phonon_manager, "spectrum", None)
 
         # spectrum is the primary dataclass
         if spectrum is not None:
+            # Always reclassify fresh via the general projection method and
+            # cross-check against labels stored in the phonon npz (they are
+            # legacy/baked-in and may predate the current classification).
+            # When the structure cannot be symmetry-detected (e.g. synthetic
+            # test fixtures with all atoms at the origin), fall back to the
+            # stored labels rather than failing the whole pipeline.
+            from .symmetry import SymmetryDetectionError, classify_and_pair
+            stored_syms = list(spectrum.symmetries) if spectrum.symmetries is not None else None
+            try:
+                fresh_labels, deg_groups = classify_and_pair(spectrum, force=True)
+            except (SymmetryDetectionError, NotImplementedError) as exc:
+                # NotImplementedError: point group detected but no character
+                # table; SymmetryDetectionError: no symmetry found at all.
+                # Both mean "cannot classify this structure" — a genuine bug
+                # in the classifier must NOT be caught here.
+                if stored_syms is None:
+                    raise
+                warnings.warn(
+                    f"Fresh symmetry classification failed ({exc}); "
+                    "falling back to stored labels.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                fresh_labels = stored_syms
+                # Stored labels are trusted as-is here, so sym_check cannot be
+                # verified (no detectable point group to build characters
+                # from) and stays None for this spectrum.
+                deg_groups = _build_groups_from_labels(spectrum, stored_syms, 0.01)
+            if stored_syms is not None and fresh_labels is not stored_syms:
+                mismatched = [i for i, (a, b) in enumerate(zip(stored_syms, fresh_labels)) if a != b]
+                if mismatched:
+                    print(
+                        f"Warning: {len(mismatched)} stored symmetry label(s) differ "
+                        f"from fresh classification: {mismatched[:10]}"
+                        f"{'...' if len(mismatched) > 10 else ''}. "
+                        f"Using fresh classification."
+                    )
+            spectrum.symmetries = fresh_labels
+            spectrum.deg_groups = deg_groups
             # An incomplete spectrum (missing degenerate E twins) must be rejected:
             # the ZFS pipeline needs all 3*N_atoms modes. Regenerate the phonon npz
             # from the full calculation instead.
@@ -43,7 +87,7 @@ class ZFSManager:
                 spectrum.check_e_pair_completeness()
             incomplete = [
                 i for i, ok in enumerate(spectrum.e_pair_complete or [])
-                if not ok and spectrum.symmetries[i] in ("Ex", "Ey")
+                if not ok and fresh_labels[i] in ("Ex", "Ey")
             ]
             if incomplete:
                 raise ValueError(
@@ -55,28 +99,24 @@ class ZFSManager:
                     f"rather than the symmetry-adapted subset."
                 )
             self.spectrum = spectrum
-            # pair_ids must be a strict symmetric involution; chains fail loudly.
-            if self.spectrum.pair_ids is None:
-                self.spectrum.build_pair_ids()
-            self.spectrum.validate_pair_ids()
         else:
             self.spectrum = None
 
         self.raw_data = raw_data
 
         # Defect metadata
-        self.defect: str | None = raw_data.defect if raw_data else None
-        self.cell_size: int | None = raw_data.cell_size if raw_data else None
-        self.pert_scale: float | None = raw_data.pert_scale if raw_data else None
-        self.calc_method: str | None = (
+        self.defect: Optional[str] = raw_data.defect if raw_data else None
+        self.cell_size: Optional[int] = raw_data.cell_size if raw_data else None
+        self.pert_scale: Optional[float] = raw_data.pert_scale if raw_data else None
+        self.calc_method: Optional[str] = (
             raw_data.calc_method or raw_data.metadata.get("calc_method")
             if raw_data
             else None
         )
 
         # Processed ZFS data in defect principal frame
-        self.zfs_relaxed: np.ndarray | None = None          # Shape (3, 3) in J
-        self.eigen_rotation: np.ndarray | None = None        # Shape (3, 3)
+        self.zfs_relaxed: Optional[np.ndarray] = None          # Shape (3, 3) in J
+        self.eigen_rotation: Optional[np.ndarray] = None        # Shape (3, 3)
         self.first_order: dict[int, dict[str, Any]] = {}        # 1D perturbations
         self.second_order: dict[tuple[int, int], dict[str, Any]] = {}  # 2D perturbations
         self.treated_modes: set[int] = set()
@@ -115,7 +155,7 @@ class ZFSManager:
             return self.spectrum.frequencies_mev
         return np.array([])
 
-    def get_phonon_pert(self, pert_scale_si: float) -> dict[str, Any] | None:
+    def get_phonon_pert(self, pert_scale_si: float) -> Optional[dict[str, Any]]:
         if self.spectrum is not None:
             return self.spectrum.get_phonon_pert(pert_scale_si)
         return None
@@ -171,7 +211,7 @@ class ZFSManager:
                 if amp is not None:
                     pert_amps[idx] = float(amp)
             if pert_amps and spectrum.infer_original_indices(pert_amps):
-                spectrum.validate_pair_ids()
+                pass
         remap_needed = (
             spectrum is not None
             and spectrum.original_indices is not None
@@ -180,7 +220,7 @@ class ZFSManager:
         n_phon = spectrum.n_modes if spectrum is not None else None
         dropped = []
 
-        def remap(idx: int) -> int | None:
+        def remap(idx: int) -> Optional[int]:
             """Raw DFT index -> spectrum position; logs and returns None if dropped."""
             if not remap_needed:
                 return idx if n_phon is None or idx < n_phon else None
@@ -234,18 +274,9 @@ class ZFSManager:
 
         if raw.second_order:
             self.second_order = {}
-            # q0 = pert_amplitude^2 / (2*f) is uniform across the perturbation run;
-            # estimate it from matched modes so orphaned entries' frequencies can be
-            # recovered and matched to the spectrum by physics rather than by index.
-            self._estimate_q0()
             for (i, j), entry in raw.second_order.items():
                 si, sj = remap(i), remap(j)
                 if si is None or sj is None:
-                    # The 2D run perturbs only one twin per degenerate E-pair; if the
-                    # spectrum kept the other twin, there is no valid index here.
-                    # V-coefficients are equal across the pair, but the pair_id
-                    # inheritance in calculate_second_order_derivatives handles that:
-                    # skip here rather than guessing an anchor.
                     continue
                 if isinstance(entry, PerturbationEntry):
                     tensor_mhz = entry.zfs_tensor.matrix
@@ -285,12 +316,12 @@ class ZFSManager:
                 f"Note: {len(dropped)} raw mode indices have no partner in the "
                 f"phonon spectrum ({n_phon} modes kept) and were skipped: "
                 f"{sorted(set(dropped))[:10]}{'...' if len(set(dropped)) > 10 else ''}. "
-                "Their V-coefficients will be inherited via degenerate pair_ids where available."
+                "Their V-coefficients will be inherited via degeneracy groups where available."
             )
 
         self.treated_modes = self._get_symmetry_factor()
 
-    def _estimate_q0(self) -> float | None:
+    def _estimate_q0(self) -> Optional[float]:
         """Estimate the uniform q0 = amp^2 / (2*f) from modes present in both the
         raw 1D data and the spectrum (their original indices)."""
         if self.spectrum is None or self.spectrum.original_indices is None:
@@ -349,26 +380,21 @@ class ZFSManager:
         print(f"Treated unique modes: {len(mode_set)}")
         return mode_set
 
-    def calculate_first_order_derivatives(self, ipr_thresh: float | None = None):
+    def calculate_first_order_derivatives(self, ipr_thresh: Optional[float] = None):
         """
         Calculates 1st order finite difference derivatives dD/dq and spin-phonon coupling coefficients.
         """
         print("Calculating first-order derivatives...")
         n_modes = self.nmodes
-        self.get_phonon_frequencies()
 
         zfs_deriv = np.zeros((n_modes, 3, 3))
         V_0_0 = np.zeros(n_modes)
         V_0_pm = np.zeros(n_modes)
         V_p_m = np.zeros(n_modes)
 
-        # Symmetry axis mapping based on defect and cell size
-        if self.defect == "NV" and self.cell_size == 512:
-            sym_x, sym_y = "Ey", "Ex"
-        elif self.defect in ("NV", "ClV") or (self.defect == "NV" and self.cell_size == 64):
-            sym_x, sym_y = "Ex", "Ey"
-        else:
-            sym_x, sym_y = "Ex", "Ey"
+        # The V formulas are rotationally invariant in the xy-plane, so the
+        # Ex/Ey ordering convention of the eigenvectors does not affect them;
+        # no per-defect/cell-size switch is needed.
 
         for i, item in sorted(self.zfs_tensors.items()):
             if i not in self.treated_modes:
@@ -400,7 +426,7 @@ class ZFSManager:
                 # Traceless projection: dD_zz - 0.5 * (dD_xx + dD_yy) = 1.5 * d\tilde{D}_zz
                 # V_00 = 0.5 * d\tilde{D}_zz = 1/3 * (dD_zz - 0.5 * (dD_xx + dD_yy))
                 V_0_0[i] = np.abs(dD_dq[2, 2] - 0.5 * trace_in_plane) / 3.0
-            elif sym in [sym_x, sym_y, "Ex", "Ey"]:
+            elif sym in ("Ex", "Ey"):
                 # Appendix A.1 Eq. A.6 & A.7 (rotationally invariant in xy-plane):
                 # V_+- = 0.5 * sqrt((dD_xx - dD_yy)^2 + 4 * dD_xy^2)
                 # V_0+- = sqrt(dD_xz^2 + dD_yz^2) / sqrt(2)
@@ -415,11 +441,9 @@ class ZFSManager:
             if (
                 len(self.treated_modes) < n_modes
                 and spectrum is not None
-                and spectrum.pair_ids is not None
-                and spectrum.pair_ids[i] < spectrum.n_modes
             ):
-                twin = int(spectrum.pair_ids[i])
-                if twin != i:
+                twin = twin_of(spectrum.deg_groups, i)
+                if twin is not None and twin != i:
                     V_0_pm[twin] = np.where(V_0_pm[twin] == 0, V_0_pm[i], V_0_pm[twin])
                     V_p_m[twin] = np.where(V_p_m[twin] == 0, V_p_m[i], V_p_m[twin])
 
@@ -441,7 +465,7 @@ class ZFSManager:
 
         return zfs_deriv, V_0_0, V_p_m, V_0_pm
 
-    def calculate_second_order_derivatives(self, zfs_1d_derivs: np.ndarray, ipr_thresh: float | None = None):
+    def calculate_second_order_derivatives(self, zfs_1d_derivs: np.ndarray, ipr_thresh: Optional[float] = None):
         """
         Calculates 2nd order finite difference derivatives d2D/dqi dqj and 2-phonon coupling coefficients.
         """
@@ -486,7 +510,11 @@ class ZFSManager:
 
             if sym == ["A1"]:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
-            elif {sym_i, sym_j} == {"Ex"} or {sym_i, sym_j} == {"Ey"}:
+            elif {sym_i, sym_j} == {"Ex"}:
+                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
+                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
+                V_p_m_2nd[i, j] = 0.25 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
+            elif {sym_i, sym_j} == {"Ey"}:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
                 V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
                 V_p_m_2nd[i, j] = 0.25 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
@@ -498,8 +526,7 @@ class ZFSManager:
                 # Inherit V-coefficients for the degenerate twin via pair_id.
                 # The spectrum owns the pairing (strict involution); no frequency guessing.
                 spectrum = self.spectrum
-                if spectrum is not None and spectrum.pair_ids is not None and spectrum.pair_ids[i] < spectrum.n_modes:
-                    twin = int(spectrum.pair_ids[i])
+                if spectrum is not None and (twin := twin_of(spectrum.deg_groups, i)) is not None:
                     if twin != j:  # avoid overwriting an (i,j) cross-coupling with the pair copy
                         V_0_0_2nd[twin, twin] = V_0_0_2nd[i, j]
                         V_0_pm_2nd[twin, twin] = V_0_pm_2nd[i, j]
@@ -532,7 +559,7 @@ class ZFSManager:
 
         return zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd
 
-    def process_first_order_perturbations(self, output_filename: str | None = None) -> list[str]:
+    def process_first_order_perturbations(self, output_filename: Optional[str] = None) -> list[str]:
         if not self.zfs_tensors:
             raise ValueError("First order ZFS data not loaded.")
 
@@ -560,7 +587,7 @@ class ZFSManager:
         return [save_path]
 
     def process_second_order_perturbations(
-        self, zfs_1d_derivs_file: str | None = None, output_filename: str | None = None
+        self, zfs_1d_derivs_file: Optional[str] = None, output_filename: Optional[str] = None
     ) -> list[str]:
         if not self.zfs_tensors_2d:
             raise ValueError("Second order ZFS data not loaded.")
@@ -601,9 +628,9 @@ class ZFSManager:
 
     def process_both_orders(
         self,
-        output_filename: str | None = None,
-        ipr_thresh_first: float | None = None,
-        ipr_thresh_second: float | None = None,
+        output_filename: Optional[str] = None,
+        ipr_thresh_first: Optional[float] = None,
+        ipr_thresh_second: Optional[float] = None,
     ) -> list[str]:
         """
         Calculates first- AND second-order derivatives/couplings in one go and
@@ -729,7 +756,7 @@ class ZFSManager:
         return save_name
 
     @staticmethod
-    def _check_symmetry(d_tensor: np.ndarray, symmetry: str | tuple[str, str], idx: Any) -> None:
+    def _check_symmetry(d_tensor: np.ndarray, symmetry: Union[str, tuple[str, str]], idx: Any) -> None:
         sym_prod = (
             MathUtils.calc_symmetry(*symmetry) if isinstance(symmetry, tuple) else [symmetry]
         )
