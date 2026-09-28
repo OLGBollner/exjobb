@@ -24,8 +24,9 @@ Input files are copied verbatim, no rewriting:
   - defect_band_approx input <- <output>/ZFS_occup (defect-band occupation)
 
 Both ZFS folders must exist; otherwise the script aborts before creating
-anything.  CHGCAR is copied when present.  Existing pert_<scale> folders are
-skipped, never overwritten.
+anything.  CHGCAR is copied when present.  Without --force, existing pert_<scale>
+folders are skipped, never overwritten; --force regenerates them after an
+explicit APPROVE confirmation.
 
 Each generated SLURM script has DEFECT, PHONON_PATH and PERT prefilled with
 absolute paths, so it is ready for `sbatch` as-is.
@@ -70,8 +71,9 @@ def replace_tag(incar: str, tag: str, value: str) -> str:
 # --------------------------------------------------------------------------- #
 # directory preparation
 # --------------------------------------------------------------------------- #
-def prepare_basis(src: Path, dst: Path, order: str, phonon: Path,
-                  defect: str, pert: float, vasp_binary: Path | None = None) -> None:
+def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
+                  defect: str, pert: float, vasp_binary: Path | None = None,
+                  pair_mode: str | None = None) -> None:
     """Fill dst/input/ and write the prefilled SLURM script."""
     inp = dst / "input"
     inp.mkdir(parents=True, exist_ok=True)
@@ -80,7 +82,6 @@ def prepare_basis(src: Path, dst: Path, order: str, phonon: Path,
         if (src / name).is_file():
             shutil.copy2(src / name, inp / name)
 
-    script_name = FIRST_ORDER_SCRIPT if order == "first" else SECOND_ORDER_SCRIPT
     tmpl = Path(__file__).resolve().parent / script_name
     if not tmpl.is_file():
         fail(f"missing template script {tmpl}")
@@ -91,13 +92,15 @@ def prepare_basis(src: Path, dst: Path, order: str, phonon: Path,
     text = replace_tag(text, "PERT", str(pert))
     if vasp_binary:
         text = replace_tag(text, "BINARY", str(vasp_binary))
-    if cluster_scripts_dir := Path(__file__).resolve().parent:
-        name = "create_combined_phonon_struct.py" if order == "second" \
-            else "create_phonon_struct.py"
-        text = replace_tag(text, "CREATE_STRUCT",
-                           str(cluster_scripts_dir / name))
-        text = replace_tag(text, "GET_N_MODES",
-                           str(cluster_scripts_dir / "get_n_modes.py"))
+    if pair_mode:
+        text = replace_tag(text, "PAIR_MODE", pair_mode)
+    cluster_scripts_dir = Path(__file__).resolve().parent
+    name = "create_combined_phonon_struct.py" \
+        if "second_order" in script_name else "create_phonon_struct.py"
+    text = replace_tag(text, "CREATE_STRUCT",
+                       str(cluster_scripts_dir / name))
+    text = replace_tag(text, "GET_N_MODES",
+                       str(cluster_scripts_dir / "get_n_modes.py"))
     (dst / script_name).write_text(text)
 
 
@@ -116,6 +119,10 @@ def main() -> int:
     ap.add_argument("--force", action="store_true",
                     help="overwrite existing perturbation folders instead of "
                          "skipping them; requires typing APPROVE to confirm")
+    ap.add_argument("--pair-mode", choices=("diag", "all"), default="diag",
+                    help="second-order pairs: diag = only (i, i) terms (the "
+                         "original behaviour), all = every pair with i <= j "
+                         "(default: diag)")
     args = ap.parse_args()
 
     if args.force:
@@ -161,9 +168,12 @@ def main() -> int:
                         print(f"  note: {dst} already exists -- skipping")
                         continue
                 print(f"  creating {dst}")
-                prepare_basis(src, dst, order.split("_")[0], phonon,
+                script_name = FIRST_ORDER_SCRIPT if order == "first_order" \
+                    else SECOND_ORDER_SCRIPT
+                prepare_basis(src, dst, script_name, phonon,
                               defect=defect, pert=pert,
-                              vasp_binary=args.vasp_binary)
+                              vasp_binary=args.vasp_binary,
+                              pair_mode=args.pair_mode if order == "second_order" else None)
 
     if FAILURES:
         print(f"\n{len(FAILURES)} problem(s) found -- inspect before launching")

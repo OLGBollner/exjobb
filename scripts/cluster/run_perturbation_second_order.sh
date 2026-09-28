@@ -40,35 +40,43 @@ echo $NJOBS
 mkdir runs
 
 PAIR_ID=0
+PAIR_MODE=${PAIR_MODE:-<pair_mode>}
 for i in $MODES; do
-  j=$i
-  if [ $((PAIR_ID % NJOBS)) -eq $ID ]; then
-    echo "$ID: processing pair $PAIR_ID (modes $i, $j)"
-    TARGET_DIR="runs/"$i"_"$j
-    if [ -f "$TARGET_DIR"/OUTCAR ] && grep -qzP "$ZFS_REGEX_PATTERN" "$TARGET_DIR"/OUTCAR; then
-      echo "$ID: skipping $i, $j"
-      PAIR_ID=$((PAIR_ID + 1))
+  for j in $MODES; do
+    if [ "$PAIR_MODE" = "diag" ] && [ "$i" != "$j" ]; then
       continue
     fi
-    mkdir -p $TARGET_DIR
-    cp "$INPUT_DIR"/* "$TARGET_DIR"/
-    cd "$TARGET_DIR"
-    echo "$ID: starting job for mode $i, $j"
-    MSG=$(python $create_struct -o POSCAR POSCAR $PHONON_PATH $i $j $PERT)
-    if echo "$MSG" | grep -q "Error:"; then
-      echo "Failed to create structure."
-      echo "Shutting down job $ID"
-      echo "$MSG"
-      exit 1
-    elif echo "$MSG" | grep -q "Success"; then
-      echo "Successfully created perturbed structure"
+    if [ "$PAIR_MODE" = "all" ] && [ $i -gt $j ]; then
+      continue
     fi
-    echo "$MSG"
-    srun $binary
-    echo "$ID: Done! $i, $j"
-    echo "$ID: removing excess WAVECAR"
-    rm WAVECAR
-    cd "$HEAD_DIR"
-  fi
-  PAIR_ID=$((PAIR_ID + 1))
+    if [ $((PAIR_ID % NJOBS)) -eq $ID ]; then
+      echo "$ID: processing pair $PAIR_ID (modes $i, $j)"
+      TARGET_DIR="runs/"$i"_"$j
+      if [ -f "$TARGET_DIR"/OUTCAR ] && grep -qzP "$ZFS_REGEX_PATTERN" "$TARGET_DIR"/OUTCAR; then
+        echo "$ID: skipping $i, $j"
+        PAIR_ID=$((PAIR_ID + 1))
+        continue
+      fi
+      mkdir -p $TARGET_DIR
+      cp "$INPUT_DIR"/* "$TARGET_DIR"/
+      cd "$TARGET_DIR"
+      echo "$ID: starting job for pair $i, $j"
+      MSG=$(python $create_struct -o POSCAR POSCAR $PHONON_PATH $i $j $PERT)
+      if echo "$MSG" | grep -q "Error:"; then
+        echo "Failed to create structure."
+        echo "Shutting down job $ID"
+        echo "$MSG"
+        exit 1
+      elif echo "$MSG" | grep -q "Success"; then
+        echo "Successfully created perturbed structure"
+      fi
+      echo "$MSG"
+      srun $binary
+      echo "$ID: Done! $i, $j"
+      echo "$ID: removing excess WAVECAR"
+      rm WAVECAR
+      cd "$HEAD_DIR"
+    fi
+    PAIR_ID=$((PAIR_ID + 1))
+  done
 done
