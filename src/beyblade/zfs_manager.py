@@ -41,6 +41,39 @@ class ZFSManager:
 
         # spectrum is the primary dataclass
         if spectrum is not None:
+            # Always reclassify fresh via the general projection method and
+            # cross-check against labels stored in the phonon npz (they are
+            # legacy/baked-in and may predate the current classification).
+            # When the structure cannot be symmetry-detected (e.g. synthetic
+            # test fixtures with all atoms at the origin), fall back to the
+            # stored labels rather than failing the whole pipeline.
+            from .symmetry import classify_and_pair
+            stored_syms = list(spectrum.symmetries) if spectrum.symmetries is not None else None
+            try:
+                fresh_labels, deg_groups = classify_and_pair(spectrum, force=True)
+            except Exception as exc:
+                if stored_syms is None:
+                    raise
+                print(
+                    f"Warning: fresh symmetry classification failed ({exc}); "
+                    f"falling back to stored labels."
+                )
+                fresh_labels = stored_syms
+                deg_groups = None
+                if deg_groups is None:
+                    from .symmetry import _build_groups_from_labels
+                    deg_groups = _build_groups_from_labels(spectrum, fresh_labels, 0.01)
+            if stored_syms is not None and fresh_labels is not stored_syms:
+                mismatched = [i for i, (a, b) in enumerate(zip(stored_syms, fresh_labels)) if a != b]
+                if mismatched:
+                    print(
+                        f"Warning: {len(mismatched)} stored symmetry label(s) differ "
+                        f"from fresh classification: {mismatched[:10]}"
+                        f"{'...' if len(mismatched) > 10 else ''}. "
+                        f"Using fresh classification."
+                    )
+            spectrum.symmetries = fresh_labels
+            spectrum.deg_groups = deg_groups
             # An incomplete spectrum (missing degenerate E twins) must be rejected:
             # the ZFS pipeline needs all 3*N_atoms modes. Regenerate the phonon npz
             # from the full calculation instead.
@@ -48,7 +81,7 @@ class ZFSManager:
                 spectrum.check_e_pair_completeness()
             incomplete = [
                 i for i, ok in enumerate(spectrum.e_pair_complete or [])
-                if not ok and spectrum.symmetries[i] in ("Ex", "Ey")
+                if not ok and fresh_labels[i] in ("Ex", "Ey")
             ]
             if incomplete:
                 raise ValueError(
@@ -60,9 +93,6 @@ class ZFSManager:
                     f"rather than the symmetry-adapted subset."
                 )
             self.spectrum = spectrum
-            if self.spectrum.deg_groups is None and self.spectrum.symmetries is not None:
-                from .symmetry import classify_and_pair
-                _, self.spectrum.deg_groups = classify_and_pair(self.spectrum)
         else:
             self.spectrum = None
 
