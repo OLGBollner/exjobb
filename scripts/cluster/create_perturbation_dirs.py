@@ -63,7 +63,7 @@ def fail(msg: str) -> None:
 
 def replace_tag(incar: str, tag: str, value: str) -> str:
     """Replace the value of every occurrence of a tag."""
-    return re.sub(rf"^(\s*{tag}\s*=\s*)(.+?)\s*(?=$|!|#)",
+    return re.sub(rf"^(\s*{tag}\s*=\s*)(.+?)[ \t]*(?=$|!|#)",
                   rf"\g<1>{value}", incar, flags=re.M | re.I)
 
 
