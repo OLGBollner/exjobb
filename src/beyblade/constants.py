@@ -1,6 +1,5 @@
-from scipy import constants as Cn
 import numpy as np
-
+from scipy import constants as Cn
 
 CONSTANTS = {
     "ang_amu2SI": np.sqrt(Cn.physical_constants["atomic mass constant"][0]) * 1e-10,

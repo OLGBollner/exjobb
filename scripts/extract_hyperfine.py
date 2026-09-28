@@ -1,5 +1,6 @@
-from argparse import ArgumentParser as Parser
 import re
+from argparse import ArgumentParser as Parser
+
 import numpy as np
 
 parser = Parser("Extracts hyperfine data from vasp OUTCAR")
@@ -7,12 +8,12 @@ parser.add_argument("outcar", metavar="outcar")
 parser.add_argument("-o", dest="output", default="hyp", help="Name of output file")
 args = parser.parse_args()
 
-iso_start_pattern = re.compile(".*\(isotropic\) hyperfine.*")
-iso_data_pattern = re.compile("\s*(\d+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+).*")
+iso_start_pattern = re.compile(r".*\(isotropic\) hyperfine.*")
+iso_data_pattern = re.compile(r"\s*(\d+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+).*")
 
 dip_start_pattern = re.compile(".*Dipolar hyperfine.*")
-dip_data_pattern = re.compile("\s*(\d+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)")
-pos_data_pattern = re.compile("\s*position of ions in cartesian coordinates.*")
+dip_data_pattern = re.compile(r"\s*(\d+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)\s*([-.\d]+)")
+pos_data_pattern = re.compile(r"\s*position of ions in cartesian coordinates.*")
 
 pos_data = []
 iso_data = []

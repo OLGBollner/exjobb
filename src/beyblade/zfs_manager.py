@@ -26,19 +26,8 @@ class ZFSManager:
         self,
         spectrum: Optional[PhononSpectrum] = None,
         raw_data: Optional[RawZFSData] = None,
-        phonon_manager: Optional[Any] = None,
         debug: bool = False,
     ):
-        if phonon_manager is not None:
-            warnings.warn(
-                "Passing phonon_manager to ZFSManager is deprecated and will be removed in a future release. "
-                "Please pass spectrum (PhononSpectrum) directly instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if spectrum is None:
-                spectrum = getattr(phonon_manager, "spectrum", None)
-
         # spectrum is the primary dataclass
         if spectrum is not None:
             # Always reclassify fresh via the general projection method and

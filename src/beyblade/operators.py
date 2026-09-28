@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def braket(state1, operator, state2):
     """Calculate the matrix element <state1|operator|state2>."""
     return np.vdot(state1.vector, np.dot(operator.matrix, state2.vector))

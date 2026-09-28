@@ -1,5 +1,6 @@
-import numpy as np
 import sys
+
+import numpy as np
 
 if ".npz" in sys.argv[1]:
   file = sys.argv[1]

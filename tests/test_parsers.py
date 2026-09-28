@@ -1,17 +1,18 @@
-import pytest
-import numpy as np
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
+import numpy as np
+import pytest
+
+from beyblade.models import PhononSpectrum, ZFSTensor
 from beyblade.parsers import (
-    parse_outcar_zfs,
     parse_outcar_energy,
+    parse_outcar_zfs,
     parse_phonon_npz,
-    save_phonon_npz,
     parse_zfs_dataset_npz,
     parse_zfs_simulation_dataset,
+    save_phonon_npz,
 )
-from beyblade.models import PhononSpectrum, ZFSTensor
 
 
 class TestParsers:
