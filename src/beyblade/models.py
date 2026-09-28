@@ -149,6 +149,39 @@ class ZFSTensor:
         return ZFSTensor(matrix=rotated_mat, unit=self.unit)
 
 
+def check_original_indices(
+    original_indices: np.ndarray,
+    n_modes: int,
+    n_full: Optional[int] = None,
+) -> None:
+    """Raise if ``original_indices`` violates the 0-based idx convention.
+
+    It must be a 1-D integer array, one entry per kept mode, strictly
+    increasing (full-spectrum order preserved), non-negative, and — when
+    ``n_full`` is given — within ``[0, n_full)``.
+    """
+    oi = np.asarray(original_indices)
+    if oi.ndim != 1 or not np.issubdtype(oi.dtype, np.integer):
+        raise TypeError("original_indices must be a 1-D integer array")
+    if len(oi) != n_modes:
+        raise ValueError(
+            f"original_indices has length {len(oi)} but spectrum has "
+            f"{n_modes} modes — inconsistent"
+        )
+    if len(oi) > 1 and np.any(np.diff(oi) <= 0):
+        raise ValueError(
+            "original_indices must be strictly increasing "
+            "(0-based, full-spectrum order preserved)"
+        )
+    if (oi < 0).any():
+        raise ValueError("original_indices must be 0-based (no negative indices)")
+    if n_full is not None and (oi >= n_full).any():
+        raise ValueError(
+            f"original_indices must be < n_full ({n_full}); the 0-based "
+            "idx convention is broken"
+        )
+
+
 @dataclass
 class PhononMode:
     """Represents a single vibrational mode."""
@@ -601,31 +634,33 @@ class PhononSpectrum:
         """
         Removes redundant degenerate partner modes from Ex/Ey doublets.
 
-        For each Ex/Ey pair closer than ``tol_mev`` in frequency, keeps the Ex
-        twin and drops the Ey one. The reduced spectrum carries 0-based
+        For every Ey mode, if an Ex mode lies within ``tol_mev`` in
+        frequency, the Ey twin is dropped (the doublet is redundant — E is
+        doubly degenerate, Ex and Ey span the same 2-D representation). All
+        Ex modes are kept. Group-theoretic bookkeeping: for a spectrum with
+        N_atoms modes, A1 + A2 + 2*E = 3*N_atoms, so after filtering
+        A1 + A2 + E = 2*N_atoms + 1 modes remain. The reduced spectrum
+        carries 0-based
         ``original_indices`` pointing into the *full* spectrum, so downstream
         code can map each reduced mode back to its source position.
 
         Requires symmetry labels: computes them if not already present.
+        Validates the returned ``original_indices`` against the 0-based
+        convention (see ``check_original_indices``); raises on violation.
         """
         syms = self.symmetries if self.symmetries is not None else self.analyze_c3v_symmetry()
         freqs = self.frequencies_mev
         n = self.n_modes
 
+        ex_idx = np.array([i for i in range(n) if syms[i] == "Ex"], dtype=int)
+        ex_freqs = freqs[ex_idx]
         skip_indices = set()
         for i in range(n):
-            if i in skip_indices:
-                continue
-            if "E" in syms[i]:
-                for j in range(i + 1, n):
-                    if j not in skip_indices and "E" in syms[j]:
-                        if abs(freqs[j] - freqs[i]) < tol_mev:
-                            skip_idx = j if syms[i] == "Ex" else i
-                            skip_indices.add(skip_idx)
-                            break
+            if syms[i] == "Ey" and np.any(np.abs(ex_freqs - freqs[i]) < tol_mev):
+                skip_indices.add(i)
 
         mask = np.array([i not in skip_indices for i in range(n)])
-        return PhononSpectrum(
+        reduced = PhononSpectrum(
             frequencies_mev=freqs[mask],
             eigenvectors=self.eigenvectors[mask],
             atom_frac_coords=self.atom_frac_coords,
@@ -638,6 +673,10 @@ class PhononSpectrum:
             # code can map each reduced mode back to its source position.
             original_indices=np.where(mask)[0],
         )
+        check_original_indices(
+            reduced.original_indices, reduced.n_modes, n_full=n
+        )
+        return reduced
 
     def save(self, out_path: Union[str, Path]) -> str:
         """Saves spectrum to .npz file with explicit frequency unit tag."""
