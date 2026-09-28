@@ -17,32 +17,7 @@ Enforced here so the convention cannot silently regress if
 
 from argparse import ArgumentParser as Parser
 
-import numpy as np
-
 from beyblade.parsers import parse_phonon_npz, save_phonon_npz
-
-
-def check_original_indices(spectrum):
-  """Raise if `original_indices` is not a faithful 0-based map into the full
-  spectrum: it must be a 1-D int array, one entry per kept mode, strictly
-  increasing (filter order preserved), and within [0, n_full)."""
-  oi = spectrum.original_indices
-  if oi is None:
-    raise ValueError("filter_sym_pairs did not set original_indices — "
-                     "the 0-based idx convention is broken")
-  oi = np.asarray(oi)
-  if oi.ndim != 1 or not np.issubdtype(oi.dtype, np.integer):
-    raise TypeError("original_indices must be a 1-D integer array")
-  if len(oi) != spectrum.n_modes:
-    raise ValueError(
-      f"original_indices has length {len(oi)} but spectrum has "
-      f"{spectrum.n_modes} modes — inconsistent",
-    )
-  if len(oi) > 1 and np.any(np.diff(oi) <= 0):
-    raise ValueError("original_indices must be strictly increasing (0-based, "
-                     "full-spectrum order preserved)")
-  if (oi < 0).any():
-    raise ValueError("original_indices must be 0-based (no negative indices)")
 
 
 if __name__ == "__main__":
@@ -56,7 +31,6 @@ if __name__ == "__main__":
   spectrum = parse_phonon_npz(args.phonon_path)
   spectrum.analyze_c3v_symmetry()
   filtered = spectrum.filter_sym_pairs()
-  check_original_indices(filtered)
   save_phonon_npz(filtered, args.out_path or args.phonon_path)
   print(f"saved filtered spectrum ({filtered.n_modes} of {spectrum.n_modes} modes) "
         f"to {args.out_path or args.phonon_path}")

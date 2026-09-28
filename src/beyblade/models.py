@@ -149,6 +149,39 @@ class ZFSTensor:
         return ZFSTensor(matrix=rotated_mat, unit=self.unit)
 
 
+def check_original_indices(
+    original_indices: np.ndarray,
+    n_modes: int,
+    n_full: Optional[int] = None,
+) -> None:
+    """Raise if ``original_indices`` violates the 0-based idx convention.
+
+    It must be a 1-D integer array, one entry per kept mode, strictly
+    increasing (full-spectrum order preserved), non-negative, and — when
+    ``n_full`` is given — within ``[0, n_full)``.
+    """
+    oi = np.asarray(original_indices)
+    if oi.ndim != 1 or not np.issubdtype(oi.dtype, np.integer):
+        raise TypeError("original_indices must be a 1-D integer array")
+    if len(oi) != n_modes:
+        raise ValueError(
+            f"original_indices has length {len(oi)} but spectrum has "
+            f"{n_modes} modes — inconsistent"
+        )
+    if len(oi) > 1 and np.any(np.diff(oi) <= 0):
+        raise ValueError(
+            "original_indices must be strictly increasing "
+            "(0-based, full-spectrum order preserved)"
+        )
+    if (oi < 0).any():
+        raise ValueError("original_indices must be 0-based (no negative indices)")
+    if n_full is not None and (oi >= n_full).any():
+        raise ValueError(
+            f"original_indices must be < n_full ({n_full}); the 0-based "
+            "idx convention is broken"
+        )
+
+
 @dataclass
 class PhononMode:
     """Represents a single vibrational mode."""
@@ -612,6 +645,8 @@ class PhononSpectrum:
         code can map each reduced mode back to its source position.
 
         Requires symmetry labels: computes them if not already present.
+        Validates the returned ``original_indices`` against the 0-based
+        convention (see ``check_original_indices``); raises on violation.
         """
         syms = self.symmetries if self.symmetries is not None else self.analyze_c3v_symmetry()
         freqs = self.frequencies_mev
@@ -625,7 +660,7 @@ class PhononSpectrum:
                 skip_indices.add(i)
 
         mask = np.array([i not in skip_indices for i in range(n)])
-        return PhononSpectrum(
+        reduced = PhononSpectrum(
             frequencies_mev=freqs[mask],
             eigenvectors=self.eigenvectors[mask],
             atom_frac_coords=self.atom_frac_coords,
@@ -638,6 +673,10 @@ class PhononSpectrum:
             # code can map each reduced mode back to its source position.
             original_indices=np.where(mask)[0],
         )
+        check_original_indices(
+            reduced.original_indices, reduced.n_modes, n_full=n
+        )
+        return reduced
 
     def save(self, out_path: Union[str, Path]) -> str:
         """Saves spectrum to .npz file with explicit frequency unit tag."""
