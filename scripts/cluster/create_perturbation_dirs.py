@@ -102,7 +102,19 @@ def main() -> int:
     ap.add_argument("--output", type=Path, default=None,
                     help="defect folder to write into; the basename is used as "
                          "the defect name (default: ./<defect> requires a name)")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite existing perturbation folders instead of "
+                         "skipping them; requires typing APPROVE to confirm")
     args = ap.parse_args()
+
+    if args.force:
+        try:
+            answer = input("Overwrite existing perturbation folders? "
+                           "Type APPROVE to continue: ")
+        except EOFError:
+            answer = ""
+        if answer.strip() != "APPROVE":
+            sys.exit("Aborted: overwrite not confirmed")
 
     if args.output is None:
         sys.exit("Error: --output is required (the defect name is read from it)")
@@ -131,8 +143,12 @@ def main() -> int:
             for pert in args.pert:
                 dst = out / order / f"pert_{pert}" / basis
                 if dst.exists():
-                    print(f"  note: {dst} already exists -- skipping")
-                    continue
+                    if args.force:
+                        print(f"  overwriting {dst}")
+                        shutil.rmtree(dst)
+                    else:
+                        print(f"  note: {dst} already exists -- skipping")
+                        continue
                 print(f"  creating {dst}")
                 prepare_basis(src, dst, order.split("_")[0], phonon,
                               defect, pert)
