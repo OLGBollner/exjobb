@@ -71,8 +71,7 @@ def replace_tag(incar: str, tag: str, value: str) -> str:
 # directory preparation
 # --------------------------------------------------------------------------- #
 def prepare_basis(src: Path, dst: Path, order: str, phonon: Path,
-                  defect: str, pert: float, vasp_binary: Path | None = None,
-                  cluster_scripts_dir: Path | None = None) -> None:
+                  defect: str, pert: float, vasp_binary: Path | None = None) -> None:
     """Fill dst/input/ and write the prefilled SLURM script."""
     inp = dst / "input"
     inp.mkdir(parents=True, exist_ok=True)
@@ -92,7 +91,7 @@ def prepare_basis(src: Path, dst: Path, order: str, phonon: Path,
     text = replace_tag(text, "PERT", str(pert))
     if vasp_binary:
         text = replace_tag(text, "BINARY", str(vasp_binary))
-    if cluster_scripts_dir:
+    if cluster_scripts_dir := Path(__file__).resolve().parent:
         name = "create_combined_phonon_struct.py" if order == "second" \
             else "create_phonon_struct.py"
         text = replace_tag(text, "CREATE_STRUCT",
@@ -114,9 +113,6 @@ def main() -> int:
                          "the defect name (default: ./<defect> requires a name)")
     ap.add_argument("--vasp-binary", type=Path, default=None,
                     help="fill the BINARY placeholder with this path")
-    ap.add_argument("--cluster-scripts-dir", type=Path, default=None,
-                    help="fill the CREATE_STRUCT/GET_N_MODES placeholders "
-                         "with this directory (on the cluster)")
     ap.add_argument("--force", action="store_true",
                     help="overwrite existing perturbation folders instead of "
                          "skipping them; requires typing APPROVE to confirm")
@@ -167,8 +163,7 @@ def main() -> int:
                 print(f"  creating {dst}")
                 prepare_basis(src, dst, order.split("_")[0], phonon,
                               defect=defect, pert=pert,
-                              vasp_binary=args.vasp_binary,
-                              cluster_scripts_dir=args.cluster_scripts_dir)
+                              vasp_binary=args.vasp_binary)
 
     if FAILURES:
         print(f"\n{len(FAILURES)} problem(s) found -- inspect before launching")
