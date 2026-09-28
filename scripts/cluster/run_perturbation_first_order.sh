@@ -17,12 +17,12 @@ ml miniconda3
 source activate /cfs/klemming/projects/supr/adaq/obollner/conda-dirs/envs/sim-env
 
 # ---- config (override via environment, e.g. DEFECT=NV_512 sbatch ...) ----
-DEFECT=${DEFECT:-ClV_128}
-binary=${BINARY:-/cfs/klemming/projects/supr/adaq/oscarlb/to_bollner/vasp_binary/vasp_std}
-create_struct=${CREATE_STRUCT:-/cfs/klemming/projects/supr/adaq/obollner/exjobb/scripts/cluster/create_phonon_struct.py}
-get_n_modes=${GET_N_MODES:-/cfs/klemming/projects/supr/adaq/obollner/exjobb/scripts/cluster/get_n_modes.py}
-PHONON_PATH=${PHONON_PATH:-/cfs/klemming/projects/supr/adaq/obollner/${DEFECT}/data/phonon_data.npz}
-PERT=${PERT:-0.025}
+DEFECT=${DEFECT:-<defect>}
+binary=${BINARY:-<vasp_binary>}
+create_struct=${CREATE_STRUCT:-<path_to>/create_phonon_struct.py}
+get_n_modes=${GET_N_MODES:-<path_to>/get_n_modes.py}
+PHONON_PATH=${PHONON_PATH:-<path_to_phonon_data.npz>}
+PERT=${PERT:-<pert_scale>}
 # --------------------------------------------------------------------------
 
 INPUT_DIR="input"
