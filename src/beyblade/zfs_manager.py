@@ -6,7 +6,7 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.symmetry import twin_of
+from beyblade.symmetry import twin_of, _build_groups_from_labels
 from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
@@ -47,22 +47,28 @@ class ZFSManager:
             # When the structure cannot be symmetry-detected (e.g. synthetic
             # test fixtures with all atoms at the origin), fall back to the
             # stored labels rather than failing the whole pipeline.
-            from .symmetry import classify_and_pair
+            from .symmetry import SymmetryDetectionError, classify_and_pair
             stored_syms = list(spectrum.symmetries) if spectrum.symmetries is not None else None
             try:
                 fresh_labels, deg_groups = classify_and_pair(spectrum, force=True)
-            except Exception as exc:
+            except (SymmetryDetectionError, NotImplementedError) as exc:
+                # NotImplementedError: point group detected but no character
+                # table; SymmetryDetectionError: no symmetry found at all.
+                # Both mean "cannot classify this structure" — a genuine bug
+                # in the classifier must NOT be caught here.
                 if stored_syms is None:
                     raise
-                print(
-                    f"Warning: fresh symmetry classification failed ({exc}); "
-                    f"falling back to stored labels."
+                warnings.warn(
+                    f"Fresh symmetry classification failed ({exc}); "
+                    "falling back to stored labels.",
+                    RuntimeWarning,
+                    stacklevel=2,
                 )
                 fresh_labels = stored_syms
-                deg_groups = None
-                if deg_groups is None:
-                    from .symmetry import _build_groups_from_labels
-                    deg_groups = _build_groups_from_labels(spectrum, fresh_labels, 0.01)
+                # Stored labels are trusted as-is here, so sym_check cannot be
+                # verified (no detectable point group to build characters
+                # from) and stays None for this spectrum.
+                deg_groups = _build_groups_from_labels(spectrum, stored_syms, 0.01)
             if stored_syms is not None and fresh_labels is not stored_syms:
                 mismatched = [i for i, (a, b) in enumerate(zip(stored_syms, fresh_labels)) if a != b]
                 if mismatched:

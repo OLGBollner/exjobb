@@ -70,6 +70,15 @@ CHARACTER_TABLES: dict[str, dict[str, Any]] = {
 }
 
 
+class SymmetryDetectionError(RuntimeError):
+    """Raised when the point group of a structure cannot be determined.
+
+    Typically synthetic fixtures with all atoms at the origin, which have
+    no usable symmetry. Callers that have stored labels may catch this and
+    fall back; anything else is a genuine bug and should propagate.
+    """
+
+
 @dataclass(frozen=True)
 class PointGroup:
     """Detected point group of a structure."""
@@ -81,8 +90,20 @@ class PointGroup:
 
 def detect_point_group(structure: Structure, symprec: float = 1e-3) -> PointGroup:
     """Detect the point group of a (defect) supercell structure."""
-    sga = SpacegroupAnalyzer(structure, symprec=symprec)
-    symm_ops = sga.get_symmetry_operations()
+    try:
+        sga = SpacegroupAnalyzer(structure, symprec=symprec)
+        symm_ops = sga.get_symmetry_operations()
+    except Exception as exc:
+        # spglib raises its own error for pathological (e.g. all-atoms-at-
+        # origin) structures; translate it so callers can catch our type.
+        raise SymmetryDetectionError(
+            f"Unable to determine symmetry (symprec={symprec}): {exc}"
+        ) from exc
+    if not symm_ops:
+        raise SymmetryDetectionError(
+            f"No symmetry operations found (symprec={symprec}); "
+            "cannot classify modes."
+        )
     return PointGroup(
         symbol=sga.get_point_group_symbol(),
         order=len(symm_ops),
