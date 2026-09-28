@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, Sequence, Union
+from typing import Any
+
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.models import RawZFSData, SpinPhononCouplingData, PhononSpectrum
+from beyblade.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
 from beyblade.parsers import (
     parse_phonon_npz,
     parse_phonopy_yaml,
@@ -25,12 +27,12 @@ from beyblade.zfs_manager import ZFSManager
 
 
 def get_unique_run_dir(
-    output_root: Union[str, Path] = "runs",
+    output_root: str | Path = "runs",
     defect: str = "defect",
-    cell_size: Union[str, int] = "",
+    cell_size: str | int = "",
     calc_method: str = "all_bands",
     order: int = 1,
-    run_name: Optional[str] = None,
+    run_name: str | None = None,
 ) -> Path:
     """
     Creates a unique run directory so prior results are never overwritten.
@@ -65,7 +67,7 @@ def get_unique_run_dir(
     return final_dir
 
 
-def find_default_phonon_file(sim_folder: Optional[Path]) -> Optional[Path]:
+def find_default_phonon_file(sim_folder: Path | None) -> Path | None:
     """Search conventional defect locations for phonopy.yaml or phonon_data.npz."""
     if sim_folder is None:
         return None
@@ -84,7 +86,7 @@ def find_default_phonon_file(sim_folder: Optional[Path]) -> Optional[Path]:
     return None
 
 
-def find_default_phonon_file_for_raw(raw_zfs_file: Union[str, Path, Sequence[Union[str, Path]]]) -> Optional[Path]:
+def find_default_phonon_file_for_raw(raw_zfs_file: str | Path | Sequence[str | Path]) -> Path | None:
     """Search next to the raw ZFS .npz file(s) for phonon_data.npz / phonopy.yaml."""
     if raw_zfs_file is None:
         return None
@@ -110,26 +112,26 @@ def find_default_phonon_file_for_raw(raw_zfs_file: Union[str, Path, Sequence[Uni
 
 def run_full_pipeline(
     *,
-    sim_folder: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
-    raw_zfs_file: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
-    raw_zfs_file_1d: Optional[Union[str, Path]] = None,
-    raw_zfs_file_2d: Optional[Union[str, Path]] = None,
-    coupling_file: Optional[Union[str, Path]] = None,
-    phonon_file: Optional[Union[str, Path]] = None,
-    two_phonon_file: Optional[Union[str, Path]] = None,
+    sim_folder: str | Path | Sequence[str | Path] | None = None,
+    raw_zfs_file: str | Path | Sequence[str | Path] | None = None,
+    raw_zfs_file_1d: str | Path | None = None,
+    raw_zfs_file_2d: str | Path | None = None,
+    coupling_file: str | Path | None = None,
+    phonon_file: str | Path | None = None,
+    two_phonon_file: str | Path | None = None,
     calc_method: str = "all_bands",
-    zfs_folder: Optional[str] = None,
-    order: Optional[int] = None,
-    pert_scale: Optional[float] = None,
-    defect: Optional[str] = None,
-    cell_size: Optional[int] = None,
+    zfs_folder: str | None = None,
+    order: int | None = None,
+    pert_scale: float | None = None,
+    defect: str | None = None,
+    cell_size: int | None = None,
     t_start: float = 0.0,
     t_end: float = 300.0,
     t_step: float = 10.0,
-    temperatures: Optional[Sequence[float]] = None,
+    temperatures: Sequence[float] | None = None,
     init_state: str = "ms_0",
-    output_root: Union[str, Path] = "runs",
-    run_name: Optional[str] = None,
+    output_root: str | Path = "runs",
+    run_name: str | None = None,
     save_plots: bool = True,
     show_plots: bool = False,
     debug: bool = False,
@@ -164,9 +166,9 @@ def run_full_pipeline(
     if zfs_folder is None:
         zfs_folder = "ZFS_hyp" if calc_method == "all_bands" else "ZFS_occup"
 
-    raw_data: Optional[RawZFSData] = None
-    spectrum: Optional[PhononSpectrum] = None
-    coupling_data: Optional[SpinPhononCouplingData] = None
+    raw_data: RawZFSData | None = None
+    spectrum: PhononSpectrum | None = None
+    coupling_data: SpinPhononCouplingData | None = None
 
     # ── 2. Ingest Input Data ─────────────────────────────────────────────────
     if coupling_file is not None:
@@ -264,10 +266,10 @@ def run_full_pipeline(
         order=order,
         run_name=run_name,
     )
-    print(f"\n========================================================")
+    print("\n========================================================")
     print(f"  Initialized run in: {run_dir}")
     print(f"  Defect: {defect} | Cell: {cell_size} | Method: {calc_method} | Order: {order}")
-    print(f"========================================================\n")
+    print("========================================================\n")
 
     # ── 4. Save Raw ZFS Data (if generated/loaded) ───────────────────────────
     raw_path = run_dir / "raw_zfs_data.npz"
@@ -521,10 +523,10 @@ def run_full_pipeline(
         except Exception as e:
             print(f"Warning: could not generate T1 plot: {e}")
 
-    print(f"\n========================================================")
-    print(f"  Run successfully completed!")
+    print("\n========================================================")
+    print("  Run successfully completed!")
     print(f"  All results stored in: {run_dir}")
-    print(f"========================================================\n")
+    print("========================================================\n")
 
     return {
         "run_dir": run_dir,

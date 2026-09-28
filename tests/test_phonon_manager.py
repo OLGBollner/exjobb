@@ -1,8 +1,9 @@
-import warnings
-import pytest
 import numpy as np
+import pytest
+
 from beyblade.models import PhononSpectrum
 from beyblade.utils import MathUtils
+
 
 class TestPhononSpectrumProperties:
     @pytest.fixture
@@ -136,7 +137,7 @@ class TestC3vSymmetryClassification:
         axis = np.array([1.0, 1.0, 1.0])
         normal = np.array([1.0, -1.0, 0.0])
         R_C3 = MathUtils.rotation_around_symmetry_axis(axis, order=3)
-        R_sv = MathUtils.reflection_matrix(normal)
+        MathUtils.reflection_matrix(normal)
 
         v1 = np.array([1.0, 1.0, -2.0])
         v1 = v1 / np.linalg.norm(v1) * 1.54

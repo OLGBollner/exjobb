@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
+
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
+from beyblade.models import (
+    PerturbationEntry,
+    PhononSpectrum,
+    RawZFSData,
+    SpinPhononCouplingData,
+    ZFSTensor,
+)
 from beyblade.parsers import (
-    parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
+    parse_zfs_simulation_dataset,
 )
 from beyblade.utils import MathUtils
 
@@ -22,8 +29,8 @@ class ZFSManager:
 
     def __init__(
         self,
-        spectrum: Optional[PhononSpectrum] = None,
-        raw_data: Optional[RawZFSData] = None,
+        spectrum: PhononSpectrum | None = None,
+        raw_data: RawZFSData | None = None,
         debug: bool = False,
     ):
 
@@ -58,18 +65,18 @@ class ZFSManager:
         self.raw_data = raw_data
 
         # Defect metadata
-        self.defect: Optional[str] = raw_data.defect if raw_data else None
-        self.cell_size: Optional[int] = raw_data.cell_size if raw_data else None
-        self.pert_scale: Optional[float] = raw_data.pert_scale if raw_data else None
-        self.calc_method: Optional[str] = (
+        self.defect: str | None = raw_data.defect if raw_data else None
+        self.cell_size: int | None = raw_data.cell_size if raw_data else None
+        self.pert_scale: float | None = raw_data.pert_scale if raw_data else None
+        self.calc_method: str | None = (
             raw_data.calc_method or raw_data.metadata.get("calc_method")
             if raw_data
             else None
         )
 
         # Processed ZFS data in defect principal frame
-        self.zfs_relaxed: Optional[np.ndarray] = None          # Shape (3, 3) in J
-        self.eigen_rotation: Optional[np.ndarray] = None        # Shape (3, 3)
+        self.zfs_relaxed: np.ndarray | None = None          # Shape (3, 3) in J
+        self.eigen_rotation: np.ndarray | None = None        # Shape (3, 3)
         self.first_order: dict[int, dict[str, Any]] = {}        # 1D perturbations
         self.second_order: dict[tuple[int, int], dict[str, Any]] = {}  # 2D perturbations
         self.treated_modes: set[int] = set()
@@ -108,7 +115,7 @@ class ZFSManager:
             return self.spectrum.frequencies_mev
         return np.array([])
 
-    def get_phonon_pert(self, pert_scale_si: float) -> Optional[dict[str, Any]]:
+    def get_phonon_pert(self, pert_scale_si: float) -> dict[str, Any] | None:
         if self.spectrum is not None:
             return self.spectrum.get_phonon_pert(pert_scale_si)
         return None
@@ -173,7 +180,7 @@ class ZFSManager:
         n_phon = spectrum.n_modes if spectrum is not None else None
         dropped = []
 
-        def remap(idx: int) -> Optional[int]:
+        def remap(idx: int) -> int | None:
             """Raw DFT index -> spectrum position; logs and returns None if dropped."""
             if not remap_needed:
                 return idx if n_phon is None or idx < n_phon else None
@@ -230,7 +237,7 @@ class ZFSManager:
             # q0 = pert_amplitude^2 / (2*f) is uniform across the perturbation run;
             # estimate it from matched modes so orphaned entries' frequencies can be
             # recovered and matched to the spectrum by physics rather than by index.
-            q0_est = self._estimate_q0()
+            self._estimate_q0()
             for (i, j), entry in raw.second_order.items():
                 si, sj = remap(i), remap(j)
                 if si is None or sj is None:
@@ -283,7 +290,7 @@ class ZFSManager:
 
         self.treated_modes = self._get_symmetry_factor()
 
-    def _estimate_q0(self) -> Optional[float]:
+    def _estimate_q0(self) -> float | None:
         """Estimate the uniform q0 = amp^2 / (2*f) from modes present in both the
         raw 1D data and the spectrum (their original indices)."""
         if self.spectrum is None or self.spectrum.original_indices is None:
@@ -342,13 +349,13 @@ class ZFSManager:
         print(f"Treated unique modes: {len(mode_set)}")
         return mode_set
 
-    def calculate_first_order_derivatives(self, ipr_thresh: Optional[float] = None):
+    def calculate_first_order_derivatives(self, ipr_thresh: float | None = None):
         """
         Calculates 1st order finite difference derivatives dD/dq and spin-phonon coupling coefficients.
         """
         print("Calculating first-order derivatives...")
         n_modes = self.nmodes
-        phonon_energies = self.get_phonon_frequencies()
+        self.get_phonon_frequencies()
 
         zfs_deriv = np.zeros((n_modes, 3, 3))
         V_0_0 = np.zeros(n_modes)
@@ -434,7 +441,7 @@ class ZFSManager:
 
         return zfs_deriv, V_0_0, V_p_m, V_0_pm
 
-    def calculate_second_order_derivatives(self, zfs_1d_derivs: np.ndarray, ipr_thresh: Optional[float] = None):
+    def calculate_second_order_derivatives(self, zfs_1d_derivs: np.ndarray, ipr_thresh: float | None = None):
         """
         Calculates 2nd order finite difference derivatives d2D/dqi dqj and 2-phonon coupling coefficients.
         """
@@ -479,11 +486,7 @@ class ZFSManager:
 
             if sym == ["A1"]:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
-            elif {sym_i, sym_j} == {"Ex"}:
-                V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
-                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
-                V_p_m_2nd[i, j] = 0.25 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
-            elif {sym_i, sym_j} == {"Ey"}:
+            elif {sym_i, sym_j} == {"Ex"} or {sym_i, sym_j} == {"Ey"}:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
                 V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
                 V_p_m_2nd[i, j] = 0.25 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
@@ -529,7 +532,7 @@ class ZFSManager:
 
         return zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd
 
-    def process_first_order_perturbations(self, output_filename: Optional[str] = None) -> list[str]:
+    def process_first_order_perturbations(self, output_filename: str | None = None) -> list[str]:
         if not self.zfs_tensors:
             raise ValueError("First order ZFS data not loaded.")
 
@@ -557,7 +560,7 @@ class ZFSManager:
         return [save_path]
 
     def process_second_order_perturbations(
-        self, zfs_1d_derivs_file: Optional[str] = None, output_filename: Optional[str] = None
+        self, zfs_1d_derivs_file: str | None = None, output_filename: str | None = None
     ) -> list[str]:
         if not self.zfs_tensors_2d:
             raise ValueError("Second order ZFS data not loaded.")
@@ -598,9 +601,9 @@ class ZFSManager:
 
     def process_both_orders(
         self,
-        output_filename: Optional[str] = None,
-        ipr_thresh_first: Optional[float] = None,
-        ipr_thresh_second: Optional[float] = None,
+        output_filename: str | None = None,
+        ipr_thresh_first: float | None = None,
+        ipr_thresh_second: float | None = None,
     ) -> list[str]:
         """
         Calculates first- AND second-order derivatives/couplings in one go and
@@ -726,7 +729,7 @@ class ZFSManager:
         return save_name
 
     @staticmethod
-    def _check_symmetry(d_tensor: np.ndarray, symmetry: Union[str, tuple[str, str]], idx: Any) -> None:
+    def _check_symmetry(d_tensor: np.ndarray, symmetry: str | tuple[str, str], idx: Any) -> None:
         sym_prod = (
             MathUtils.calc_symmetry(*symmetry) if isinstance(symmetry, tuple) else [symmetry]
         )

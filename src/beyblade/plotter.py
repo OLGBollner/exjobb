@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Optional, Sequence, Union
-import numpy as np
+from typing import Any
+
 import matplotlib.pyplot as plt
+import numpy as np
 
 from beyblade.constants import CONSTANTS
 from beyblade.models import SpinPhononCouplingData
@@ -13,11 +15,11 @@ from beyblade.utils import MathUtils
 def plot_vlines_sorted_by_magnitude(
     ax: plt.Axes,
     x: np.ndarray,
-    y_data_dict: dict[str, Union[np.ndarray, tuple[np.ndarray, np.ndarray]]],
+    y_data_dict: dict[str, np.ndarray | tuple[np.ndarray, np.ndarray]],
     *,
     sort_metric: str = "max",
-    colors: Optional[Sequence[Optional[str]]] = None,
-    alphas: Union[float, Sequence[float]] = 1.0,
+    colors: Sequence[str | None] | None = None,
+    alphas: float | Sequence[float] = 1.0,
     **vlines_kwargs,
 ):
     """
@@ -60,13 +62,13 @@ def plot_1d_spectral_functions(
     V_p_m: np.ndarray,
     V_0_pm: np.ndarray,
     *,
-    zfs_mev: Optional[float] = None,
+    zfs_mev: float | None = None,
     sigma: float = 7.5,
     res: float = 1.0,
     label_prefix: str = "",
     order: int = 1,
-    ax: Optional[plt.Axes] = None,
-    ax2: Optional[plt.Axes] = None,
+    ax: plt.Axes | None = None,
+    ax2: plt.Axes | None = None,
     vline_scale: str = "MHz",
 ) -> tuple[plt.Figure, plt.Axes, plt.Axes]:
     """
@@ -130,8 +132,8 @@ def plot_1d_spectral_functions(
 
 
 def plot_transition_rates_stacked(
-    rates_data: Union[str, Path, dict[str, Any]],
-    output_path: Optional[Union[str, Path]] = None,
+    rates_data: str | Path | dict[str, Any],
+    output_path: str | Path | None = None,
     show: bool = False,
     log_scale: bool = True,
 ) -> list[tuple[plt.Figure, plt.Axes]]:
@@ -227,8 +229,8 @@ def plot_transition_rates_stacked(
 
 
 def plot_t1_relaxation(
-    t1_data: Union[str, Path, dict[str, Any]],
-    output_path: Optional[Union[str, Path]] = None,
+    t1_data: str | Path | dict[str, Any],
+    output_path: str | Path | None = None,
     show: bool = False,
 ) -> tuple[plt.Figure, plt.Axes]:
     """
@@ -242,8 +244,6 @@ def plot_t1_relaxation(
     temperatures = np.asarray(data["temperatures"], dtype=float)
     defect = str(data.get("defect", ""))
     cell_size = str(data.get("cell_size", ""))
-    calc_method = str(data.get("calc_method", ""))
-    init_state = str(data.get("init_state", "ms_0"))
 
     t1_fit = np.asarray(data["t1_fit"], dtype=float) if "t1_fit" in data else None
     t1_eigenval = np.asarray(data["t1_eigenval"], dtype=float) if "t1_eigenval" in data else None
@@ -292,7 +292,7 @@ def plot_ipr_spectrum(
     *,
     sigma: float = 7.5,
     as_bar: bool = False,
-    ax: Optional[plt.Axes] = None,
+    ax: plt.Axes | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
     """Plots Inverse Participation Ratio (IPR) across phonon frequencies or mode indices."""
     if ax is None:
@@ -319,7 +319,7 @@ def plot_2d_spectral_density_map(
     *,
     sigma: float = 7.5,
     res: float = 1.0,
-    ax: Optional[plt.Axes] = None,
+    ax: plt.Axes | None = None,
     zfs_2nd_derivs_unit: str = "MHz",
 ) -> tuple[plt.Figure, plt.Axes]:
     """Plots a 2D Raman phonon coupling intensity heatmap."""
@@ -464,7 +464,7 @@ class ZFSPlotter:
     High-level plotter that coordinates matplotlib rendering without mutating underlying data arrays.
     """
 
-    def __init__(self, plot_config: Optional[dict[str, Any]] = None):
+    def __init__(self, plot_config: dict[str, Any] | None = None):
         self.config = plot_config or {}
         plt.rcParams.update({
             "axes.titlesize": 16,
@@ -474,7 +474,7 @@ class ZFSPlotter:
             "legend.fontsize": 14,
         })
 
-    def plot_data(self, data_files: Sequence[Union[str, Path, SpinPhononCouplingData]], args: Any):
+    def plot_data(self, data_files: Sequence[str | Path | SpinPhononCouplingData], args: Any):
         """
         Processes and plots one or more derivative dataset files or SpinPhononCouplingData objects.
         Uses the internal unit conversion of SpinPhononCouplingData instead of manual conversions.

@@ -1,10 +1,14 @@
-from typing import Union, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Union
+
+if TYPE_CHECKING:
+    from beyblade.models import SpinPhononCouplingData
+
 import numpy as np
 from scipy import constants as Cn
-from pathlib import Path
 
-from beyblade.utils import MathUtils
 from beyblade.constants import CONSTANTS
+from beyblade.utils import MathUtils
 
 # (sign_l, sign_lp) for energy conservation: omega_spin = s*omega_l + s'*omega_lp
 PHONON_PROCESSES = {
@@ -62,7 +66,7 @@ class TransitionRate:
     if two_phonon_data_file is not None:
       self.load_data_2ph(two_phonon_data_file)
 
-  def load_data_2ph(self, filename: Union[str, Path]) -> None:
+  def load_data_2ph(self, filename: str | Path) -> None:
     self.data_2ph = np.load(str(filename), allow_pickle=True)
 
   def load_data(self, filename: Union[str, Path, "SpinPhononCouplingData"]) -> None:
@@ -134,8 +138,10 @@ class TransitionRate:
       if m1 == m2:
         return (self.Fz_elements[m1]**2) * J_0_0
       diff = abs(m1 - m2)
-      if diff == 1: return J_0_pm
-      if diff == 2: return J_p_m
+      if diff == 1:
+        return J_0_pm
+      if diff == 2:
+        return J_p_m
       return np.zeros_like(omega)
 
     for ms in self.ms_values:
@@ -197,8 +203,10 @@ class TransitionRate:
       if m1 == m2:
         return (self.Fz_elements[m1]**2) * J_0_0
       diff = abs(m1 - m2)
-      if diff == 1: return J_0_pm
-      if diff == 2: return J_p_m
+      if diff == 1:
+        return J_0_pm
+      if diff == 2:
+        return J_p_m
       return np.zeros_like(omega_x)
 
     bose = Phonons.bose_einstein_2d(omega_x[0, :], T)

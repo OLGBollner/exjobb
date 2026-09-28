@@ -1,13 +1,13 @@
-from _pytest.tmpdir import tmp_path
-import pytest
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 from beyblade.plotter import (
-    plot_1d_spectral_functions,
-    plot_ipr_spectrum,
-    plot_2d_spectral_density_map,
     ZFSPlotter,
+    plot_1d_spectral_functions,
+    plot_2d_spectral_density_map,
+    plot_ipr_spectrum,
 )
+
 
 class TestPlotter:
     def test_plot_1d_spectral_functions(self):
@@ -50,9 +50,9 @@ class TestPlotter:
     def test_zfs_plotter_with_spin_phonon_coupling_data(self, tmp_path, monkeypatch):
         """Tests that ZFSPlotter accepts SpinPhononCouplingData directly and converts units seamlessly."""
         from types import SimpleNamespace
-        from beyblade.models import SpinPhononCouplingData, ZFSTensor
-        from beyblade.plotter import ZFSPlotter
+
         from beyblade.constants import CONSTANTS
+        from beyblade.models import SpinPhononCouplingData, ZFSTensor
 
         # Data in Joules
         freqs_j = np.array([20.0, 40.0, 60.0]) * CONSTANTS["meV2J"]
