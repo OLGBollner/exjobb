@@ -6,6 +6,7 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from beyblade.constants import CONSTANTS
+from beyblade.symmetry import twin_of, _build_groups_from_labels
 from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
@@ -40,6 +41,45 @@ class ZFSManager:
 
         # spectrum is the primary dataclass
         if spectrum is not None:
+            # Always reclassify fresh via the general projection method and
+            # cross-check against labels stored in the phonon npz (they are
+            # legacy/baked-in and may predate the current classification).
+            # When the structure cannot be symmetry-detected (e.g. synthetic
+            # test fixtures with all atoms at the origin), fall back to the
+            # stored labels rather than failing the whole pipeline.
+            from .symmetry import SymmetryDetectionError, classify_and_pair
+            stored_syms = list(spectrum.symmetries) if spectrum.symmetries is not None else None
+            try:
+                fresh_labels, deg_groups = classify_and_pair(spectrum, force=True)
+            except (SymmetryDetectionError, NotImplementedError) as exc:
+                # NotImplementedError: point group detected but no character
+                # table; SymmetryDetectionError: no symmetry found at all.
+                # Both mean "cannot classify this structure" — a genuine bug
+                # in the classifier must NOT be caught here.
+                if stored_syms is None:
+                    raise
+                warnings.warn(
+                    f"Fresh symmetry classification failed ({exc}); "
+                    "falling back to stored labels.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                fresh_labels = stored_syms
+                # Stored labels are trusted as-is here, so sym_check cannot be
+                # verified (no detectable point group to build characters
+                # from) and stays None for this spectrum.
+                deg_groups = _build_groups_from_labels(spectrum, stored_syms, 0.01)
+            if stored_syms is not None and fresh_labels is not stored_syms:
+                mismatched = [i for i, (a, b) in enumerate(zip(stored_syms, fresh_labels)) if a != b]
+                if mismatched:
+                    print(
+                        f"Warning: {len(mismatched)} stored symmetry label(s) differ "
+                        f"from fresh classification: {mismatched[:10]}"
+                        f"{'...' if len(mismatched) > 10 else ''}. "
+                        f"Using fresh classification."
+                    )
+            spectrum.symmetries = fresh_labels
+            spectrum.deg_groups = deg_groups
             # An incomplete spectrum (missing degenerate E twins) must be rejected:
             # the ZFS pipeline needs all 3*N_atoms modes. Regenerate the phonon npz
             # from the full calculation instead.
@@ -47,7 +87,7 @@ class ZFSManager:
                 spectrum.check_e_pair_completeness()
             incomplete = [
                 i for i, ok in enumerate(spectrum.e_pair_complete or [])
-                if not ok and spectrum.symmetries[i] in ("Ex", "Ey")
+                if not ok and fresh_labels[i] in ("Ex", "Ey")
             ]
             if incomplete:
                 raise ValueError(
@@ -59,10 +99,6 @@ class ZFSManager:
                     f"rather than the symmetry-adapted subset."
                 )
             self.spectrum = spectrum
-            # pair_ids must be a strict symmetric involution; chains fail loudly.
-            if self.spectrum.pair_ids is None:
-                self.spectrum.build_pair_ids()
-            self.spectrum.validate_pair_ids()
         else:
             self.spectrum = None
 
@@ -175,7 +211,7 @@ class ZFSManager:
                 if amp is not None:
                     pert_amps[idx] = float(amp)
             if pert_amps and spectrum.infer_original_indices(pert_amps):
-                spectrum.validate_pair_ids()
+                pass
         remap_needed = (
             spectrum is not None
             and spectrum.original_indices is not None
@@ -280,7 +316,7 @@ class ZFSManager:
                 f"Note: {len(dropped)} raw mode indices have no partner in the "
                 f"phonon spectrum ({n_phon} modes kept) and were skipped: "
                 f"{sorted(set(dropped))[:10]}{'...' if len(set(dropped)) > 10 else ''}. "
-                "Their V-coefficients will be inherited via degenerate pair_ids where available."
+                "Their V-coefficients will be inherited via degeneracy groups where available."
             )
 
         self.treated_modes = self._get_symmetry_factor()
@@ -356,13 +392,9 @@ class ZFSManager:
         V_0_pm = np.zeros(n_modes)
         V_p_m = np.zeros(n_modes)
 
-        # Symmetry axis mapping based on defect and cell size
-        if self.defect == "NV" and self.cell_size == 512:
-            sym_x, sym_y = "Ey", "Ex"
-        elif self.defect in ("NV", "ClV") or (self.defect == "NV" and self.cell_size == 64):
-            sym_x, sym_y = "Ex", "Ey"
-        else:
-            sym_x, sym_y = "Ex", "Ey"
+        # The V formulas are rotationally invariant in the xy-plane, so the
+        # Ex/Ey ordering convention of the eigenvectors does not affect them;
+        # no per-defect/cell-size switch is needed.
 
         for i, item in sorted(self.zfs_tensors.items()):
             if i not in self.treated_modes:
@@ -394,7 +426,7 @@ class ZFSManager:
                 # Traceless projection: dD_zz - 0.5 * (dD_xx + dD_yy) = 1.5 * d\tilde{D}_zz
                 # V_00 = 0.5 * d\tilde{D}_zz = 1/3 * (dD_zz - 0.5 * (dD_xx + dD_yy))
                 V_0_0[i] = np.abs(dD_dq[2, 2] - 0.5 * trace_in_plane) / 3.0
-            elif sym in [sym_x, sym_y, "Ex", "Ey"]:
+            elif sym in ("Ex", "Ey"):
                 # Appendix A.1 Eq. A.6 & A.7 (rotationally invariant in xy-plane):
                 # V_+- = 0.5 * sqrt((dD_xx - dD_yy)^2 + 4 * dD_xy^2)
                 # V_0+- = sqrt(dD_xz^2 + dD_yz^2) / sqrt(2)
@@ -409,11 +441,9 @@ class ZFSManager:
             if (
                 len(self.treated_modes) < n_modes
                 and spectrum is not None
-                and spectrum.pair_ids is not None
-                and spectrum.pair_ids[i] < spectrum.n_modes
             ):
-                twin = int(spectrum.pair_ids[i])
-                if twin != i:
+                twin = twin_of(spectrum.deg_groups, i)
+                if twin is not None and twin != i:
                     V_0_pm[twin] = np.where(V_0_pm[twin] == 0, V_0_pm[i], V_0_pm[twin])
                     V_p_m[twin] = np.where(V_p_m[twin] == 0, V_p_m[i], V_p_m[twin])
 
@@ -496,8 +526,7 @@ class ZFSManager:
                 # Inherit V-coefficients for the degenerate twin via pair_id.
                 # The spectrum owns the pairing (strict involution); no frequency guessing.
                 spectrum = self.spectrum
-                if spectrum is not None and spectrum.pair_ids is not None and spectrum.pair_ids[i] < spectrum.n_modes:
-                    twin = int(spectrum.pair_ids[i])
+                if spectrum is not None and (twin := twin_of(spectrum.deg_groups, i)) is not None:
                     if twin != j:  # avoid overwriting an (i,j) cross-coupling with the pair copy
                         V_0_0_2nd[twin, twin] = V_0_0_2nd[i, j]
                         V_0_pm_2nd[twin, twin] = V_0_pm_2nd[i, j]

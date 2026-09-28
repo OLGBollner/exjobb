@@ -5,3 +5,6 @@ __pycache__/
 POSCAR
 runs/
 *.yaml
+
+# Thesis drafts stay local
+Thesis/
