@@ -1,5 +1,4 @@
 from beyblade.parsers import parse_zfs_simulation_dataset
-from pathlib import Path
 import argparse
 
 def main():
