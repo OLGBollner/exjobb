@@ -1,12 +1,12 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.colors import Normalize
-from matplotlib import ticker
 from argparse import ArgumentParser as Parser
-from beyblade.models import PhononSpectrum
-from beyblade.parsers import parse_phonon_npz
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import Normalize
+from matplotlib.lines import Line2D
+
 from beyblade.constants import CONSTANTS
+from beyblade.parsers import parse_phonon_npz
 
 if __name__ == "__main__":
     parser = Parser("Plots IPR.")

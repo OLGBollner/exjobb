@@ -8,8 +8,8 @@ Usage:
 
 import argparse
 import sys
+
 import numpy as np
-from pathlib import Path
 
 try:
     from pymatgen.core.structure import Structure
@@ -47,7 +47,7 @@ def load_poscar(poscar_file: str) -> Structure:
     except FileNotFoundError:
         raise FileNotFoundError(f"POSCAR file not found: {poscar_file}")
     except Exception as e:
-        raise Exception(f"Error reading POSCAR file {poscar_file}: {str(e)}")
+        raise Exception(f"Error reading POSCAR file {poscar_file}: {e!s}")
 
 
 def apply_combined_perturbation(structure: Structure,
@@ -159,7 +159,7 @@ Example:
         print("\nSuccess!")
 
     except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
+        print(f"Error: {e!s}", file=sys.stderr)
         sys.exit(1)
 
 

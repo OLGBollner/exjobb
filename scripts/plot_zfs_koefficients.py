@@ -1,8 +1,7 @@
-from pathlib import Path
 from argparse import ArgumentParser as Parser
-import numpy as np
+
 import matplotlib.pyplot as plt
-from scipy import constants as Cn
+import numpy as np
 from utils import smear_data
 
 if __name__ == "__main__":
@@ -56,7 +55,7 @@ if __name__ == "__main__":
       else:
         filename += "zfs_vs_pert"
 
-      filename += "_{}".format(pert_scale)
+      filename += f"_{pert_scale}"
 
       if args.bar:
         filename += "_bar"
@@ -69,7 +68,7 @@ if __name__ == "__main__":
       else:
         sim_type = "all_bands" if "all" in zfs_files[i] else "defect_band_approx"
 
-        filename+=":{}".format(sim_type)
+        filename+=f":{sim_type}"
     filename += args.format if args.format else ".png"
 
     ipr = data["ipr"]

@@ -1,5 +1,6 @@
-import numpy as np
 import argparse
+
+import numpy as np
 
 parser = argparse.ArgumentParser("Reads hyperfine parameters and vectors of desired ions")
 parser.add_argument("hyp_file", metavar="hyp_file", help="Hyperfine data file")
@@ -14,25 +15,25 @@ data = np.load(args.hyp_file, allow_pickle=True)
 
 
 for ion in args.ions:
-    print("For ion {}:".format(ion))
+    print(f"For ion {ion}:")
     if args.xyz:
         mat = data[ion-1,1,:,:]
         print("Tensor:")
-        print("{} {} {} {} {} {}".format(mat[0,0], mat[1,1], mat[2,2], mat[0,1], mat[0,2], mat[1,2]))
+        print(f"{mat[0,0]} {mat[1,1]} {mat[2,2]} {mat[0,1]} {mat[0,2]} {mat[1,2]}")
     if args.tensor:
         print("Tensor:")
         mat = data[args.ions[0] - 1, 1, :,:]
         for i in range(3):
             for j in range(3):
-                print("{:<4.3f}".format(mat[i,j]), end=" ")
+                print(f"{mat[i,j]:<4.3f}", end=" ")
             print()
     if args.pos:
-        print("Position: {}".format(np.diag(data[ion-1, 3,:,:])))
+        print(f"Position: {np.diag(data[ion-1, 3,:,:])}")
     eigs = np.diag(data[ion-1,0,:,:])
     for label, eig in zip(["A1","A2","A3"], eigs):
-        print("{}: {:.3g} MHz".format(label, eig))
+        print(f"{label}: {eig:.3g} MHz")
     print("Vectors:")
     print(data[ion-1,2,:,:])
-    print("")
+    print()
 
 

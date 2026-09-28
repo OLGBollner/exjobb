@@ -24,6 +24,7 @@ Usage examples:
 import argparse
 import sys
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 
 # Add project root to sys.path

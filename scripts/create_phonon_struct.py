@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+
 import numpy as np
-from pathlib import Path
 
 try:
     from pymatgen.core.structure import Structure

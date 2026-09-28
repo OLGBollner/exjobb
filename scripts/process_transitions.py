@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy as np
+from matplotlib import ticker
 
 # -----------------------------------------------------------------------------
 #  Constants and configuration
@@ -164,8 +164,8 @@ def compute_rates(data_path, two_phonon_path, t_start, t_end, t_step):
     together with metadata and temperature array.
     """
     try:
-        from beyblade.transition_rate import TransitionRate
         from beyblade.constants import CONSTANTS
+        from beyblade.transition_rate import TransitionRate
     except ImportError as exc:
         raise ImportError(
             "Could not import TransitionRate or CONSTANTS. Ensure the "
