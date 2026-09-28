@@ -3,9 +3,11 @@ from __future__ import annotations
 import re
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
+
 import numpy as np
 import yaml
+
 try:
     from yaml import CLoader as Loader
 except ImportError:
@@ -14,8 +16,7 @@ except ImportError:
 from pymatgen.core import Structure
 
 from beyblade.constants import CONSTANTS
-from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData
-
+from beyblade.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor
 
 ZFS_REGEX = re.compile(
     r"Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*D_xx\s+D_yy\s+D_zz\s+D_xy\s+D_xz\s+D_yz\s*-+\s*([\s\d\.\-]+?)(?=\s*-{3,})",
@@ -28,7 +29,7 @@ ENERGY_REGEX = re.compile(
 )
 
 
-def parse_outcar_zfs(outcar_path: Union[str, Path]) -> Optional[ZFSTensor]:
+def parse_outcar_zfs(outcar_path: str | Path) -> ZFSTensor | None:
     """
     Parses the dipole-dipole spin-spin ZFS tensor from a VASP OUTCAR file.
     Returns ZFSTensor in MHz, or None if not found.
@@ -65,7 +66,7 @@ def parse_outcar_zfs(outcar_path: Union[str, Path]) -> Optional[ZFSTensor]:
         return None
 
 
-def parse_outcar_energy(outcar_path: Union[str, Path]) -> Optional[float]:
+def parse_outcar_energy(outcar_path: str | Path) -> float | None:
     """
     Parses the final free energy TOTEN (in eV) from a VASP OUTCAR file.
     """
@@ -88,7 +89,7 @@ def parse_outcar_energy(outcar_path: Union[str, Path]) -> Optional[float]:
         return None
 
 
-def parse_phonopy_yaml(yaml_path: Union[str, Path], poscar_path: Optional[Union[str, Path]] = None) -> PhononSpectrum:
+def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = None) -> PhononSpectrum:
     """
     Parses phonon vibrational frequencies, eigenvectors, and structure from a phonopy.yaml file.
     """
@@ -144,7 +145,7 @@ def parse_phonopy_yaml(yaml_path: Union[str, Path], poscar_path: Optional[Union[
     )
 
 
-def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
+def parse_phonon_npz(npz_path: str | Path) -> PhononSpectrum:
     """Loads a precomputed PhononSpectrum from a .npz file using PhononSpectrum.load."""
     path = Path(npz_path)
     if not path.is_file():
@@ -201,12 +202,12 @@ def parse_phonon_npz(npz_path: Union[str, Path]) -> PhononSpectrum:
     )
 
 
-def save_phonon_npz(spectrum: PhononSpectrum, out_path: Union[str, Path]) -> str:
+def save_phonon_npz(spectrum: PhononSpectrum, out_path: str | Path) -> str:
     """Saves a PhononSpectrum object to a .npz archive with explicit unit tracking."""
     return spectrum.save(out_path)
 
 
-def _worker_parse_outcar_1d(outcar_file: Path) -> Optional[tuple[int, ZFSTensor, Optional[float]]]:
+def _worker_parse_outcar_1d(outcar_file: Path) -> tuple[int, ZFSTensor, float | None] | None:
     zfs = parse_outcar_zfs(outcar_file)
     if zfs is None:
         return None
@@ -222,7 +223,7 @@ def _worker_parse_outcar_1d(outcar_file: Path) -> Optional[tuple[int, ZFSTensor,
         return None
 
 
-def _worker_parse_outcar_2d(outcar_file: Path) -> Optional[tuple[tuple[int, int], ZFSTensor, Optional[float]]]:
+def _worker_parse_outcar_2d(outcar_file: Path) -> tuple[tuple[int, int], ZFSTensor, float | None] | None:
     zfs = parse_outcar_zfs(outcar_file)
     if zfs is None:
         return None
@@ -239,9 +240,9 @@ def _worker_parse_outcar_2d(outcar_file: Path) -> Optional[tuple[tuple[int, int]
 
 
 def parse_perturbation_directory(
-    directory: Union[str, Path],
+    directory: str | Path,
     order: int = 1,
-    amplitude: Union[float, tuple[float, float]] = 1.0,
+    amplitude: float | tuple[float, float] = 1.0,
     max_workers: int = 4,
 ) -> dict[Any, PerturbationEntry]:
     """
@@ -272,15 +273,15 @@ def parse_perturbation_directory(
 
 
 def parse_zfs_simulation_dataset(
-    sim_folder: Union[str, Path],
+    sim_folder: str | Path,
     max_workers: int = 4,
-    order: Optional[int] = None,
-    pert_scale: Optional[float] = None,
-    defect: Optional[str] = None,
-    cell_size: Optional[int] = None,
+    order: int | None = None,
+    pert_scale: float | None = None,
+    defect: str | None = None,
+    cell_size: int | None = None,
     *,
-    calc_method: Optional[str] = None,
-    zfs_folder: Optional[str] = None,
+    calc_method: str | None = None,
+    zfs_folder: str | None = None,
 ) -> RawZFSData:
     """
     Parses an entire simulation directory structure:
@@ -343,7 +344,7 @@ def parse_zfs_simulation_dataset(
     )
 
 
-def parse_zfs_dataset_npz(raw_paths: Union[list[Union[str, Path]], tuple[Union[str, Path], ...]]) -> RawZFSData:
+def parse_zfs_dataset_npz(raw_paths: list[str | Path] | tuple[str | Path, ...]) -> RawZFSData:
     """
     Loads raw 1D and 2D perturbation data from precomputed .npz files using RawZFSData.load.
     """

@@ -1,8 +1,10 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from beyblade.relaxation_dynamics import RelaxationDynamics
-from scipy import constants as Cn
 import sys
+
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy import constants as Cn
+
+from beyblade.relaxation_dynamics import RelaxationDynamics
 
 plt.rcParams.update({
     "axes.labelsize": 16,
@@ -39,7 +41,7 @@ region_cfg = [
 ]
 for x0, x1, col, lbl in region_cfg:
     ax.axvspan(x0, x1, color=col, alpha=0.08)
-    ax.text((x0 + min(x1, 500)) / 2, ax.get_ylim()[1] if ax.get_ylim()[1] > 1 else 1,
+    ax.text((x0 + min(x1, 500)) / 2, max(1, ax.get_ylim()[1]),
             lbl, ha="center", va="bottom", fontsize=8, color=col, alpha=0.9)
 
 # Physical constants

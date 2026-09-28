@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+
 import numpy as np
 
 try:
@@ -30,7 +31,7 @@ def load_poscar(poscar_file: str) -> Structure:
 
 def load_phonon_data(npz_file: str) -> dict:
     """
-    Loads phonon eigenvectors and masses from an npz file produced by PhononManager.
+    Loads phonon eigenvectors and masses from an npz file produced by parse_phonon_npz.
     Expects keys: 'eigs' (n_modes, n_atoms, 3), 'freqs' (n_modes,), and optionally 'masses' (n_atoms,).
     The eigenvectors are the raw phonopy eigenvectors of the dynamical matrix,
     normalized as sum_ja |e_ja|^2 = 1.

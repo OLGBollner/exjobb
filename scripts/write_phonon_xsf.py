@@ -1,6 +1,7 @@
 #!/bin/python
-import numpy as np
 import argparse
+
+import numpy as np
 
 parser = argparse.ArgumentParser("Writes the data file for a specific phonon mode")
 parser.add_argument("phonon_data", metavar="phonon_data", help="Phonon data file")
@@ -24,14 +25,14 @@ mass_dist = np.zeros(3)
 
 for mode in args.modes:
     mode_eigs = eigs[mode-1,:,:]
-    file_name = "phonon_{}.xsf".format(mode)
+    file_name = f"phonon_{mode}.xsf"
     content = []
     content.append("CRYSTAL\n")
     content.append("PRIMVEC\n")
     for n in range(lattice.shape[0]):
         content.append("{} {} {}\n".format(*lattice[n,:]))
     content.append("PRIMCOORD\n")
-    content.append("{} 1\n".format(len(atoms)))
+    content.append(f"{len(atoms)} 1\n")
     mass_dist = np.zeros(3)
     for n in range(len(atoms)):
         mass = weights[species[n]]
