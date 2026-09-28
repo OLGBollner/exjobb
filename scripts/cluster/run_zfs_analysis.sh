@@ -1,7 +1,7 @@
 #!/bin/bash
 # Script to run zfs_analysis.py for all raw ZFS 1d/2d file pairs across bases.
 # Works with any middle descriptor (e.g., all_bands, defect_band_approx).
-# Run from project root (where zfs_analysis.py is located).
+# Run from project root (where zfs_analysis.py is located (scripts/cluster)).
 
 BASES=("NV_512" "NV_64" "ClV_128")
 ORDER=3
@@ -36,7 +36,7 @@ for base in "${BASES[@]}"; do
         echo "Processing ${base} with descriptor '${middle}':"
         echo "  1d: $raw_1d"
         echo "  2d: $raw_2d"
-        python zfs_analysis.py \
+        python scripts/cluster/zfs_analysis.py \
             --raw_zfs_file "$raw_1d" "$raw_2d" \
             --ph "$phonon" \
             --calc \

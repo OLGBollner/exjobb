@@ -619,9 +619,9 @@ class PhononSpectrum:
             pair_ids=self.pair_ids,
             original_indices=self.original_indices,
             # Legacy aliases consumed by the supercomputer VASP scripts:
-            #   scripts/get_n_modes.py reads 'idx' (0-based, printed +1 as
+            #   scripts/cluster/get_n_modes.py reads 'idx' (0-based, printed +1 as
             #   VASP folder numbers) and 'freqs';
-            #   scripts/create_combined_phonon_struct.py reads 'eigs' and
+            #   scripts/cluster/create_combined_phonon_struct.py reads 'eigs' and
             #   'masses'. Keep these keys in sync with the modern ones.
             eigs=self.eigenvectors,
             masses=self.atomic_masses,
