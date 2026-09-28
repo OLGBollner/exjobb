@@ -36,10 +36,15 @@ CHARACTER_TABLES: dict[str, dict[str, Any]] = {
         "A1": [1, 1, 1, 1, 1, 1],
         "A2": [1, 1, 1, -1, -1, -1],
         "E": {
+            # The stored sublabel patterns are NOT physical characters (a 2D
+            # irrep's components are basis conventions). They only define the
+            # parent class characters via their sum, and are kept for pairing.
             "sublabels": {
                 "Ex": [1, -1, -1, 1, 1, 1],
                 "Ey": [1, -1, -1, -1, -1, -1],
-            }
+            },
+            # Legacy convention: chi(first reflection) > 0 -> Ex, else Ey.
+            "sublabel_rule": (3, "Ex", "Ey"),
         },
     },
     # C2v: operations (E, C2, σv, σv')
@@ -111,7 +116,15 @@ def classify_modes(spectrum, tol_mev: float = 0.01, symprec: float = 1e-3) -> tu
 
     ops = defect_frame_operations(spectrum)
     chars = _mode_characters(spectrum, ops)
-    labels, deg_groups = _match_irreps(spectrum, chars, table, tol_mev)
+    # Sublabels of a 2D irrep (Ex/Ey) are a basis convention, not physics:
+    # the stored convention (set by the legacy analyzer) is the sign of the
+    # character on the first reflection operation. Compute that index here.
+    first_reflection = next(
+        (k for k, R in enumerate(ops) if np.linalg.det(R) < 0), None
+    )
+    labels, deg_groups = _match_irreps(
+        spectrum, chars, table, tol_mev, first_reflection=first_reflection
+    )
     spectrum.symmetries = labels
     return labels, deg_groups
 
@@ -285,7 +298,7 @@ def _parent_label(label: str) -> str:
     return label.rstrip("xy") if label not in ("A1", "A2") else label
 
 
-def _match_irreps(spectrum, chars, table, tol_mev):
+def _match_irreps(spectrum, chars, table, tol_mev, first_reflection=None):
     """Assign irrep labels per mode, mirroring the legacy semantics.
 
     Each mode is matched independently against 1D irreps and the
@@ -298,15 +311,27 @@ def _match_irreps(spectrum, chars, table, tol_mev):
     n = spectrum.n_modes
     freqs = spectrum.frequencies_mev
 
-    # Per-irrep component patterns: 1D irreps appear as-is; for an irrep of
-    # dimension d>1 the stored sublabels are the characters of one component.
+    # Per-irrep patterns: 1D irreps appear as-is. A multi-dimensional irrep
+    # (e.g. C3v E) is irreducible, so its components have no characters of
+    # their own — the sublabels (Ex/Ey) are a basis convention. Each mode is
+    # therefore scored once against the parent's class characters (the sum of
+    # the stored sublabel patterns), and the sublabel is then assigned by a
+    # sign rule (see first_reflection in classify_modes) that mirrors the
+    # legacy analyzer's convention: chi > 0 -> first sublabel, else second.
     patterns: list[tuple[str, np.ndarray]] = []
     parent_of: dict[str, str] = {}
+    sublabel_rule: dict[str, tuple[int, str, str]] = {}
     for name, entry in table.items():
         if isinstance(entry, dict):
-            for sub, chi in entry["sublabels"].items():
-                patterns.append((sub, np.asarray(chi, dtype=float)))
+            subs = list(entry["sublabels"].items())
+            parent_chi = np.zeros(len(next(iter(subs))[1]), dtype=float)
+            for sub, chi in subs:
+                parent_chi += np.asarray(chi, dtype=float)
                 parent_of[sub] = name
+            patterns.append((name, parent_chi))
+            parent_of[name] = name
+            if "sublabel_rule" in entry:
+                sublabel_rule[name] = tuple(entry["sublabel_rule"])
         else:
             patterns.append((name, np.asarray(entry, dtype=float)))
             parent_of[name] = name
@@ -321,6 +346,14 @@ def _match_irreps(spectrum, chars, table, tol_mev):
             score = abs(np.dot(v, chi)) / (nv * (np.linalg.norm(chi) + 1e-12))
             if score > best_score:
                 best, best_score, best_parent = name, score, parent_of[name]
+        if (
+            best is not None
+            and best in sublabel_rule
+            and first_reflection is not None
+        ):
+            op_idx, pos, neg = sublabel_rule[best]
+            chi_ref = v[op_idx]
+            best = pos if chi_ref > 0 else neg
         labels.append(best)
         parents.append(best_parent)
 
