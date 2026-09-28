@@ -9,5 +9,5 @@ runs/
 # Thesis drafts stay local
 Thesis/
 
-# Stray pasted scratch files
-pasted-text-*.txt
+# All txt files (use git add -f to include one)
+*.txt
