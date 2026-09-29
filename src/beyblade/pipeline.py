@@ -11,8 +11,7 @@ import numpy as np
 from beyblade.constants import CONSTANTS
 from beyblade.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
 from beyblade.parsers import (
-    parse_phonon_npz,
-    parse_phonopy_yaml,
+    parse_phonon_data,
     parse_zfs_dataset_npz,
     parse_zfs_simulation_dataset,
 )
@@ -184,10 +183,7 @@ def run_full_pipeline(
         ph_from_raw = find_default_phonon_file_for_raw(raw_zfs_file) if raw_zfs_file is not None else None
         ph_path = Path(phonon_file) if phonon_file else (ph_from_sim or ph_from_raw)
         if ph_path is not None and ph_path.exists():
-            if ph_path.suffix in [".yaml", ".yml"]:
-                spectrum = parse_phonopy_yaml(ph_path)
-            else:
-                spectrum = parse_phonon_npz(ph_path)
+            spectrum = parse_phonon_data(ph_path)
         elif phonon_file is not None:
             raise FileNotFoundError(f"Phonon file not found: {phonon_file}")
         elif ph_path is not None and not ph_path.exists():
