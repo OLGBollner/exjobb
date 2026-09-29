@@ -86,13 +86,16 @@ def replace_sbatch(text: str, directive: str, value: str) -> str:
 
 
 def read_outcar_time(src: Path) -> float | None:
-    """Elapsed VASP wall time (sec) from the top-level OUTCAR under src."""
+    """Elapsed VASP wall time (sec) from the top-level OUTCAR under src.
+
+    Continued runs append one `Elapsed time` line per invocation; sum them.
+    """
     outcar = src / "OUTCAR"
     if not outcar.is_file():
         return None
-    m = re.findall(r"Elapsed time \(sec\):\s*([\d\.]+)",
-                   outcar.read_text(errors="replace"))
-    return float(m[-1]) if m else None
+    times = re.findall(r"Elapsed time \(sec\):\s*([\d\.]+)",
+                       outcar.read_text(errors="replace"))
+    return sum(float(m) for m in times) if times else None
 
 
 def sbatch_time(seconds: float) -> str:
