@@ -701,7 +701,11 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
     """
     labels, _ = classify_and_pair(spectrum, tol_mev)
     pg = detect_point_group_from_spectrum(spectrum)
-    table = CHARACTER_TABLES[pg.symbol]
+    table = CHARACTER_TABLES.get(pg.symbol)
+    if table is None:
+        # No character table (e.g. synthetic structures) — nothing to
+        # symmetrize against; return the spectrum unchanged.
+        return spectrum
     ops = defect_frame_operations(spectrum)
     mappings = _op_mappings(spectrum, ops)
     vecs = np.array(spectrum.eigenvectors, dtype=float, copy=True)

@@ -105,6 +105,38 @@ def sbatch_time(seconds: float) -> str:
     return f"{h}:{m:02d}:00"
 
 
+from beyblade.parsers import parse_phonon_npz, save_phonon_npz
+from beyblade.symmetry import (classify_and_pair, filter_degenerate_partners,
+                               symmetrize_degenerate_groups)
+
+
+def default_phonon(out: Path) -> Path:
+    """Default phonon file: <defect>/data/phonon_data.npz."""
+    return out / "data" / "phonon_data.npz"
+
+
+def resolve_sym_phonon(out: Path, phonon: Path) -> Path:
+    """Return the symmetrised phonon file for the perturbation runs.
+
+    Looks in <defect>/data for phonon_data_sym<n>.npz (n = filtered mode
+    count); if missing, classifies, symmetrises and filters `phonon` and
+    saves the reduced set there first.
+    """
+    data = out / "data"
+    spectrum = parse_phonon_npz(phonon)
+    classify_and_pair(spectrum)
+    symmetrized = symmetrize_degenerate_groups(spectrum)
+    filtered = filter_degenerate_partners(symmetrized)
+    target = data / f"phonon_data_sym{filtered.n_modes}.npz"
+    if target.is_file():
+        print(f"  using existing symmetrised phonon file {target}")
+        return target
+    save_phonon_npz(filtered, target)
+    print(f"  symmetrised phonon data saved to {target} "
+          f"({filtered.n_modes} of {spectrum.n_modes} modes)")
+    return target
+
+
 def n_modes_from_phonon(phonon: Path) -> int:
     """Number of phonon modes to perturb along (same logic as get_n_modes)."""
     with np.load(phonon) as data:
@@ -194,8 +226,9 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--phonon", type=Path, required=True,
-                    help="phonon npz used as-is for both orders")
+    ap.add_argument("--phonon", type=Path,
+                    help="phonon npz (default: <defect>/data/phonon_data.npz; "
+                         "perturbations run from a symmetrised file in that folder)")
     ap.add_argument("--pert", type=float, nargs="+", default=[0.025],
                     help="one or more perturbation scales (default: 0.025)")
     ap.add_argument("--output", type=Path, default=None,
@@ -232,7 +265,7 @@ def main() -> int:
         sys.exit("Error: --output is required (the defect name is read from it)")
     out = args.output.resolve()
     defect = out.name
-    phonon = args.phonon.resolve()
+    phonon = args.phonon.resolve() if args.phonon else default_phonon(out)
 
     if not phonon.is_file():
         sys.exit(f"Error: phonon file {phonon} does not exist")
@@ -249,6 +282,7 @@ def main() -> int:
                 sys.exit(f"Error: missing {name} in {src}")
         sources[basis] = src
 
+    phonon = resolve_sym_phonon(out, phonon)
     n_modes = n_modes_from_phonon(phonon)
     print(f"=== {defect}: phonon {phonon} ({n_modes} modes) -> {out} ===")
     for order in ("first_order", "second_order"):
