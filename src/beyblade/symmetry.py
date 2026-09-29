@@ -256,31 +256,33 @@ def classify_and_pair(
 
 def _build_groups_from_labels(spectrum, labels, tol_mev):
     """Build degeneracy groups from stored labels without re-deriving."""
-    from collections import defaultdict
-
     parent_of = {
         sub: parent for parent, entry in CHARACTER_TABLES["3m"].items()
         if isinstance(entry, dict) for sub in entry["sublabels"]
     }
     freqs = spectrum.frequencies_mev
-    by_key: dict[tuple[str, float], list[int]] = defaultdict(list)
+    by_parent: dict[str, list[int]] = {}
     for i, lab in enumerate(labels):
-        if lab is None:
-            continue
-        key = (parent_of.get(lab, lab), round(freqs[i] / tol_mev))
-        by_key[key].append(i)
+        if lab is not None:
+            by_parent.setdefault(parent_of.get(lab, lab), []).append(i)
     groups = []
-    for (parent, _), idxs in by_key.items():
-        # one group per complete set: split idxs by sublabel count
+    for idxs in by_parent.values():
+        # seed-based grouping (same as _match_irreps): direct |df| < tol
+        # comparison, NOT frequency bucketing — rounding puts partners that
+        # straddle a bucket boundary into different buckets (observed on
+        # NV_512: 146.60496 vs 146.60502 meV split into two lone groups).
         remaining = list(idxs)
         while remaining:
             seed = remaining.pop(0)
             group = [seed]
             seen = {labels[seed]}
             for j in remaining:
-                if labels[j] not in seen:
-                    seen.add(labels[j])
-                    group.append(j)
+                if labels[j] in seen:
+                    continue
+                if abs(freqs[j] - freqs[seed]) >= tol_mev:
+                    continue
+                seen.add(labels[j])
+                group.append(j)
             for j in group[1:]:
                 remaining.remove(j)
             groups.append(group)
@@ -504,6 +506,57 @@ def group_of(deg_groups: list[list[int]] | None, i: int) -> list[int] | None:
         if i in g:
             return g
     return None
+
+
+def filter_degenerate_partners(
+    spectrum,
+    tol_mev: float = 0.01,
+    symprec: float = 1e-3,
+):
+    """Return a reduced spectrum keeping one mode per complete degenerate set.
+
+    General replacement for ``PhononSpectrum.filter_sym_pairs``: classifies
+    via :func:`classify_and_pair` (any point group), then drops all but one
+    member of every multi-member degeneracy group. Within a group the
+    surviving member is the one with the lexicographically smallest irrep
+    label (for C3v this reproduces the legacy keep-all-Ex rule, since
+    'Ex' < 'Ey').
+
+    The reduced spectrum carries 0-based ``original_indices`` into the
+    FULL (pre-reduction) spectrum. If the input spectrum was itself already
+    reduced, the indices are mapped through so they keep pointing at the
+    original DFT run positions.
+    """
+    labels, deg_groups = classify_and_pair(spectrum, tol_mev=tol_mev, symprec=symprec)
+    drop: set[int] = set()
+    for g in deg_groups:
+        if len(g) < 2:
+            continue
+        keep = min(g, key=lambda i: labels[i] or "")
+        drop.update(i for i in g if i != keep)
+
+    from beyblade.models import PhononSpectrum, check_original_indices
+    import numpy as np
+
+    n = spectrum.n_modes
+    mask = np.array([i not in drop for i in range(n)])
+    original = spectrum.original_indices
+    kept = np.where(mask)[0]
+    if original is not None:
+        kept = np.asarray(original, dtype=int)[kept]
+    reduced = PhononSpectrum(
+        frequencies_mev=spectrum.frequencies_mev[mask],
+        eigenvectors=spectrum.eigenvectors[mask],
+        atom_frac_coords=spectrum.atom_frac_coords,
+        atom_symbols=spectrum.atom_symbols,
+        atomic_masses=spectrum.atomic_masses,
+        lattice=spectrum.lattice,
+        symmetries=[s for k, s in enumerate(labels) if mask[k]],
+        iprs=spectrum.iprs[mask] if spectrum.iprs is not None else None,
+        original_indices=kept,
+    )
+    check_original_indices(reduced.original_indices, reduced.n_modes, n_full=n)
+    return reduced
 
 
 def twin_of(deg_groups, i: int) -> int | None:
