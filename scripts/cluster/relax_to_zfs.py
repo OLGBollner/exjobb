@@ -48,11 +48,13 @@ def all_tag_occurrences(incar: str, tag: str) -> list[str]:
     return re.findall(rf"^\s*{tag}\s*=\s*(.+?)\s*(?:!|#|$)", incar, re.M | re.I)
 
 
-def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int]:
-    """Parse EIGENVAL (ISPIN=2) -> (n_up, n_down, nbands).
+def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int, set[int], set[int]]:
+    """Parse EIGENVAL (ISPIN=2).
 
-    Occupied means occ > 0.5 in the respective spin column.
-    Assumes Gamma-only (one k-point) or takes the first k-point.
+    Returns (n_up, n_down, nbands, unpaired_up, unpaired_dn).  Occupied means
+    occ > 0.5 in the respective spin column.  Assumes Gamma-only (one k-point)
+    or takes the first k-point.  Unpaired bands are occupied in one spin
+    channel only (the defect states used by the defect_band_approx runs).
     """
     lines = eigenval.read_text().splitlines()
     # header: line 2 holds (nelect, kpts, bands, ...)
@@ -62,15 +64,21 @@ def occupied_bands_from_eigenval(eigenval: Path) -> tuple[int, int, int]:
     # nbands lines of  "band  E_up  occ_up  E_dn  occ_dn"
     data = lines[7:] if nkpts == 1 else lines[7 : 7 + nbands + 1]
     n_up = n_dn = 0
+    unpaired_up: set[int] = set()
+    unpaired_dn: set[int] = set()
     for line in data[1:]:
         parts = line.split()
         if len(parts) < 3:
             continue
-        if float(parts[3]) > 0.5:
-            n_up += 1
-        if len(parts) >= 5 and float(parts[4]) > 0.5:
-            n_dn += 1
-    return n_up, n_dn, nbands
+        occ_up = float(parts[3]) > 0.5
+        occ_dn = len(parts) >= 5 and float(parts[4]) > 0.5
+        n_up += occ_up
+        n_dn += occ_dn
+        if occ_up and not occ_dn:
+            unpaired_up.add(int(parts[0]))
+        elif occ_dn and not occ_up:
+            unpaired_dn.add(int(parts[0]))
+    return n_up, n_dn, nbands, unpaired_up, unpaired_dn
 
 
 # --------------------------------------------------------------------------- #
@@ -103,7 +111,9 @@ Gamma
 """
 
 
-def patch_incar(text: str, n_up: int, n_dn: int, nbands: int) -> str:
+def patch_incar(text: str, n_up: int, n_dn: int, nbands: int,
+                unpaired_up: set[int] | None = None,
+                unpaired_dn: set[int] | None = None) -> str:
     body_lines = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -126,6 +136,11 @@ NBANDS = {nbands}
 DOCCUP = {n_up}*1.0 {nbands - n_up}*0.0
 DOCCDO = {n_dn}*1.0 {nbands - n_dn}*0.0
 """
+    if unpaired_up is not None and unpaired_dn is not None:
+        # machine-readable record of the defect bands, derived here where the
+        # occupations are first known; downstream tooling reads these comments
+        additions += (f"# UNPAIRED_UP = {' '.join(str(i) for i in sorted(unpaired_up)) or 'none'}\n"
+                      f"# UNPAIRED_DN = {' '.join(str(i) for i in sorted(unpaired_dn)) or 'none'}\n")
     return "\n".join(body_lines).rstrip() + "\n" + additions
 
 
@@ -174,8 +189,9 @@ def prepare(relax: Path, zfs: Path) -> None:
                  f"(last one wins in VASP -- fix before running)")
 
     # ---- occupations from EIGENVAL ---------------------------------------- #
-    n_up, n_dn, nbands = occupied_bands_from_eigenval(relax / "EIGENVAL")
-    print(f"  EIGENVAL: {n_up} occupied (up), {n_dn} (down), NBANDS = {nbands}")
+    n_up, n_dn, nbands, unp_up, unp_dn = occupied_bands_from_eigenval(relax / "EIGENVAL")
+    print(f"  EIGENVAL: {n_up} occupied (up), {n_dn} (down), NBANDS = {nbands}; "
+          f"unpaired up {sorted(unp_up)}, down {sorted(unp_dn)}")
 
     nelect = parse_tag(incar_text, "NELECT")
     isp, = [parse_tag(incar_text, "ISPIN") or "2"]
@@ -190,7 +206,8 @@ def prepare(relax: Path, zfs: Path) -> None:
              f"{n_up} - {n_dn} = {n_up - n_dn}")
 
     # ---- patched INCAR ----------------------------------------------------- #
-    (zfs / "INCAR").write_text(patch_incar(incar_text, n_up, n_dn, nbands))
+    (zfs / "INCAR").write_text(
+        patch_incar(incar_text, n_up, n_dn, nbands, unp_up, unp_dn))
     print(f"  wrote INCAR with NUPDOWN={n_up - n_dn}, "
           f"DOCCUP={n_up}*1.0 {nbands - n_up}*0.0, DOCCDO={n_dn}*1.0 {nbands - n_dn}*0.0")
 
