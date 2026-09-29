@@ -74,7 +74,7 @@ class TransitionRate:
                 "cell_size": filename.cell_size,
                 "calc_method": filename.calc_method,
                 "pert_scale": filename.pert_scale,
-                "zfs": filename.ground_state_zfs,
+                "zfs": filename.ground_state_zfs.to_unit("J").D if filename.ground_state_zfs is not None else 0.0,  # legacy scalar D in Joules
                 "V_0_0": filename.V_0_0,
                 "V_p_m": filename.V_p_m,
                 "V_0_pm": filename.V_0_pm,
@@ -90,13 +90,13 @@ class TransitionRate:
                 if self.data_2ph is None:
                     self.data_2ph = self.data
         else:
-            self.data = np.load(str(filename), allow_pickle=True)
-            # If the same file also carries second-order coefficients, treat it as
-            # the two-phonon source so combined 1d+2d runs work with one file.
-            if self.data_2ph is None and "V2_0_0" in self.data:
-                v2 = np.asarray(self.data["V2_0_0"])
-                if v2.ndim >= 2 and v2.size > 0:
+            # Load through the schema-aware loader so legacy and new keys both map
+            if "V_0_0" in np.load(str(filename), allow_pickle=True):
+                self.load_data(SpinPhononCouplingData.load(filename))
+                if self.data_2ph is None:
                     self.data_2ph = self.data
+                return
+            self.data = np.load(str(filename), allow_pickle=True)
 
     def get_spectral_density(self, res, sigma):
         V_0_0 = self.data["V_0_0"] / CONSTANTS["meV2J"]
