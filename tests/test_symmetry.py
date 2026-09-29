@@ -182,3 +182,73 @@ def test_filter_original_indices_valid_on_real_data():
     assert c["Ex"] == 511
     assert c["A1"] == 287 and c["A2"] == 224
     assert red.n_modes == 1022
+
+
+# ---------------------------------------------------------------------------
+# Symmetrization of accidentally mixed near-degenerate modes
+# ---------------------------------------------------------------------------
+
+def test_symmetrize_mixed_a1_e_pair_on_nv512():
+    """NV_512 modes 313/314/315: Ex pure, Ey~A1 mixed (accidental degeneracy).
+
+    After symmetrization every group member must have characters matching
+    its label's class characters exactly.
+    """
+    from beyblade.symmetry import (
+        symmetrize_degenerate_groups,
+        defect_frame_operations,
+        _mode_characters,
+    )
+    spec = parse_phonon_npz(NV_PATH)
+    labels = [str(s) for s in spec.symmetries]
+    assert labels[313] == "Ey" and labels[314] == "Ex" and labels[315] == "A1"
+
+    sym = symmetrize_degenerate_groups(spec)
+    ops = defect_frame_operations(sym)
+    chars = _mode_characters(sym, ops)
+    new_labels = [str(s) for s in sym.symmetries]
+    for i in (313, 314, 315):
+        c = chars[i]
+        # class characters: A1 -> (1,1,1); E -> (1, -0.5, -0.5) for E/C3/C3^2
+        want3 = np.array([1.0, 1.0, 1.0]) if new_labels[i] == "A1" else np.array([1.0, -0.5, -0.5])
+        assert np.allclose(c[:3], want3, atol=0.05), (i, new_labels[i], c)
+        if new_labels[i] in ("Ex", "Ey"):
+            # mirror characters are cos(2 phi_k): absolute values must form
+            # the same multiset as the pure reference mode's, and the sublabel
+            # sign rule (op 3) must agree with the assigned label
+            assert sorted(np.abs(c[3:]).round(3)) == sorted([0.5, 0.5, 1.0]), (i, c)
+            assert (c[3] > 0) == (new_labels[i] == "Ex"), (i, new_labels[i], c)
+    # unchanged elsewhere: pure modes stay put
+    assert np.allclose(sym.eigenvectors[309], spec.eigenvectors[309], atol=1e-8)
+
+
+def test_symmetrize_is_fixpoint_on_pure_groups():
+    from beyblade.symmetry import symmetrize_degenerate_groups
+    spec = parse_phonon_npz(CLV_PATH)
+    sym = symmetrize_degenerate_groups(spec)
+    # every vector either unchanged or reassigned within its group; total
+    # label multiset must be preserved
+    from collections import Counter
+    assert Counter(map(str, sym.symmetries)) == Counter(map(str, spec.symmetries))
+
+
+def test_symmetrize_recover_artificial_mixing():
+    """Rotate a known-pure A1/Ey pair by theta, symmetrize, check recovery."""
+    from beyblade.symmetry import symmetrize_degenerate_groups
+    import dataclasses
+    spec = parse_phonon_npz(NV_PATH)
+    pure = symmetrize_degenerate_groups(spec)  # ground-truth pure states
+    ia, ie = 315, 313  # A1 and Ey slots
+    theta = 0.35
+    va = pure.eigenvectors[ia].copy()
+    ve = pure.eigenvectors[ie].copy()
+    vecs = spec.eigenvectors.copy()
+    vecs[ia] = np.cos(theta) * va + np.sin(theta) * ve
+    vecs[ie] = -np.sin(theta) * va + np.cos(theta) * ve
+    mixed = dataclasses.replace(spec, eigenvectors=vecs)
+    sym = symmetrize_degenerate_groups(mixed)
+    # recovered vectors must overlap strongly with the pure originals
+    ov_a = abs(np.sum(sym.eigenvectors[ia] * va))
+    ov_e = abs(np.sum(sym.eigenvectors[ie] * ve))
+    assert ov_a > 0.999, ov_a
+    assert ov_e > 0.999, ov_e

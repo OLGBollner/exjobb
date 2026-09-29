@@ -338,11 +338,10 @@ def defect_frame_operations(spectrum) -> list[np.ndarray]:
     ops = [np.eye(3)]
     ops.append(MathUtils.rotation_around_symmetry_axis(axis, 3))
     ops.append(MathUtils.rotation_around_symmetry_axis(axis, 3).T)  # C3^2
-    for sign in (+1.0, -1.0, -1.0):  # three sigma_v mirrors of C3v
+    for C in (None, ops[1], ops[2]):  # three sigma_v mirrors of C3v
         n = normal / np.linalg.norm(normal)
         M = np.eye(3) - 2.0 * np.outer(n, n)
-        if sign < 0:  # rotate plane about axis by +-120 deg for the other mirrors
-            C = ops[1]
+        if C is not None:  # rotate the mirror plane by +-120 deg about the axis
             M = C @ M
         ops.append(M)
     return ops
@@ -565,3 +564,194 @@ def twin_of(deg_groups, i: int) -> int | None:
     if g is None or len(g) < 2:
         return None
     return next(j for j in g if j != i)
+
+
+def _op_mappings(spectrum, operations) -> list[np.ndarray]:
+    """Per-operation atom mapping sigma (i -> atom R sends i onto).
+
+    The defect frame is centered so R about the origin equals R about the
+    defect. Mapping of the *centered* coordinates equals that of the raw
+    ones (translation invariance of the nearest-partner search).
+    """
+    lattice = np.asarray(spectrum.lattice, dtype=float)
+    inv_lat = np.linalg.inv(lattice)
+    frac = np.mod(np.asarray(spectrum.atom_frac_coords, dtype=float), 1.0)
+    center = _defect_center(spectrum)
+    frac = np.mod(frac - center, 1.0)
+    cart = frac @ lattice
+    symbols = np.asarray(spectrum.atom_symbols)
+    return [
+        _atom_mapping(np.asarray(R, dtype=float), cart, frac, inv_lat, symbols, lattice)
+        for R in operations
+    ]
+
+
+def _group_operator_apply(mappings, operations, vecs) -> np.ndarray:
+    """U_k v for each group operation: (U v)_j = R_k v_{sigma_k^-1(j)}.
+
+    sigma maps atom i onto the atom R sends it to (per _atom_mapping), so
+    the inverse mapping feeds each output atom from its preimage. This is
+    the operator whose expectation value _mode_characters reports:
+    chi_m(k) = <v_m | U_k | v_m>.
+    """
+    out = np.empty((len(operations),) + np.shape(vecs)[1:], dtype=float)
+    for k, (R, m) in enumerate(zip(operations, mappings)):
+        R = np.asarray(R, dtype=float)
+        inv = np.argsort(m)
+        out[k] = np.einsum("ij,naj->nai", R, vecs[:, inv])
+    return out
+
+
+def _per_op_characters(table, name: str) -> np.ndarray:
+    """Character of each operation (ops ordered E, C3, C3^2, sv1..3)."""
+    entry = table[name]
+    if isinstance(entry, dict):
+        return np.asarray(entry["class_chars"], dtype=float)
+    return np.asarray(entry, dtype=float)
+
+
+def _irrep_dimension(table, name: str) -> int:
+    entry = table[name]
+    return len(entry["sublabels"]) if isinstance(entry, dict) else 1
+
+
+def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool = False):
+    """Re-diagonalize accidentally mixed near-degenerate modes into pure irreps.
+
+    Physics: [H, R] = 0 for every point-group operation R, so exact
+    eigenvectors transform as pure irreps. At an *accidental* degeneracy
+    between different irreps (e.g. an A1 landing on top of an Ex/Ey pair),
+    the eigensolver may return a rotated basis of the degenerate subspace,
+    giving modes with ~7% admixture of the wrong irrep. The degenerate
+    subspace is degenerate to within tol, so any orthonormal basis of it is
+    an eigenbasis to that accuracy — we may as well take the symmetric one.
+
+    Method (Wigner): for each near-degenerate cluster of modes whose
+    members span more than one parent irrep, apply the isotypic projectors
+
+        P_G = (d_G / |G|) * sum_k chi_G(R_k)^* U_k
+
+    with U_k the full space-group operator (permute atoms + rotate
+    displacements). Each member's projection onto each irrep sector is
+    collected and Gram-Schmidt orthonormalized within the sector; each new
+    pure vector inherits the frequency of the old mode it overlaps most.
+    Clusters already spanning a single irrep are left untouched (the
+    projector is a fixpoint on them).
+
+    Returns a new PhononSpectrum (input untouched) with symmetrized
+    eigenvectors and re-derived labels/groups; the
+    ``symmetrization_report`` attribute lists symmetrized and skipped
+    clusters.
+    """
+    import dataclasses
+
+    labels, _ = classify_and_pair(spectrum, tol_mev)
+    pg = detect_point_group_from_spectrum(spectrum)
+    table = CHARACTER_TABLES[pg.symbol]
+    ops = defect_frame_operations(spectrum)
+    mappings = _op_mappings(spectrum, ops)
+    vecs = np.array(spectrum.eigenvectors, dtype=float, copy=True)
+    freqs = np.asarray(spectrum.frequencies_mev, dtype=float)
+    report: dict[str, list] = {"symmetrized": [], "skipped": []}
+
+    # Frequency clusters: chains of modes within tol of their neighbour.
+    # Unlike deg_groups (which only merge complete sets of one parent
+    # irrep), clusters may span several parents — exactly the accidental
+    # degeneracies that produce mixed eigenvectors.
+    freq_order = list(np.argsort(freqs))
+    clusters: list[list[int]] = []
+    cur: list[int] = []
+    for idx in freq_order:
+        if cur and freqs[idx] - freqs[cur[-1]] > tol_mev:
+            clusters.append(cur)
+            cur = []
+        cur.append(idx)
+    if cur:
+        clusters.append(cur)
+
+    for g in clusters:
+        parents: list[str] = []
+        for i in g:
+            p = _parent_label(labels[i])
+            if p is not None and p not in parents:
+                parents.append(p)
+        if len(parents) < 2:
+            continue  # single-irrep cluster: already pure (fixpoint)
+
+        new_vecs: list[np.ndarray] = []
+        new_freqs: list[float] = []
+        ok = True
+        for parent in parents:
+            chi_ops = _per_op_characters(table, parent)
+            d = _irrep_dimension(table, parent)
+            # projections of every cluster member onto this irrep sector
+            sector: list[np.ndarray] = []
+            for i in g:
+                U = _group_operator_apply(mappings, ops, vecs[i : i + 1])
+                u = sum(float(np.conj(chi_ops[k])) * U[k] for k in range(len(ops)))
+                u *= d / len(ops)
+                norm = np.linalg.norm(u)
+                if norm > 1e-2:
+                    sector.append(u / norm)
+            # orthonormalize within the sector
+            basis: list[np.ndarray] = []
+            for u in sector:
+                for b in basis:
+                    u = u - float(np.sum(u * b)) * b
+                n = np.linalg.norm(u)
+                if n > 1e-3:
+                    basis.append(u / n)
+            if len(basis) > d * sum(1 for i in g if _parent_label(labels[i]) == parent):
+                report["skipped"].append((g, parents))
+                ok = False
+                break
+            for u in basis:
+                overlaps = [abs(float(np.sum(u * vecs[i]))) for i in g]
+                best = g[int(np.argmax(overlaps))]
+                new_vecs.append(u)
+                new_freqs.append(float(freqs[best]))
+        if not ok:
+            continue
+        if len(new_vecs) != len(g):
+            report["skipped"].append((g, parents))
+            if verbose:
+                print(f"skipped cluster {g} {parents}: {len(new_vecs)} basis vectors for {len(g)} modes")
+            continue
+        # keep the cluster's slots frequency-sorted: pair up new vectors
+        # with their inherited frequencies, sort, then fill the slots in order
+        pairs = sorted(zip(new_vecs, new_freqs), key=lambda t: t[1])
+        for slot, (u, f) in zip(g, pairs):
+            vecs[slot] = u
+            freqs[slot] = f
+        report["symmetrized"].append((g, parents))
+        if verbose:
+            print(f"symmetrized {g}: {parents}")
+
+    # sublabels for E components: sign rule on the designated reflection
+    new_labels = [labels[i] for i in range(len(labels))]
+    touched = sorted({i for g, _ in report["symmetrized"] for i in g})
+    if touched:
+        touched_arr = np.asarray(touched, dtype=int)
+        sub_chars = np.zeros((len(touched), len(ops)))
+        for k, (R, m) in enumerate(zip(ops, mappings)):
+            R = np.asarray(R, dtype=float)
+            applied = np.einsum("ij,maj->mai", R, vecs[touched_arr][:, m])
+            sub_chars[:, k] = np.sum(vecs[touched_arr] * applied, axis=(1, 2))
+        sublabel_rule = {
+            name: tuple(entry["sublabel_rule"])
+            for name, entry in table.items()
+            if isinstance(entry, dict) and "sublabel_rule" in entry
+        }
+        for n, i in enumerate(touched):
+            parent = _parent_label(new_labels[i])
+            if parent in sublabel_rule:
+                op_idx, pos, neg = sublabel_rule[parent]
+                new_labels[i] = pos if sub_chars[n, op_idx] > 0 else neg
+
+    new_spec = dataclasses.replace(
+        spectrum, frequencies_mev=freqs, eigenvectors=vecs,
+        symmetries=new_labels, e_pair_complete=None, pair_ids=None,
+        deg_groups=None, original_indices=spectrum.original_indices,
+    )
+    new_spec.symmetrization_report = report
+    return new_spec

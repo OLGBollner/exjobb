@@ -18,7 +18,11 @@ Enforced here so the convention cannot silently regress if
 from argparse import ArgumentParser as Parser
 
 from beyblade.parsers import parse_phonon_npz, save_phonon_npz
-from beyblade.symmetry import classify_and_pair, filter_degenerate_partners
+from beyblade.symmetry import (
+    classify_and_pair,
+    filter_degenerate_partners,
+    symmetrize_degenerate_groups,
+)
 
 
 if __name__ == "__main__":
@@ -31,6 +35,7 @@ if __name__ == "__main__":
 
   spectrum = parse_phonon_npz(args.phonon_path)
   classify_and_pair(spectrum)
+  symmetrize_degenerate_groups(spectrum)
   filtered = filter_degenerate_partners(spectrum)
   save_phonon_npz(filtered, args.out_path or args.phonon_path)
   check = spectrum.sym_check
