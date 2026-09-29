@@ -684,8 +684,7 @@ class PhononSpectrum:
         if not path.endswith(".npz"):
             path += ".npz"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            path,
+        payload = dict(
             frequencies=self.frequencies_mev,
             frequencies_mev=self.frequencies_mev,
             frequency_unit="meV",
@@ -695,7 +694,6 @@ class PhononSpectrum:
             atomic_masses=self.atomic_masses,
             lattice=self.lattice,
             symmetries=self.symmetries,
-            iprs=self.iprs,
             e_pair_complete=self.e_pair_complete,
             pair_ids=self.pair_ids,
             original_indices=self.original_indices,
@@ -709,6 +707,11 @@ class PhononSpectrum:
             idx=self.original_indices if self.original_indices is not None else np.arange(self.n_modes),
             freqs=self.frequencies_mev,
         )
+        # Only write optional arrays that actually exist; writing None produces
+        # 0-d object arrays that load back as "present but unusable".
+        if self.iprs is not None:
+            payload["iprs"] = self.iprs
+        np.savez(path, **payload)
         return path
 
     @classmethod
