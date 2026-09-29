@@ -89,19 +89,14 @@ def read_outcar_time(src: Path) -> float | None:
     """Total elapsed VASP wall time (sec) reported in OUTCARs under src.
 
     Restarted runs append one `Elapsed time` line per invocation, so lines
-    are summed.  A top-level OUTCAR and any runs/<mode>/OUTCAR are scanned.
+    are summed.
     """
-    candidates = [src / "OUTCAR", *sorted(src.glob("runs/*/OUTCAR"))]
-    total = 0.0
-    found = False
-    for outcar in candidates:
-        if not outcar.is_file():
-            continue
-        text = outcar.read_text(errors="replace")
-        for m in re.findall(r"Elapsed time \(sec\):\s*([\d\.]+)", text):
-            total += float(m)
-            found = True
-    return total if found else None
+    outcar = src / "OUTCAR"
+    if not outcar.is_file():
+        return None
+    text = outcar.read_text(errors="replace")
+    times = re.findall(r"Elapsed time \(sec\):\s*([\d\.]+)", text)
+    return sum(float(m) for m in times) if times else None
 
 
 def sbatch_time(seconds: float) -> str:
@@ -135,7 +130,8 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
                   defect: str, pert: float, order: str,
                   n_array_jobs: int, n_modes: int, basis: str,
                   vasp_binary: Path | None = None,
-                  pair_mode: str | None = None) -> None:
+                  pair_mode: str | None = None,
+                  max_hours: float | None = None) -> None:
     """Fill dst/input/ and write the prefilled SLURM script."""
     inp = dst / "input"
     inp.mkdir(parents=True, exist_ok=True)
@@ -157,6 +153,12 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
              "leaving the template time limit and array size untouched")
     total = per_sim * n_tasks if per_sim is not None else None
     per_job = total / n_array_jobs if total is not None else None
+    if per_job is not None and max_hours is not None:
+        cap = max_hours * 3600
+        if per_job > cap:
+            n_array_jobs = max(n_array_jobs,
+                               math.ceil(total / cap))
+            per_job = total / n_array_jobs
 
     text = tmpl.read_text()
     text = replace_tag(text, "DEFECT", defect)
@@ -211,6 +213,10 @@ def main() -> int:
     ap.add_argument("--array-jobs", type=int, default=10,
                     help="number of SLURM array jobs to split the sweep into "
                          "(default: 10)")
+    ap.add_argument("--max-hours", type=float, default=None,
+                    help="cap on the per-job time limit in hours; the array "
+                         "job count is raised until the limit fits (e.g. "
+                         "--max-hours 8)")
     args = ap.parse_args()
 
     if args.force:
@@ -264,7 +270,8 @@ def main() -> int:
                               n_array_jobs=args.array_jobs,
                               n_modes=n_modes, basis=dst.name,
                               vasp_binary=args.vasp_binary,
-                              pair_mode=args.pair_mode if order == "second_order" else None)
+                              pair_mode=args.pair_mode if order == "second_order" else None,
+                              max_hours=args.max_hours)
 
     if FAILURES:
         print(f"\n{len(FAILURES)} problem(s) found -- inspect before launching")
