@@ -3,13 +3,17 @@
 Script to generate perturbed VASP structures based on a combination of two phonon eigenvectors.
 
 Usage:
-    python create_combined_phonon_struct.py <poscar_file> <npz_file> <mode_i> <mode_j> <perturbation_angstrom>
+    python create_combined_phonon_struct.py <poscar_file> <phonon_file> <mode_i> <mode_j> <perturbation_angstrom>
 """
 
 import argparse
 import sys
+from pathlib import Path
 
 import numpy as np
+
+from beyblade.models import PhononSpectrum
+from beyblade.parsers import parse_phonon_data
 
 try:
     from pymatgen.core.structure import Structure
@@ -19,24 +23,23 @@ except ImportError:
     sys.exit(1)
 
 
-def load_phonon_data(npz_file: str) -> dict:
+def load_phonon_data(phonon_file: str) -> PhononSpectrum:
     """
-    Loads phonon eigenvectors and masses from an npz file produced by parse_phonon_npz.
-    Expects keys: 'eigs' (n_modes, n_atoms, 3), 'freqs' (n_modes,), and optionally 'masses' (n_atoms,).
+    Loads phonon data (frequencies, eigenvectors, masses) via the general
+    parser, accepting both npz files and phonopy yaml files.
     The eigenvectors are the raw phonopy eigenvectors of the dynamical matrix,
     normalized as sum_ja |e_ja|^2 = 1.
     """
-    try:
-        data = np.load(npz_file)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"NPZ file not found: {npz_file}")
+    if not Path(phonon_file).exists():
+        raise FileNotFoundError(f"Phonon data file not found: {phonon_file}")
 
-    if 'eigs' not in data:
-        raise KeyError(f"'eigs' not found. Available: {list(data.keys())}")
-    if data['eigs'].ndim != 3 or data['eigs'].shape[2] != 3:
-        raise ValueError(f"Expected eigs shape (n_modes, n_atoms, 3), got {data['eigs'].shape}")
+    spectrum = parse_phonon_data(phonon_file)
+    if spectrum.eigenvectors.ndim != 3 or spectrum.eigenvectors.shape[2] != 3:
+        raise ValueError(
+            f"Expected eigenvectors shape (n_modes, n_atoms, 3), got {spectrum.eigenvectors.shape}"
+        )
 
-    return data
+    return spectrum
 
 
 def load_poscar(poscar_file: str) -> Structure:
@@ -114,11 +117,12 @@ def main():
         epilog="""
 Example:
   python create_combined_phonon_struct.py POSCAR phonon_modes.npz 5 6 0.1
+  python create_combined_phonon_struct.py POSCAR phonopy.yaml 5 6 0.1
         """
     )
 
     parser.add_argument('poscar_file', help='Path to VASP POSCAR file')
-    parser.add_argument('npz_file', help="Path to npz file containing 'eigs' array")
+    parser.add_argument('phonon_file', help='Path to phonon data file (.npz or phonopy .yaml)')
     parser.add_argument('mode_i', type=int, help='First phonon mode index (1-based)')
     parser.add_argument('mode_j', type=int, help='Second phonon mode index (1-based)')
     parser.add_argument('amplitude', type=float, help='Perturbation amplitude in Angstroms')
@@ -129,9 +133,9 @@ Example:
     try:
         print("Loading files...")
         structure = load_poscar(args.poscar_file)
-        phonon_data = load_phonon_data(args.npz_file)
-        eigenvectors = phonon_data["eigs"]
-        masses = phonon_data["masses"]
+        phonon_data = load_phonon_data(args.phonon_file)
+        eigenvectors = phonon_data.eigenvectors
+        masses = phonon_data.atomic_masses
 
         print("Applying combined perturbation...")
         perturbed_structure = apply_combined_perturbation(
