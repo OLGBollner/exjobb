@@ -1,12 +1,8 @@
 """Tests for phonon resolution in create_perturbation_tree."""
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "cluster"))
-import create_perturbation_tree as cpt
+from beyblade.vasp import (build_zfs_tree, default_phonon, resolve_sym_phonon, sbatch_time)
 
 
 @pytest.fixture
@@ -42,7 +38,7 @@ def test_finds_existing_sym_file(defect):
     spec = _tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"])
     _save(spec, data / "phonon_data.npz")
     _save(spec, data / "phonon_data_sym3.npz")
-    phonon = cpt.resolve_sym_phonon(out, data / "phonon_data.npz")
+    phonon = resolve_sym_phonon(out, data / "phonon_data.npz")
     assert phonon == data / "phonon_data_sym3.npz"
 
 
@@ -50,7 +46,7 @@ def test_creates_sym_file_when_missing(defect):
     out, data = defect
     spec = _tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"])
     _save(spec, data / "phonon_data.npz")
-    phonon = cpt.resolve_sym_phonon(out, data / "phonon_data.npz")
+    phonon = resolve_sym_phonon(out, data / "phonon_data.npz")
     assert phonon.is_file()
     assert phonon.name == "phonon_data_sym3.npz"
     assert phonon.parent == data
@@ -60,5 +56,35 @@ def test_default_phonon_in_data_folder(defect):
     out, data = defect
     _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]), data / "phonon_data.npz")
 
-    phonon = cpt.default_phonon(out)
+    phonon = default_phonon(out)
     assert phonon == data / "phonon_data.npz"
+
+
+def test_sbatch_time_rounds_up():
+    assert sbatch_time(0.1) == "0:01:00"
+    assert sbatch_time(3661) == "1:02:00"
+
+
+def test_build_zfs_tree(tmp_path):
+    inp = tmp_path / "NV_512"
+    (inp / "data").mkdir(parents=True)
+    (inp / "template" / "relax").mkdir(parents=True)
+    (inp / "data" / "POSCAR").write_text("poscar\n")
+    (inp / "template" / "relax" / "INCAR").write_text("INCAR\n")
+
+    out = build_zfs_tree(inp, out=tmp_path / "tree")
+    assert (out / "data" / "POSCAR").is_file()
+    for stage in ("relaxation_data", "ZFS_hyp", "ZFS_occup"):
+        assert (out / stage / "POSCAR").is_file()
+        assert (out / stage / "INCAR").is_file()
+
+
+def test_build_zfs_tree_refuses_overwrite(tmp_path):
+    inp = tmp_path / "NV_512"
+    (inp / "data").mkdir(parents=True)
+    (inp / "template" / "relax").mkdir(parents=True)
+    (inp / "data" / "POSCAR").write_text("poscar\n")
+    (inp / "template" / "relax" / "INCAR").write_text("INCAR\n")
+    build_zfs_tree(inp, out=tmp_path / "tree")
+    with pytest.raises(FileExistsError):
+        build_zfs_tree(inp, out=tmp_path / "tree")
