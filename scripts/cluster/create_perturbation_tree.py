@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""create_perturbation_dirs.py -- build ready-to-go perturbed ZFS run folders.
+"""create_perturbation_tree.py -- build ready-to-go perturbed ZFS run folders.
 
 Creates, inside a defect folder:
 
@@ -32,7 +32,7 @@ Each generated SLURM script has DEFECT, PHONON_PATH and PERT prefilled with
 absolute paths, so it is ready for `sbatch` as-is.
 
 Usage:
-    python create_perturbation_dirs.py --phonon NV_512/data/phonon_data.npz \
+    python create_perturbation_tree.py --phonon NV_512/data/phonon_data.npz \
         [--pert 0.025 0.05] [--output /path/to/NV_512]
 """
 from __future__ import annotations

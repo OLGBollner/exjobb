@@ -16,7 +16,7 @@ Output: a tree like the one used on the cluster:
         ZFS_occup/          files from template/relax + pristine POSCAR
 
 Usage:
-    python create_vasp_tree.py --input <path-to-data>/<defect>_<size>/
+    python create_zfs_tree.py --input <path-to-data>/<defect>_<size>/
 """
 import argparse
 import shutil
