@@ -29,19 +29,30 @@ folders are skipped, never overwritten; --force regenerates them after an
 explicit APPROVE confirmation.
 
 Each generated SLURM script has DEFECT, PHONON_PATH and PERT prefilled with
-absolute paths, so it is ready for `sbatch` as-is.
+absolute paths, plus a job name of the form <defect>_<order>_<basis>.  The
+reference ZFS simulation's OUTCAR under each source folder is parsed for its
+elapsed wall time; the script's time limit and array size are then computed:
+
+    per_sim_time * n_tasks / n_array_jobs
+
+where n_tasks is the number of single-mode (first order) or mode-pair
+(second order) simulations.  The number of array jobs is set with
+--array-jobs.
 
 Usage:
     python create_perturbation_tree.py --phonon NV_512/data/phonon_data.npz \
-        [--pert 0.025 0.05] [--output /path/to/NV_512]
+        [--pert 0.025 0.05] [--output /path/to/NV_512] [--array-jobs 10]
 """
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import shutil
 import sys
 from pathlib import Path
+
+import numpy as np
 
 FIRST_ORDER_SCRIPT = "run_perturbation_first_order.sh"
 SECOND_ORDER_SCRIPT = "run_perturbation_second_order.sh"
@@ -68,11 +79,62 @@ def replace_tag(incar: str, tag: str, value: str) -> str:
                   rf"\g<1>{value}", incar, flags=re.M | re.I)
 
 
+def replace_sbatch(text: str, directive: str, value: str) -> str:
+    """Replace the value of an #SBATCH directive (e.g. -J, -t, -a)."""
+    return re.sub(rf"(#SBATCH\s+{re.escape(directive)}\s+).*",
+                  rf"\g<1>{value}", text, flags=re.M)
+
+
+def read_outcar_time(src: Path) -> float | None:
+    """Total elapsed VASP wall time (sec) reported in OUTCARs under src.
+
+    Restarted runs append one `Elapsed time` line per invocation, so lines
+    are summed.  A top-level OUTCAR and any runs/<mode>/OUTCAR are scanned.
+    """
+    candidates = [src / "OUTCAR", *sorted(src.glob("runs/*/OUTCAR"))]
+    total = 0.0
+    found = False
+    for outcar in candidates:
+        if not outcar.is_file():
+            continue
+        text = outcar.read_text(errors="replace")
+        for m in re.findall(r"Elapsed time \(sec\):\s*([\d\.]+)", text):
+            total += float(m)
+            found = True
+    return total if found else None
+
+
+def sbatch_time(seconds: float) -> str:
+    """Format seconds as a SLURM time limit, rounded up to whole minutes."""
+    minutes = max(1, math.ceil(seconds / 60))
+    h, m = divmod(minutes, 60)
+    return f"{h}:{m:02d}:00"
+
+
+def n_modes_from_phonon(phonon: Path) -> int:
+    """Number of phonon modes to perturb along (same logic as get_n_modes)."""
+    with np.load(phonon) as data:
+        if "idx" in data:
+            return len(data["idx"])
+        return int(data["freqs"].shape[0])
+
+
+def n_tasks_for(order: str, pair_mode: str | None, n_modes: int) -> int:
+    """Number of simulations a full perturbation sweep requires."""
+    if order == "first_order":
+        return n_modes
+    if pair_mode == "all":
+        return n_modes * (n_modes + 1) // 2
+    return n_modes  # diag
+
+
 # --------------------------------------------------------------------------- #
 # directory preparation
 # --------------------------------------------------------------------------- #
 def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
-                  defect: str, pert: float, vasp_binary: Path | None = None,
+                  defect: str, pert: float, order: str,
+                  n_array_jobs: int, n_modes: int, basis: str,
+                  vasp_binary: Path | None = None,
                   pair_mode: str | None = None) -> None:
     """Fill dst/input/ and write the prefilled SLURM script."""
     inp = dst / "input"
@@ -86,6 +148,16 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
     if not tmpl.is_file():
         fail(f"missing template script {tmpl}")
         return
+
+    # timing: per-sim wall time from the reference ZFS run's OUTCARs
+    per_sim = read_outcar_time(src)
+    n_tasks = n_tasks_for(order, pair_mode, n_modes)
+    if per_sim is None:
+        fail(f"no Elapsed time found in OUTCARs under {src} -- "
+             "leaving the template time limit and array size untouched")
+    total = per_sim * n_tasks if per_sim is not None else None
+    per_job = total / n_array_jobs if total is not None else None
+
     text = tmpl.read_text()
     text = replace_tag(text, "DEFECT", defect)
     text = replace_tag(text, "PHONON_PATH", str(phonon.resolve()))
@@ -101,7 +173,20 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
                        str(cluster_scripts_dir / name))
     text = replace_tag(text, "GET_N_MODES",
                        str(cluster_scripts_dir / "get_n_modes.py"))
+
+    # job name reflects defect, order and basis
+    text = replace_sbatch(text, "-J", f"{defect}_{order}_{basis}")
+    if per_job is not None:
+        text = replace_sbatch(text, "-t", sbatch_time(per_job))
+    text = replace_sbatch(text, "-a", f"0-{n_array_jobs - 1}")
+
     (dst / script_name).write_text(text)
+
+    if per_sim is not None:
+        print(f"    time: {per_sim:.0f} s/sim x {n_tasks} tasks / "
+              f"{n_array_jobs} array jobs = {per_job:.0f} s/job "
+              f"-> {sbatch_time(per_job)}")
+
 
 
 def main() -> int:
@@ -123,6 +208,9 @@ def main() -> int:
                     help="second-order pairs: diag = only (i, i) terms (the "
                          "original behaviour), all = every pair with i <= j "
                          "(default: diag)")
+    ap.add_argument("--array-jobs", type=int, default=10,
+                    help="number of SLURM array jobs to split the sweep into "
+                         "(default: 10)")
     args = ap.parse_args()
 
     if args.force:
@@ -155,7 +243,8 @@ def main() -> int:
                 sys.exit(f"Error: missing {name} in {src}")
         sources[basis] = src
 
-    print(f"=== {defect}: phonon {phonon} -> {out} ===")
+    n_modes = n_modes_from_phonon(phonon)
+    print(f"=== {defect}: phonon {phonon} ({n_modes} modes) -> {out} ===")
     for order in ("first_order", "second_order"):
         for basis, src in sources.items():
             for pert in args.pert:
@@ -171,7 +260,9 @@ def main() -> int:
                 script_name = FIRST_ORDER_SCRIPT if order == "first_order" \
                     else SECOND_ORDER_SCRIPT
                 prepare_basis(src, dst, script_name, phonon,
-                              defect=defect, pert=pert,
+                              defect=defect, pert=pert, order=order,
+                              n_array_jobs=args.array_jobs,
+                              n_modes=n_modes, basis=dst.name,
                               vasp_binary=args.vasp_binary,
                               pair_mode=args.pair_mode if order == "second_order" else None)
 
