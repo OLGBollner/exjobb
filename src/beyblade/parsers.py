@@ -145,6 +145,28 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
     )
 
 
+def parse_phonon_data(
+    path: str | Path,
+    poscar_path: str | Path | None = None,
+) -> PhononSpectrum:
+    """Load a PhononSpectrum from any supported phonon file format.
+
+    Dispatches on the file extension: ``.yaml``/``.yml`` goes to
+    :func:`parse_phonopy_yaml`, everything else (``.npz``) to
+    :func:`parse_phonon_npz`. Raises ``ValueError`` for unsupported
+    extensions.
+    """
+    p = Path(path)
+    if p.suffix in (".yaml", ".yml"):
+        return parse_phonopy_yaml(p, poscar_path=poscar_path)
+    if p.suffix == ".npz":
+        return parse_phonon_npz(p)
+    raise ValueError(
+        f"Unsupported phonon file format: '{p.suffix}' (path: {p}). "
+        "Expected .yaml, .yml or .npz"
+    )
+
+
 def parse_phonon_npz(npz_path: str | Path) -> PhononSpectrum:
     """Loads a precomputed PhononSpectrum from a .npz file using PhononSpectrum.load."""
     path = Path(npz_path)
