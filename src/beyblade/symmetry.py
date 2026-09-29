@@ -15,10 +15,12 @@ this seam.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 import numpy as np
+
+from beyblade.models import PhononSpectrum, check_original_indices
 from pymatgen.core import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
@@ -534,9 +536,6 @@ def filter_degenerate_partners(
         keep = min(g, key=lambda i: labels[i] or "")
         drop.update(i for i in g if i != keep)
 
-    from beyblade.models import PhononSpectrum, check_original_indices
-    import numpy as np
-
     n = spectrum.n_modes
     mask = np.array([i not in drop for i in range(n)])
     original = spectrum.original_indices
@@ -615,6 +614,62 @@ def _irrep_dimension(table, name: str) -> int:
     return len(entry["sublabels"]) if isinstance(entry, dict) else 1
 
 
+# Sector-presence threshold: the projector applied to a vector in its own
+# irrep returns norm 1 up to numerical error (~1e-5); a genuine admixture of
+# another irrep shows up as a projection norm of order 0.1 or larger. 1e-2
+# separates the noise floor from real projections.
+_SECTOR_PRESENCE_NORM = 1e-2
+# Gram-Schmidt acceptance: a residual below this is numerical noise, not a
+# new independent direction.
+_GS_KEEP_NORM = 1e-3
+
+
+def _build_clusters(freqs: np.ndarray, tol_mev: float) -> list[list[int]]:
+    """Chains of modes within tol of their neighbour, in frequency order.
+
+    Unlike deg_groups (which only merge complete sets of one parent irrep),
+    clusters may span several parents — exactly the accidental degeneracies
+    that produce mixed eigenvectors.
+    """
+    clusters: list[list[int]] = []
+    cur: list[int] = []
+    for idx in np.argsort(freqs):
+        if cur and freqs[idx] - freqs[cur[-1]] > tol_mev:
+            clusters.append(cur)
+            cur = []
+        cur.append(int(idx))
+    if cur:
+        clusters.append(cur)
+    return clusters
+
+
+def _project_sector(vecs, cluster, mappings, ops, table, parent):
+    """Isotypic projection of a cluster onto one irrep's sector.
+
+    Applies P_G = (d_G / |G|) sum_k chi_G(R_k)^* U_k to every cluster
+    member, keeps the nonzero results and Gram-Schmidt-orthonormalizes
+    them. Returns the sector basis (may be fewer vectors than members).
+    """
+    chi_ops = _per_op_characters(table, parent)
+    d = _irrep_dimension(table, parent)
+    sector: list[np.ndarray] = []
+    for i in cluster:
+        U = _group_operator_apply(mappings, ops, vecs[i : i + 1])
+        u = sum(float(np.conj(chi_ops[k])) * U[k] for k in range(len(ops)))
+        u *= d / len(ops)
+        norm = np.linalg.norm(u)
+        if norm > _SECTOR_PRESENCE_NORM:
+            sector.append(u / norm)
+    basis: list[np.ndarray] = []
+    for u in sector:
+        for b in basis:
+            u = u - float(np.sum(u * b)) * b
+        n = np.linalg.norm(u)
+        if n > _GS_KEEP_NORM:
+            basis.append(u / n)
+    return basis
+
+
 def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool = False):
     """Re-diagonalize accidentally mixed near-degenerate modes into pure irreps.
 
@@ -639,12 +694,11 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
     projector is a fixpoint on them).
 
     Returns a new PhononSpectrum (input untouched) with symmetrized
-    eigenvectors and re-derived labels/groups; the
-    ``symmetrization_report`` attribute lists symmetrized and skipped
+    eigenvectors and freshly derived labels/groups (``classify_and_pair``
+    re-run on the cleaned vectors, so sublabels follow the new characters);
+    the ``symmetrization_report`` attribute lists symmetrized and skipped
     clusters.
     """
-    import dataclasses
-
     labels, _ = classify_and_pair(spectrum, tol_mev)
     pg = detect_point_group_from_spectrum(spectrum)
     table = CHARACTER_TABLES[pg.symbol]
@@ -658,16 +712,7 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
     # Unlike deg_groups (which only merge complete sets of one parent
     # irrep), clusters may span several parents — exactly the accidental
     # degeneracies that produce mixed eigenvectors.
-    freq_order = list(np.argsort(freqs))
-    clusters: list[list[int]] = []
-    cur: list[int] = []
-    for idx in freq_order:
-        if cur and freqs[idx] - freqs[cur[-1]] > tol_mev:
-            clusters.append(cur)
-            cur = []
-        cur.append(idx)
-    if cur:
-        clusters.append(cur)
+    clusters = _build_clusters(freqs, tol_mev)
 
     for g in clusters:
         parents: list[str] = []
@@ -682,26 +727,10 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
         new_freqs: list[float] = []
         ok = True
         for parent in parents:
-            chi_ops = _per_op_characters(table, parent)
-            d = _irrep_dimension(table, parent)
-            # projections of every cluster member onto this irrep sector
-            sector: list[np.ndarray] = []
-            for i in g:
-                U = _group_operator_apply(mappings, ops, vecs[i : i + 1])
-                u = sum(float(np.conj(chi_ops[k])) * U[k] for k in range(len(ops)))
-                u *= d / len(ops)
-                norm = np.linalg.norm(u)
-                if norm > 1e-2:
-                    sector.append(u / norm)
-            # orthonormalize within the sector
-            basis: list[np.ndarray] = []
-            for u in sector:
-                for b in basis:
-                    u = u - float(np.sum(u * b)) * b
-                n = np.linalg.norm(u)
-                if n > 1e-3:
-                    basis.append(u / n)
-            if len(basis) > d * sum(1 for i in g if _parent_label(labels[i]) == parent):
+            basis = _project_sector(vecs, g, mappings, ops, table, parent)
+            n_expected = _irrep_dimension(table, parent) * sum(
+                1 for i in g if _parent_label(labels[i]) == parent)
+            if len(basis) > n_expected:
                 report["skipped"].append((g, parents))
                 ok = False
                 break
@@ -727,31 +756,15 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
         if verbose:
             print(f"symmetrized {g}: {parents}")
 
-    # sublabels for E components: sign rule on the designated reflection
-    new_labels = [labels[i] for i in range(len(labels))]
-    touched = sorted({i for g, _ in report["symmetrized"] for i in g})
-    if touched:
-        touched_arr = np.asarray(touched, dtype=int)
-        sub_chars = np.zeros((len(touched), len(ops)))
-        for k, (R, m) in enumerate(zip(ops, mappings)):
-            R = np.asarray(R, dtype=float)
-            applied = np.einsum("ij,maj->mai", R, vecs[touched_arr][:, m])
-            sub_chars[:, k] = np.sum(vecs[touched_arr] * applied, axis=(1, 2))
-        sublabel_rule = {
-            name: tuple(entry["sublabel_rule"])
-            for name, entry in table.items()
-            if isinstance(entry, dict) and "sublabel_rule" in entry
-        }
-        for n, i in enumerate(touched):
-            parent = _parent_label(new_labels[i])
-            if parent in sublabel_rule:
-                op_idx, pos, neg = sublabel_rule[parent]
-                new_labels[i] = pos if sub_chars[n, op_idx] > 0 else neg
-
-    new_spec = dataclasses.replace(
+    # Labels and groups are re-derived from the cleaned vectors rather than
+    # inherited: a symmetrization can move a mode between irreps (that is
+    # its whole point), and classify_and_pair applies the sublabel sign rule
+    # the same way everywhere else in the module.
+    new_spec = replace(
         spectrum, frequencies_mev=freqs, eigenvectors=vecs,
-        symmetries=new_labels, e_pair_complete=None, pair_ids=None,
+        symmetries=None, e_pair_complete=None, pair_ids=None,
         deg_groups=None, original_indices=spectrum.original_indices,
     )
+    classify_and_pair(new_spec, tol_mev)
     new_spec.symmetrization_report = report
     return new_spec

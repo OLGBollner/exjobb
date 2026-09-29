@@ -175,11 +175,12 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
     text = replace_tag(text, "GET_N_MODES",
                        str(cluster_scripts_dir / "get_n_modes.py"))
 
-    # job name reflects defect, order and basis
+    # job name reflects defect, order and basis; time limit and array size
+    # only change when the reference OUTCAR gave us a timing to compute from
     text = replace_sbatch(text, "-J", f"{defect}_{order}_{basis}")
     if per_job is not None:
         text = replace_sbatch(text, "-t", sbatch_time(per_job))
-    text = replace_sbatch(text, "-a", f"0-{n_array_jobs - 1}")
+        text = replace_sbatch(text, "-a", f"0-{n_array_jobs - 1}")
 
     (dst / script_name).write_text(text)
 

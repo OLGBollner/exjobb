@@ -35,10 +35,10 @@ if __name__ == "__main__":
 
   spectrum = parse_phonon_npz(args.phonon_path)
   classify_and_pair(spectrum)
-  symmetrize_degenerate_groups(spectrum)
-  filtered = filter_degenerate_partners(spectrum)
+  symmetrized = symmetrize_degenerate_groups(spectrum)
+  filtered = filter_degenerate_partners(symmetrized)
   save_phonon_npz(filtered, args.out_path or args.phonon_path)
   check = spectrum.sym_check
-  note = "" if check is None else f"; sym_check: {check.summary if hasattr(check, 'summary') else check}"
+  note = "" if check is None else f"; sym_check: {check.summary}"
   print(f"saved filtered spectrum ({filtered.n_modes} of {spectrum.n_modes} modes) "
         f"to {args.out_path or args.phonon_path}{note}")
