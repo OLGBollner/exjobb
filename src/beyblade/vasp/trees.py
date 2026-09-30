@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from beyblade.parsers import parse_phonon_data, parse_phonon_npz, save_phonon_npz
+from beyblade.parsers import parse_phonon_data, save_phonon_npz
 from beyblade.symmetry import (classify_and_pair, filter_degenerate_partners,
                                symmetrize_degenerate_groups)
 
