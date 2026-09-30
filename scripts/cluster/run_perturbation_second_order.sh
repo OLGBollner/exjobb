@@ -12,7 +12,7 @@
 # the config variables below (or export them before sbatch). Personal paths
 # belong in the config block only, not in the loop logic.
 
-ml PDC/24.11
+ml PDC/26.03
 ml miniconda3
 source activate /cfs/klemming/projects/supr/adaq/obollner/conda-dirs/envs/sim-env || {
   echo "FATAL: failed to activate conda env -- aborting before any VASP run" >&2
