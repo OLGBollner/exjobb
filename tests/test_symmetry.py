@@ -266,5 +266,5 @@ def test_sym_check_summary_variants():
     assert sym_check_summary(
         {"ok": True, "failures": [], "unpaired": [1, 2]}
     ) == "ok (2 unpaired)"
-    msg = sym_check_summary({"ok": False, "failures": ["A1 x", "Ey y"], "unpaired": []})
-    assert "FAILED" in msg and "2" in msg
+    msg = sym_check_summary({"ok": False, "failures": [(3, [10, 11], [2.0, -1.0], [1.9, -0.8])], "unpaired": []})
+    assert "FAILED" in msg and "1" in msg and "group 3" in msg

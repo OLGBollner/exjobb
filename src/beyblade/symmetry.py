@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+
 from beyblade.models import PhononSpectrum, check_original_indices
 from pymatgen.core import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -228,7 +229,14 @@ def sym_check_summary(check: dict | None) -> str:
         if n_unpaired:
             return f"ok ({n_unpaired} unpaired)"
         return "ok"
-    return f"FAILED ({len(check['failures'])} group(s) mismatch)"
+    n = len(check["failures"])
+    detail = "; ".join(
+        f"group {gi} ({' '.join(map(str, idx))}): expected {np.round(np.asarray(exp), 3).tolist()}, "
+        f"got {np.round(np.asarray(got), 3).tolist()}"
+        for gi, idx, exp, got in check["failures"][:3]
+    )
+    more = f" (+{n - 3} more)" if n > 3 else ""
+    return f"FAILED ({n} group(s) mismatch: {detail}{more})"
 
 
 def classify_and_pair(
