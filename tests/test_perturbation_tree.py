@@ -88,3 +88,56 @@ def test_build_zfs_tree_refuses_overwrite(tmp_path):
     build_zfs_tree(inp, out=tmp_path / "tree")
     with pytest.raises(FileExistsError):
         build_zfs_tree(inp, out=tmp_path / "tree")
+
+
+def test_patch_restart_incar_rewrites_flags():
+    from beyblade.vasp.trees import patch_restart_incar
+    import re
+    def tag(text, name):
+        vals = re.findall(rf"^\s*{name}\s*=\s*(.+?)\s*(?:!|#|$)", text, re.M | re.I)
+        return vals[-1] if vals else None
+    incar = "ISYM = 3\nISTART = 2\nICHARG = 2\nLWAVE = .FALSE.\nLCHARG = .FALSE.\n"
+    out = patch_restart_incar(incar)
+    assert tag(out, "ISTART") == "0"
+    assert tag(out, "ICHARG") == "1"
+    assert tag(out, "LWAVE") == ".TRUE."
+    assert tag(out, "LCHARG") == ".TRUE."
+    assert out.count("ISTART") == 1  # old value replaced, not duplicated
+
+
+def test_patch_restart_incar_appends_missing():
+    from beyblade.vasp.trees import patch_restart_incar
+    import re
+    out = patch_restart_incar("ENCUT = 520\n")
+    for name in ("ISTART", "ICHARG", "LWAVE", "LCHARG"):
+        assert re.search(rf"^\s*{name}\s*=", out, re.M | re.I), name
+    assert re.search(r"^\s*ENCUT\s*=", out, re.M)
+
+
+def test_perturbation_input_incar_is_restart_ready(tmp_path):
+    import re
+    from pathlib import Path
+    from beyblade.vasp import build_perturbation_tree
+    defect = tmp_path / "NV_512"
+    (defect / "data").mkdir(parents=True)
+    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]),
+          defect / "data" / "phonon_data.npz")
+    for stage in ("ZFS_hyp", "ZFS_occup"):
+        d = defect / stage
+        d.mkdir()
+        (d / "INCAR").write_text("ENCUT = 520\nISTART = 2\nICHARG = 2\n")
+        for name in ("POSCAR", "KPOINTS", "POTCAR"):
+            (d / name).write_text(name + "\n")
+        (d / "OUTCAR").write_text("Elapsed time (sec):   100.000\n")
+    failures = build_perturbation_tree(
+        out=defect, pert=[0.0001], phonon=defect / "data" / "phonon_data.npz",
+        scripts_dir=Path("scripts/cluster"), array_jobs=1, force=True,
+        vasp_binary=Path("/bin/true"))
+    assert failures == []
+    incar = (defect / "first_order" / "pert_0.0001" / "all_bands"
+             / "input" / "INCAR").read_text()
+    for name, value in (("ISTART", "0"), ("ICHARG", "1"),
+                        ("LWAVE", ".TRUE."), ("LCHARG", ".TRUE.")):
+        vals = re.findall(rf"^\s*{name}\s*=\s*(.+?)\s*(?:!|#|$)", incar, re.M | re.I)
+        assert vals, name
+        assert vals[-1] == value, name

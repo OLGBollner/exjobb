@@ -35,6 +35,26 @@ def replace_tag(incar: str, tag: str, value: str) -> str:
                   rf"\g<1>{value}", incar, flags=re.M | re.I)
 
 
+RESTART_TAGS = ("ISTART", "ICHARG", "LWAVE", "LCHARG")
+RESTART_VALUES = {"ISTART": "0", "ICHARG": "1",
+                  "LWAVE": ".TRUE.", "LCHARG": ".TRUE."}
+
+
+def patch_restart_incar(incar: str) -> str:
+    """Make an INCAR restart-ready from the CHGCAR.
+
+    Sets ISTART=0 (fresh SCF cycle) and ICHARG=1 (read CHGCAR), and turns
+    on LWAVE/LCHARG so a failed run leaves a usable CHGCAR behind.  Any
+    missing tag is appended.
+    """
+    out = incar
+    for tag, value in RESTART_VALUES.items():
+        out = replace_tag(out, tag, value)
+        if not re.search(rf"^\s*{tag}\s*=", out, re.M | re.I):
+            out = out.rstrip("\n") + f"\n{tag} = {value}\n"
+    return out
+
+
 def replace_sbatch(text: str, directive: str, value: str) -> str:
     """Replace the value of an #SBATCH directive (e.g. -J, -t, -a)."""
     return re.sub(rf"(#SBATCH\s+{re.escape(directive)}\s+).*",
@@ -179,6 +199,15 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
     if not tmpl.is_file():
         fail(f"missing template script {tmpl}")
         return failures
+
+    # the perturbation INCAR is the ZFS run's INCAR, verbatim apart from
+    # the restart flags: same setup, only the structure differs, and the
+    # CHGCAR lets a failed run pick up where it left off
+    incar_path = inp / "INCAR"
+    if incar_path.is_file():
+        incar_path.write_text(patch_restart_incar(incar_path.read_text()))
+    else:
+        fail("no INCAR in the ZFS source folder -- cannot make it restart-ready")
 
     # timing: per-sim wall time from the reference ZFS run's OUTCAR
     per_sim = read_outcar_time(src)
