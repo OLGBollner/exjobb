@@ -1,4 +1,9 @@
 """Tests for phonon resolution in create_perturbation_tree."""
+import re
+import subprocess
+
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -92,7 +97,6 @@ def test_build_zfs_tree_refuses_overwrite(tmp_path):
 
 def test_patch_restart_incar_rewrites_flags():
     from beyblade.vasp.trees import patch_restart_incar
-    import re
     def tag(text, name):
         vals = re.findall(rf"^\s*{name}\s*=\s*(.+?)\s*(?:!|#|$)", text, re.M | re.I)
         return vals[-1] if vals else None
@@ -107,7 +111,6 @@ def test_patch_restart_incar_rewrites_flags():
 
 def test_patch_restart_incar_appends_missing():
     from beyblade.vasp.trees import patch_restart_incar
-    import re
     out = patch_restart_incar("ENCUT = 520\n")
     for name in ("ISTART", "ICHARG", "LWAVE", "LCHARG"):
         assert re.search(rf"^\s*{name}\s*=", out, re.M | re.I), name
@@ -115,8 +118,6 @@ def test_patch_restart_incar_appends_missing():
 
 
 def test_perturbation_input_incar_is_restart_ready(tmp_path):
-    import re
-    from pathlib import Path
     from beyblade.vasp import build_perturbation_tree
     defect = tmp_path / "NV_512"
     (defect / "data").mkdir(parents=True)
@@ -141,3 +142,28 @@ def test_perturbation_input_incar_is_restart_ready(tmp_path):
         vals = re.findall(rf"^\s*{name}\s*=\s*(.+?)\s*(?:!|#|$)", incar, re.M | re.I)
         assert vals, name
         assert vals[-1] == value, name
+
+
+def test_cli_expands_tilde_binary(tmp_path, monkeypatch):
+    """--vasp-binary ../... must resolve to an absolute path baked into the
+    sbatch scripts, like --phonon."""
+    defect = tmp_path / "NV_512"
+    (defect / "data").mkdir(parents=True)
+    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]),
+          defect / "data" / "phonon_data.npz")
+    for stage in ("ZFS_hyp", "ZFS_occup"):
+        d = defect / stage
+        d.mkdir()
+        (d / "INCAR").write_text("ENCUT = 520\n")
+        for name in ("POSCAR", "KPOINTS", "POTCAR"):
+            (d / name).write_text(name + "\n")
+        (d / "OUTCAR").write_text("Elapsed time (sec):   100.000\n")
+    args = [str(defect), "--pert", "0.0001", "--array-jobs", "1",
+            "--vasp-binary", "../me/vasp_std"]
+    r = subprocess.run(
+        ["python", str(Path("scripts/cluster/create_perturbation_tree.py").resolve()), *args],
+        capture_output=True, text=True, cwd=tmp_path,
+        env={"PYTHONPATH": str(Path("src").resolve()), "PATH": __import__("os").environ["PATH"]})
+    assert r.returncode == 0, r.stdout + r.stderr
+    sbatch = next(defect.rglob("run_perturbation_first_order.sh"))
+    assert f"binary={tmp_path.parent}/me/vasp_std" in sbatch.read_text()

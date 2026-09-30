@@ -54,12 +54,13 @@ def main() -> int:
         sys.exit("Error: --output is required (the defect name is read from it)")
     out = args.output.resolve()
     phonon = args.phonon.resolve() if args.phonon else default_phonon(out)
+    vasp_binary = args.vasp_binary.resolve() if args.vasp_binary else None
     try:
         failures = build_perturbation_tree(
             out, args.pert, phonon,
             scripts_dir=Path(__file__).resolve().parent,
             pair_mode=args.pair_mode, array_jobs=args.array_jobs,
-            max_hours=args.max_hours, vasp_binary=args.vasp_binary,
+            max_hours=args.max_hours, vasp_binary=vasp_binary,
             force=args.force)
     except FileNotFoundError as e:
         sys.exit(f"Error: {e}")
