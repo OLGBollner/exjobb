@@ -252,3 +252,19 @@ def test_symmetrize_recover_artificial_mixing():
     ov_e = abs(np.sum(sym.eigenvectors[ie] * ve))
     assert ov_a > 0.999, ov_a
     assert ov_e > 0.999, ov_e
+
+
+# ---------------------------------------------------------------------------
+# sym_check_summary: wrapper-facing one-liner for the verify report
+# ---------------------------------------------------------------------------
+
+def test_sym_check_summary_variants():
+    from beyblade.symmetry import sym_check_summary
+
+    assert sym_check_summary(None) == ""
+    assert sym_check_summary({"ok": True, "failures": [], "unpaired": []}) == "ok"
+    assert sym_check_summary(
+        {"ok": True, "failures": [], "unpaired": [1, 2]}
+    ) == "ok (2 unpaired)"
+    msg = sym_check_summary({"ok": False, "failures": ["A1 x", "Ey y"], "unpaired": []})
+    assert "FAILED" in msg and "2" in msg

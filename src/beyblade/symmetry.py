@@ -219,6 +219,18 @@ def verify_deg_groups(
     }
 
 
+def sym_check_summary(check: dict | None) -> str:
+    """Human-readable one-liner for a verify_deg_groups() report."""
+    if check is None:
+        return ""
+    if check.get("ok"):
+        n_unpaired = len(check.get("unpaired", ()))
+        if n_unpaired:
+            return f"ok ({n_unpaired} unpaired)"
+        return "ok"
+    return f"FAILED ({len(check['failures'])} group(s) mismatch)"
+
+
 def classify_and_pair(
     spectrum,
     tol_mev: float = 0.01,

@@ -21,6 +21,7 @@ from beyblade.parsers import parse_phonon_npz, save_phonon_npz
 from beyblade.symmetry import (
     classify_and_pair,
     filter_degenerate_partners,
+    sym_check_summary,
     symmetrize_degenerate_groups,
 )
 
@@ -38,7 +39,7 @@ if __name__ == "__main__":
   symmetrized = symmetrize_degenerate_groups(spectrum)
   filtered = filter_degenerate_partners(symmetrized)
   save_phonon_npz(filtered, args.out_path or args.phonon_path)
-  check = spectrum.sym_check
-  note = "" if check is None else f"; sym_check: {check.summary}"
+  check = sym_check_summary(getattr(spectrum, "sym_check", None))
+  note = "" if not check else f"; sym_check: {check}"
   print(f"saved filtered spectrum ({filtered.n_modes} of {spectrum.n_modes} modes) "
         f"to {args.out_path or args.phonon_path}{note}")
