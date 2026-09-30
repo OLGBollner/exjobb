@@ -117,6 +117,25 @@ def test_patch_restart_incar_appends_missing():
     assert re.search(r"^\s*ENCUT\s*=", out, re.M)
 
 
+def test_forbid_algo_none_corrects_and_warns():
+    from beyblade.vasp.trees import forbid_algo_none
+    incar = "ALGO = None\nENCUT = 520\n"
+    out, warning = forbid_algo_none(incar)
+    assert re.search(r"^\s*ALGO\s*=\s*Normal\b", out, re.M | re.I)
+    assert out.count("ALGO") == 1
+    assert warning is not None and "ALGO=Normal" in warning
+
+
+def test_forbid_algo_none_leaves_scf_incar_alone():
+    from beyblade.vasp.trees import forbid_algo_none
+    out, warning = forbid_algo_none("ALGO = Normal\nENCUT = 520\n")
+    assert warning is None
+    assert out == "ALGO = Normal\nENCUT = 520\n"
+    out, warning = forbid_algo_none("ENCUT = 520\n")
+    assert warning is None
+    assert out == "ENCUT = 520\n"
+
+
 def test_perturbation_input_incar_is_restart_ready(tmp_path):
     from beyblade.vasp import build_perturbation_tree
     defect = tmp_path / "NV_512"
@@ -142,6 +161,77 @@ def test_perturbation_input_incar_is_restart_ready(tmp_path):
         vals = re.findall(rf"^\s*{name}\s*=\s*(.+?)\s*(?:!|#|$)", incar, re.M | re.I)
         assert vals, name
         assert vals[-1] == value, name
+
+
+def test_forbid_sym_ldmatrix_corrects_isym_12():
+    from beyblade.vasp.trees import forbid_sym_ldmatrix
+    for isym in ("1", "2"):
+        out, warning = forbid_sym_ldmatrix(f"ISYM = {isym}\nLDMATRIX = .TRUE.\n")
+        assert re.search(r"^\s*ISYM\s*=\s*3\b", out, re.M | re.I)
+        assert warning is not None and f"ISYM={isym}" in warning
+
+
+def test_forbid_sym_ldmatrix_leaves_valid_incars_alone():
+    from beyblade.vasp.trees import forbid_sym_ldmatrix
+    cases = ("ISYM = 3\nLDMATRIX = .TRUE.\n",       # already safe
+             "LDMATRIX = .TRUE.\n",                  # no ISYM tag
+             "ISYM = 2\nENCUT = 520\n")              # no LDMATRIX
+    for incar in cases:
+        out, warning = forbid_sym_ldmatrix(incar)
+        assert warning is None and out == incar
+
+
+def test_perturbation_input_incar_corrects_algo_none(tmp_path, capsys):
+    """ALGO=None in the ZFS source INCAR is corrected to Normal with a log."""
+    from beyblade.vasp import build_perturbation_tree
+    defect = tmp_path / "NV_512"
+    (defect / "data").mkdir(parents=True)
+    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]),
+          defect / "data" / "phonon_data.npz")
+    for stage in ("ZFS_hyp", "ZFS_occup"):
+        d = defect / stage
+        d.mkdir()
+        (d / "INCAR").write_text("ENCUT = 520\nALGO = None\n")
+        for name in ("POSCAR", "KPOINTS", "POTCAR"):
+            (d / name).write_text(name + "\n")
+        (d / "OUTCAR").write_text("Elapsed time (sec):   100.000\n")
+    failures = build_perturbation_tree(
+        out=defect, pert=[0.0001], phonon=defect / "data" / "phonon_data.npz",
+        scripts_dir=Path("scripts/cluster"), array_jobs=1, force=True,
+        vasp_binary=Path("/bin/true"))
+    assert failures == []
+    incar = (defect / "first_order" / "pert_0.0001" / "all_bands"
+             / "input" / "INCAR").read_text()
+    assert re.search(r"^\s*ALGO\s*=\s*Normal\b", incar, re.M | re.I)
+    assert "ALGO=None" not in incar
+    out = capsys.readouterr().out
+    assert "WARN" in out and "ALGO=Normal" in out
+
+
+def test_perturbation_input_incar_corrects_isym_with_ldmatrix(tmp_path, capsys):
+    """ISYM=1/2 with LDMATRIX in the source INCAR is corrected to 3."""
+    from beyblade.vasp import build_perturbation_tree
+    defect = tmp_path / "NV_512"
+    (defect / "data").mkdir(parents=True)
+    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]),
+          defect / "data" / "phonon_data.npz")
+    for stage in ("ZFS_hyp", "ZFS_occup"):
+        d = defect / stage
+        d.mkdir()
+        (d / "INCAR").write_text("ENCUT = 520\nISYM = 2\nLDMATRIX = .TRUE.\n")
+        for name in ("POSCAR", "KPOINTS", "POTCAR"):
+            (d / name).write_text(name + "\n")
+        (d / "OUTCAR").write_text("Elapsed time (sec):   100.000\n")
+    failures = build_perturbation_tree(
+        out=defect, pert=[0.0001], phonon=defect / "data" / "phonon_data.npz",
+        scripts_dir=Path("scripts/cluster"), array_jobs=1, force=True,
+        vasp_binary=Path("/bin/true"))
+    assert failures == []
+    incar = (defect / "first_order" / "pert_0.0001" / "all_bands"
+             / "input" / "INCAR").read_text()
+    assert re.search(r"^\s*ISYM\s*=\s*3\b", incar, re.M | re.I)
+    out = capsys.readouterr().out
+    assert "WARN" in out and "ISYM=2" in out and "LDMATRIX" in out
 
 
 def test_cli_expands_tilde_binary(tmp_path, monkeypatch):

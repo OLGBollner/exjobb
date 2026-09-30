@@ -55,6 +55,43 @@ def patch_restart_incar(incar: str) -> str:
     return out
 
 
+def forbid_algo_none(incar: str) -> tuple[str, str | None]:
+    """Guard against ALGO=None in a perturbation INCAR.
+
+    ALGO=None runs a single diagonalization on whatever CHGCAR is present,
+    so a perturbed structure would be evaluated on the relaxed structure's
+    (stale) charge density -- silently invalid ZFS.  If ALGO=None is found,
+    correct it to ALGO=Normal and return a warning message.
+    """
+    if not re.search(r"^\s*ALGO\s*=\s*None\b", incar, re.M | re.I):
+        return incar, None
+    out = replace_tag(incar, "ALGO", "Normal")
+    warning = ("INCAR had ALGO=None (non-self-consistent single "
+               "diagonalization on the CHGCAR); corrected to ALGO=Normal "
+               "so the perturbed structure gets its own SCF density")
+    return out, warning
+
+
+def forbid_sym_ldmatrix(incar: str) -> tuple[str, str | None]:
+    """Guard against ISYM=1/2 combined with LDMATRIX.
+
+    VASP's LDMATRIX is not supported with symmetry handling ISYM=1 or 2:
+    the density symmetrization conflicts with the D-matrix evaluation.
+    If such a combination is found, correct ISYM to 3 (symmetry applied
+    to the detected structure only) and return a warning message.
+    """
+    if not re.search(r"^\s*LDMATRIX\s*=\s*\.TRUE\.", incar, re.M | re.I):
+        return incar, None
+    isym = re.search(r"^\s*ISYM\s*=\s*([12])\b", incar, re.M | re.I)
+    if isym is None:
+        return incar, None
+    out = replace_tag(incar, "ISYM", "3")
+    warning = (f"INCAR had ISYM={isym.group(1)} together with LDMATRIX; "
+               "corrected to ISYM=3 (ISYM=1/2 is not supported with "
+               "LDMATRIX)")
+    return out, warning
+
+
 def replace_sbatch(text: str, directive: str, value: str) -> str:
     """Replace the value of an #SBATCH directive (e.g. -J, -t, -a)."""
     return re.sub(rf"(#SBATCH\s+{re.escape(directive)}\s+).*",
@@ -205,7 +242,15 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
     # CHGCAR lets a failed run pick up where it left off
     incar_path = inp / "INCAR"
     if incar_path.is_file():
-        incar_path.write_text(patch_restart_incar(incar_path.read_text()))
+        incar = incar_path.read_text()
+        warnings = []
+        for guard in (forbid_algo_none, forbid_sym_ldmatrix):
+            incar, warning = guard(incar)
+            if warning:
+                warnings.append(warning)
+        incar_path.write_text(patch_restart_incar(incar))
+        for warning in warnings:
+            print(f"  WARN: {warning}")
     else:
         fail("no INCAR in the ZFS source folder -- cannot make it restart-ready")
 
