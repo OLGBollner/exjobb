@@ -218,6 +218,7 @@ class PhononSpectrum:
     pair_ids: Optional[np.ndarray] = None   # Shape (N_modes,): degenerate partner index, n_modes if unpaired (out-of-bounds sentinel)
     deg_groups: Optional[list] = None       # Lists of mode indices forming complete irrep component sets
     original_indices: Optional[np.ndarray] = None  # Shape (N_modes,): mode index in the full DFT run
+    n_full: Optional[int] = None  # size of the full spectrum original_indices point into
     frequency_unit: str = "meV"
 
     def __post_init__(self):
@@ -236,6 +237,8 @@ class PhononSpectrum:
             self.check_e_pair_completeness()
         if self.original_indices is None:
             self.original_indices = np.arange(self.n_modes, dtype=int)
+        if self.n_full is None:
+            self.n_full = self.n_modes
 
     @property
     def n_modes(self) -> int:
@@ -661,6 +664,12 @@ class PhononSpectrum:
                 skip_indices.add(i)
 
         mask = np.array([i not in skip_indices for i in range(n)])
+        # 0-based indices into the ORIGINAL (full) spectrum: when this
+        # spectrum is itself already reduced, map through its own indices
+        original = self.original_indices
+        kept = np.where(mask)[0]
+        if original is not None:
+            kept = np.asarray(original, dtype=int)[kept]
         reduced = PhononSpectrum(
             frequencies_mev=freqs[mask],
             eigenvectors=self.eigenvectors[mask],
@@ -672,10 +681,18 @@ class PhononSpectrum:
             iprs=self.iprs[mask] if self.iprs is not None else None,
             # 0-based indices into the ORIGINAL (full) spectrum, so downstream
             # code can map each reduced mode back to its source position.
-            original_indices=np.where(mask)[0],
+            original_indices=kept,
+            n_full=(
+                (self.n_full if self.n_full is not None else len(original))
+                if original is not None else n
+            ),
+        )
+        n_full = (
+            self.n_full if self.n_full is not None
+            else (len(original) if original is not None else n)
         )
         check_original_indices(
-            reduced.original_indices, reduced.n_modes, n_full=n
+            reduced.original_indices, reduced.n_modes, n_full=n_full
         )
         return reduced
 
@@ -693,6 +710,7 @@ class PhononSpectrum:
         FieldSpec("pair_ids", "array", shape=("n_modes",), optional=True),
         FieldSpec("deg_groups", "array", optional=True),
         FieldSpec("original_indices", "array", shape=("n_modes",), optional=True, save_aliases=("idx",)),
+        FieldSpec("n_full", "int", optional=True),
     ]
 
     def save(self, out_path: Union[str, Path]) -> str:

@@ -102,3 +102,27 @@ def test_save_and_load_preserves_e_pair_complete(tmp_path):
     loaded = PhononSpectrum.load(out_file)
     assert loaded.n_modes == 2
     assert loaded.e_pair_complete == [False, False]
+
+
+def test_filter_reduced_spectrum_keeps_original_indices_valid():
+    """Regression: filtering an already-reduced spectrum (e.g. loading
+    phonon_data_sym.npz and filtering again) must validate its carried
+    original_indices against the full pre-reduction size, not the reduced
+    size. classify_and_pair finds no degeneracies on this stub, so nothing
+    is dropped -- but the index check would previously raise."""
+    from beyblade.models import PhononSpectrum
+    from beyblade.symmetry import filter_degenerate_partners
+
+    reduced = PhononSpectrum(
+        frequencies_mev=np.array([10.0, 20.0]),
+        eigenvectors=np.zeros((2, 1, 3)),
+        atom_frac_coords=np.zeros((1, 3)),
+        atom_symbols=np.array(["N"]),
+        atomic_masses=np.array([14.0]),
+        lattice=np.eye(3),
+        original_indices=np.array([0, 2]),
+        n_full=4,  # as written by a first filter pass over the full spectrum
+    )
+    out = filter_degenerate_partners(reduced, tol_mev=0.01)
+    assert out.n_modes == 2
+    assert out.original_indices.tolist() == [0, 2]

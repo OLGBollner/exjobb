@@ -552,8 +552,18 @@ def filter_degenerate_partners(
         symmetries=[s for k, s in enumerate(labels) if mask[k]],
         iprs=spectrum.iprs[mask] if spectrum.iprs is not None else None,
         original_indices=kept,
+        n_full=(
+            (spectrum.n_full if spectrum.n_full is not None else len(original))
+            if original is not None else n
+        ),
     )
-    check_original_indices(reduced.original_indices, reduced.n_modes, n_full=n)
+    # indices point into the FULL pre-reduction spectrum, so the parent
+    # size is the recorded n_full (or the input's own size when unreduced)
+    n_full = (
+        spectrum.n_full if spectrum.n_full is not None
+        else (len(original) if original is not None else n)
+    )
+    check_original_indices(reduced.original_indices, reduced.n_modes, n_full=n_full)
     return reduced
 
 
