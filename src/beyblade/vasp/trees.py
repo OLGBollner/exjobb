@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from beyblade.parsers import parse_phonon_npz, save_phonon_npz
+from beyblade.parsers import parse_phonon_data, parse_phonon_npz, save_phonon_npz
 from beyblade.symmetry import (classify_and_pair, filter_degenerate_partners,
                                symmetrize_degenerate_groups)
 
@@ -97,7 +97,7 @@ def resolve_sym_phonon(out: Path, phonon: Path) -> Path:
     saves the reduced set there first.
     """
     data = out / "data"
-    spectrum = parse_phonon_npz(phonon)
+    spectrum = parse_phonon_data(phonon)
     classify_and_pair(spectrum)
     symmetrized = symmetrize_degenerate_groups(spectrum)
     filtered = filter_degenerate_partners(symmetrized)
