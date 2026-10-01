@@ -7,7 +7,7 @@ import numpy as np
 
 from beyblade.constants import CONSTANTS
 from beyblade.symmetry import twin_of, _build_groups_from_labels
-from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
+from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, SymmetricArray
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
@@ -462,7 +462,7 @@ class ZFSManager:
         n_modes = self.nmodes
         phonon_energies = self.get_phonon_frequencies()
 
-        zfs_2nd_derivs = np.zeros((n_modes, n_modes, 3, 3))
+        zfs_2nd_derivs = SymmetricArray(n_modes)
         V_0_0_2nd = np.zeros((n_modes, n_modes))
         V_p_m_2nd = np.zeros((n_modes, n_modes))
         V_0_pm_2nd = np.zeros((n_modes, n_modes))
