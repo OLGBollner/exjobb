@@ -44,7 +44,7 @@ def verify_setup(folder: Path, script_name: str) -> list[str]:
                                 f"placeholder not filled: {ph}")
         # path existence for the four referenced files
         for key in ("BINARY", "PHONON_PATH", "CREATE_STRUCT", "GET_N_MODES"):
-            vals = re.findall(rf"^{key}=(.*)$", text, re.MULTILINE)
+            vals = re.findall(rf"^{key}=(.*)$", text.lower(), re.MULTILINE)
             if not vals:
                 problems.append(f"FAIL: {script_name}: {key} not set")
                 continue
