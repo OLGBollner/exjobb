@@ -8,9 +8,9 @@ and the `get_n_modes.py` printout (`i+1`) are 1-based. Downstream code that
 joins on `idx` must not mix the two conventions.
 
 Enforced here so the convention cannot silently regress if
-`PhononSpectrum.filter_sym_pairs` changes:
+`beyblade.symmetry.filter_degenerate_partners` changes:
 
-1. `filter_sym_pairs` must return an `original_indices` array whose values
+1. The filter must return an `original_indices` array whose values
    are exactly the 0-based positions of the kept modes in the full spectrum.
 2. The filtered spectrum's mode count must match `len(original_indices)`.
 """
@@ -18,6 +18,12 @@ Enforced here so the convention cannot silently regress if
 from argparse import ArgumentParser as Parser
 
 from beyblade.parsers import parse_phonon_npz, save_phonon_npz
+from beyblade.symmetry import (
+    classify_and_pair,
+    filter_degenerate_partners,
+    sym_check_summary,
+    symmetrize_degenerate_groups,
+)
 
 
 if __name__ == "__main__":
@@ -29,8 +35,11 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   spectrum = parse_phonon_npz(args.phonon_path)
-  spectrum.analyze_c3v_symmetry()
-  filtered = spectrum.filter_sym_pairs()
+  classify_and_pair(spectrum)
+  symmetrized = symmetrize_degenerate_groups(spectrum)
+  filtered = filter_degenerate_partners(symmetrized)
   save_phonon_npz(filtered, args.out_path or args.phonon_path)
+  check = sym_check_summary(getattr(spectrum, "sym_check", None))
+  note = "" if not check else f"; sym_check: {check}"
   print(f"saved filtered spectrum ({filtered.n_modes} of {spectrum.n_modes} modes) "
-        f"to {args.out_path or args.phonon_path}")
+        f"to {args.out_path or args.phonon_path}{note}")
