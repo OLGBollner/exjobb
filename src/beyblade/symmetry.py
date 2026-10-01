@@ -62,10 +62,10 @@ CHARACTER_TABLES: dict[str, dict[str, Any]] = {
     "-6m2": {
         "A1'": [1, 1, 1, 1, 1, 1],
         "A2'": [1, 1, -1, 1, 1, -1],
-        "E'": [1, -1, 0, 1, -1, 0],
+        "E'": [2, -1, 0, 2, -1, 0],
         "A1''": [1, 1, 1, -1, -1, -1],
         "A2''": [1, 1, -1, -1, -1, 1],
-        "E''": [1, -1, 0, -1, 1, 0],
+        "E''": [2, -1, 0, -2, 1, 0],
     },
 }
 
@@ -121,6 +121,23 @@ def detect_point_group_from_spectrum(spectrum, symprec: float = 1e-3) -> PointGr
         coords_are_cartesian=False,
     )
     return detect_point_group(structure, symprec=symprec)
+
+
+def expand_classes(table: dict, ops: list[str]) -> dict[str, list[float]]:
+    """Expand a per-class character table into per-operation chi vectors.
+
+    ``table`` is one entry of POINT_GROUP_CHARACTER_TABLES (classes +
+    irreps); ``ops`` is the per-operation class label list in pipeline
+    order, e.g. ["E", "C3", "C3", "sv", "sv", "sv"] for C3v. Returns
+    {irrep: [chi_per_operation]}.
+    """
+    class_chars = {name: chars for name, chars in table["irreps"].items()}
+    out: dict[str, list[float]] = {}
+    for name, chars in class_chars.items():
+        lookup = {cname: chi for (cname, _mult), chi in zip(table["classes"], chars)}
+        vec = [lookup[op] for op in ops]
+        out[name] = vec
+    return out
 
 
 def classify_modes(spectrum, tol_mev: float = 0.01, symprec: float = 1e-3) -> tuple[list[str], list[list[int]]]:
