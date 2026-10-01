@@ -5,8 +5,10 @@ scripts/cluster/ wrap them with argparse CLIs.
 """
 from beyblade.vasp.occupations import prepare_relax_to_zfs
 from beyblade.vasp.structures import (apply_combined_perturbation,
-                                      apply_perturbation, load_phonon_data,
-                                      load_poscar)
+                                      apply_perturbation,
+                                      compare_displacement,
+                                      compare_displacement_cli,
+                                      load_phonon_data, load_poscar)
 from beyblade.vasp.trees import (build_perturbation_tree, build_zfs_tree,
                                  default_phonon, n_modes_from_phonon,
                                  n_tasks_for, read_outcar_time,
@@ -14,6 +16,7 @@ from beyblade.vasp.trees import (build_perturbation_tree, build_zfs_tree,
 
 __all__ = [
     "apply_combined_perturbation", "apply_perturbation",
+    "compare_displacement", "compare_displacement_cli",
     "build_perturbation_tree", "build_zfs_tree", "default_phonon",
     "load_phonon_data", "load_poscar", "n_modes_from_phonon", "n_tasks_for",
     "prepare_relax_to_zfs", "read_outcar_time", "resolve_sym_phonon",
