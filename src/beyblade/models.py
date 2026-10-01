@@ -767,19 +767,16 @@ def _decode_packed_2nd(value: Any, data: Any) -> Optional[np.ndarray]:
     if isinstance(value, np.ndarray) and value.dtype.names and {"i", "j", "tensor"} <= set(value.dtype.names):
         if value.size == 0:
             return None
-        n = int(max(value["i"].max(), value["j"].max())) + 1
-        dense = np.zeros((n, n, 3, 3))
-        for row in value:
-            dense[row["i"], row["j"]] = row["tensor"]
-            dense[row["j"], row["i"]] = row["tensor"]
-        return dense
+        return SymmetricArray.from_packed(value)
     return _decode_2d_array(value, data)
 
 
 def _encode_packed_2nd(value: Any) -> Any:
-    """Pack the symmetric dense (n, n, 3, 3) tensor to canonical i <= j entries."""
+    """Pack the symmetric second-order tensor to canonical i <= j entries."""
     if value is None:
         return None
+    if isinstance(value, SymmetricArray):
+        return value.to_packed()
     arr = np.asarray(value)
     if arr.ndim != 4:
         return value  # already packed or malformed; let validation catch it
@@ -791,6 +788,100 @@ def _encode_packed_2nd(value: Any) -> Any:
     for k, (i, j, t) in enumerate(rows):
         packed[k] = (i, j, t)
     return packed
+
+
+class SymmetricArray:
+    """Memory-frugal holder for a symmetric (n, n, 3, 3) tensor array.
+
+    Only canonical i <= j entries are stored; reads of [j, i] redirect to
+    [i, j]. Designed for the second-order ZFS derivative tensor over phonon
+    mode pairs, where n can reach ~1150 (a ~95 MB dense array).
+
+    Consumers that need a real ndarray call np.asarray(arr) (or slice through
+    __array__), which materializes the dense form on demand. Arithmetic with
+    a scalar returns another SymmetricArray, so symmetry survives unit
+    conversion; anything fancier should convert to dense first.
+    """
+
+    def __init__(self, n_modes: int):
+        self._n = int(n_modes)
+        self._rows: dict[tuple[int, int], np.ndarray] = {}
+
+    # -- construction / packing -------------------------------------------
+
+    @classmethod
+    def from_packed(cls, packed: np.ndarray) -> "SymmetricArray":
+        """Build from a structured (K,) array with fields i, j, tensor."""
+        i_max = int(packed["i"].max()) if packed.size else 0
+        j_max = int(packed["j"].max()) if packed.size else 0
+        arr = cls(max(i_max, j_max) + 1)
+        for row in packed:
+            arr[int(row["i"]), int(row["j"])] = np.array(row["tensor"])
+        return arr
+
+    def to_packed(self) -> np.ndarray:
+        """Structured (K,) array over canonical i <= j entries, disk format."""
+        packed = np.zeros(len(self._rows),
+                          dtype=[("i", np.int64), ("j", np.int64), ("tensor", float, (3, 3))])
+        for k, ((i, j), t) in enumerate(sorted(self._rows.items())):
+            packed[k] = (i, j, t)
+        return packed
+
+    # -- access ------------------------------------------------------------
+
+    def _canon(self, i: int, j: int) -> tuple[int, int]:
+        return (i, j) if i <= j else (j, i)
+
+    def __setitem__(self, key, value):
+        i, j = key
+        self._rows[self._canon(i, j)] = np.asarray(value, dtype=float)
+
+    def __getitem__(self, key):
+        i, j = key
+        entry = self._rows.get(self._canon(i, j))
+        if entry is None:
+            return np.zeros((3, 3))
+        return entry.copy()
+
+    # -- numpy interop -----------------------------------------------------
+
+    @property
+    def shape(self):
+        return (self._n, self._n, 3, 3)
+
+    @property
+    def ndim(self):
+        return 4
+
+    @property
+    def n_packed(self) -> int:
+        return len(self._rows)
+
+    def any_entry(self) -> bool:
+        return bool(self._rows)
+
+    @property
+    def nbytes_stored(self) -> int:
+        return sum(t.nbytes for t in self._rows.values())
+
+    def __array__(self, dtype=None):
+        dense = np.zeros(self.shape, dtype=dtype or float)
+        for (i, j), t in self._rows.items():
+            dense[i, j] = t
+            dense[j, i] = t
+        return dense
+
+    def __mul__(self, factor):
+        out = SymmetricArray(self._n)
+        out._rows = {k: v * factor for k, v in self._rows.items()}
+        return out
+
+    __rmul__ = __mul__
+
+    def copy(self) -> "SymmetricArray":
+        out = SymmetricArray(self._n)
+        out._rows = {k: v.copy() for k, v in self._rows.items()}
+        return out
 
 
 def _decode_calc_method(value: str, data: Any) -> Optional[str]:
