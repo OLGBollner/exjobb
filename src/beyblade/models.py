@@ -737,6 +737,44 @@ def _decode_2d_array(value: Any, data: Any) -> Optional[np.ndarray]:
     return arr if arr.ndim >= 2 and arr.size > 0 else None
 
 
+def _decode_packed_2nd(value: Any, data: Any) -> Optional[np.ndarray]:
+    """Rebuild the symmetric dense (n, n, 3, 3) tensor from the packed on-disk form.
+
+    Packed form: arrays "pair_indices" (K, 2, int64) and "pair_values"
+    (K, 3, 3) holding only canonical i <= j entries over computed 2d
+    perturbation pairs. Falls back to legacy dense storage unchanged.
+    """
+    if isinstance(value, np.ndarray):
+        value = value[()]
+    if isinstance(value, np.ndarray) and value.dtype.names and {"i", "j", "tensor"} <= set(value.dtype.names):
+        if value.size == 0:
+            return None
+        n = int(max(value["i"].max(), value["j"].max())) + 1
+        dense = np.zeros((n, n, 3, 3))
+        for row in value:
+            dense[row["i"], row["j"]] = row["tensor"]
+            dense[row["j"], row["i"]] = row["tensor"]
+        return dense
+    return _decode_2d_array(value, data)
+
+
+def _encode_packed_2nd(value: Any) -> Any:
+    """Pack the symmetric dense (n, n, 3, 3) tensor to canonical i <= j entries."""
+    if value is None:
+        return None
+    arr = np.asarray(value)
+    if arr.ndim != 4:
+        return value  # already packed or malformed; let validation catch it
+    n = arr.shape[0]
+    rows = [(i, j, arr[i, j]) for i in range(n) for j in range(i, n) if arr[i, j].any()]
+    if not rows:
+        return None
+    packed = np.zeros(len(rows), dtype=[("i", np.int64), ("j", np.int64), ("tensor", float, (3, 3))])
+    for k, (i, j, t) in enumerate(rows):
+        packed[k] = (i, j, t)
+    return packed
+
+
 def _decode_calc_method(value: str, data: Any) -> Optional[str]:
     """Legacy files may store the string "None" or "" for an absent method."""
     return None if value in ("None", "") else value
@@ -1249,7 +1287,7 @@ class SpinPhononCouplingData:
         FieldSpec("V2_0_0", "array", optional=True, decode=_decode_2d_array),
         FieldSpec("V2_p_m", "array", optional=True, decode=_decode_2d_array),
         FieldSpec("V2_0_pm", "array", optional=True, decode=_decode_2d_array),
-        FieldSpec("zfs_2nd_derivs", "array", optional=True, decode=_decode_2d_array),
+        FieldSpec("zfs_2nd_derivs", "dict", optional=True, encode=_encode_packed_2nd, decode=_decode_packed_2nd),
     ]
 
     def save(self, out_path: Union[str, Path]) -> str:
@@ -1283,7 +1321,8 @@ class SpinPhononCouplingData:
                 kwargs["V2_0_0"] = kwargs.get("V_0_0")
                 kwargs["V2_p_m"] = kwargs.get("V_p_m")
                 kwargs["V2_0_pm"] = kwargs.get("V_0_pm")
-                kwargs["zfs_2nd_derivs"] = kwargs.get("zfs_2nd_derivs") or kwargs.get("zfs_derivs")
+                if kwargs.get("zfs_2nd_derivs") is None:
+                    kwargs["zfs_2nd_derivs"] = kwargs.get("zfs_derivs")
 
             # Legacy scalar D in Joules -> diagonal ZFSTensor
             if kwargs.get("ground_state_zfs") is None and "zfs" in d:
