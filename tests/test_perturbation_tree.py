@@ -303,3 +303,55 @@ def test_forbid_relaxation_leaves_static_incars_alone():
     ):  # no LDMATRIX -> untouched
         out, warning = forbid_relaxation(incar)
         assert out == incar and warning is None
+
+
+# ---------- verify_setup (pre-sbatch INCAR + script checks) ----------
+
+def _verify_folder(tmp_path, script="DEFECT=NV_512\nBINARY={bin}\n"
+                  "PHONON_PATH={phon}\nCREATE_STRUCT=/bin/true\n"
+                  "GET_N_MODES=/bin/true\nPERT=0.025\n",
+                  incar="LDMATRIX = .TRUE.\nALGO = Normal\nIBRION = -1\n"):
+    from beyblade.vasp.verify import verify_setup
+    phon = tmp_path / "phon.npz"
+    phon.write_bytes(b"x")
+    (tmp_path / "input").mkdir()
+    (tmp_path / "input" / "INCAR").write_text(incar)
+    (tmp_path / "run_x.sh").write_text(script.format(
+        bin="/bin/true", phon=str(tmp_path / "phon.npz")))
+    return verify_setup(tmp_path, "run_x.sh")
+
+
+def test_verify_setup_passes_clean_folder(tmp_path):
+    problems = _verify_folder(tmp_path)
+    assert [p for p in problems if p.startswith("FAIL")] == []
+    assert problems == []
+
+
+def test_verify_setup_flags_algo_none(tmp_path):
+    problems = _verify_folder(tmp_path,
+                              incar="LDMATRIX = .TRUE.\nALGO = None\n")
+    assert any(p.startswith("FAIL") and "ALGO=None" in p for p in problems)
+
+
+def test_verify_setup_flags_leftover_placeholder(tmp_path):
+    problems = _verify_folder(
+        tmp_path, script="DEFECT=<defect>\nBINARY=/bin/true\n"
+        "PHONON_PATH=/tmp/phon.npz\nPERT=0.025\n")
+    assert any("placeholder" in p for p in problems)
+
+
+def test_verify_setup_flags_missing_phonon_path(tmp_path):
+    (tmp_path / "input").mkdir()
+    (tmp_path / "input" / "INCAR").write_text("LDMATRIX = .TRUE.\n")
+    (tmp_path / "run_x.sh").write_text(
+        "BINARY=/bin/true\nPHONON_PATH=/no/such/phon.npz\n")
+    from beyblade.vasp.verify import verify_setup
+    problems = verify_setup(tmp_path, "run_x.sh")
+    assert any(p.startswith("FAIL") and "PHONON_PATH" in p for p in problems)
+
+
+def test_verify_setup_warns_on_gamma_binary(tmp_path):
+    problems = _verify_folder(
+        tmp_path, script="BINARY=/opt/vasp/vasp.5.4.4_gam\n"
+        "PHONON_PATH=" + str(tmp_path / "phon.npz") + "\nPERT=0.025\n")
+    assert any(p.startswith("WARNING") and "gamma-only" in p for p in problems)
