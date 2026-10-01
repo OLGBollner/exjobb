@@ -42,6 +42,7 @@ construction).
 import numpy as np
 
 from beyblade.spin import spin_raise, spin_lower, spin_z, spin_x, spin_y
+from beyblade.symmetry import CHARACTER_TABLES
 
 # ---------------------------------------------------------------------------
 # Spin side
@@ -108,111 +109,6 @@ def _transform(T, R):
     return R @ T @ R.T
 
 
-# Character table for C3v (3m), op order: E, C3, C3^2, sv1, sv2, sv3
-_C3V_CHARACTERS = {
-    "A1": [1, 1, 1, 1, 1, 1],
-    "A2": [1, 1, 1, -1, -1, -1],
-    "E": [2, -1, -1, 0, 0, 0],
-}
-
-# Symmetric 3x3 monomial basis used by the generic projector. Coordinates:
-# (xx, yy, zz, xy, xz, yz); each monomial is the symmetrized matrix, so a
-# tensor T = sum_k a_k M_k has a_xy = T_xy etc.
-_MONOMIALS = {
-    "xx": np.diag([1.0, 0, 0]),
-    "yy": np.diag([0, 1.0, 0]),
-    "zz": np.diag([0, 0, 1.0]),
-    "xy": np.array([[0, 0.5, 0], [0.5, 0, 0], [0, 0, 0]]),
-    "xz": np.array([[0, 0, 0.5], [0, 0, 0], [0.5, 0, 0]]),
-    "yz": np.array([[0, 0, 0], [0, 0, 0.5], [0, 0.5, 0]]),
-}
-_M = np.array([B.reshape(-1) for B in _MONOMIALS.values()])  # 6x6
-
-
-def _group_action(operations):
-    """Monomial-coefficient transfer matrices: T = sum_j a_j B_j (a in monomial
-    coords), then gTg^T = sum_k a'_k B_k with a' = M_g @ a, where
-    M_g[j,k] = <B_j, g B_k g^T> / <B_k, B_k> (monomials are not orthonormal)."""
-    norms2 = np.array([np.sum(B * B) for B in _MONOMIALS.values()])
-    Ms = []
-    for R in operations:
-        W = np.array([[np.sum(Bj * _transform(Bk, R))
-                       for Bk in _MONOMIALS.values()]
-                      for Bj in _MONOMIALS.values()])
-        Ms.append(W / norms2[None, :])
-    return np.array(Ms)  # (n_g, 6, 6)
-
-
-def _to_monomial_coeffs(dD):
-    """Coefficients a with dD = sum_k a_k B_k (monomials mutually orthogonal)."""
-    b = np.array([np.sum(B * dD) for B in _MONOMIALS.values()])
-    n2 = np.array([np.sum(B * B) for B in _MONOMIALS.values()])
-    return b / n2
-
-
-def _character_projector(Ms, chi):
-    """P = (d/|G|) sum_g chi(g)^* M_g, as a 6x6 matrix (d = chi[E])."""
-    d = chi[0]
-    P = np.zeros((6, 6), dtype=complex)
-    for g_idx, M in enumerate(Ms):
-        P += np.conj(chi[g_idx]) * M
-    return np.real(d * P / len(Ms))
-
-
-def _irrep_subspace(P):
-    """Orthonormal basis (columns) of the range of projector P."""
-    w, V = np.linalg.eigh(P)
-    keep = w > 1e-9
-    return V[:, keep], int(keep.sum())
-
-
-def _split_e_copies(sub, P):
-    """Split a doubly-occurring E subspace by O(3) parent structure.
-
-    Group theory alone cannot separate two isomorphic E copies (any
-    G-equivariant map is block-scalar), but the O(3) parent does: the
-    m=1 copy (|m|=1) carries exactly one z index (xz, yz monomials), the
-    m=2 copy none (xx-yy, xy). We project those monomial seeds through the
-    character projector and orthonormalize within each copy.
-
-    Returns two real matrices whose columns are orthonormal copy bases:
-    (m=1 copy, m=2 copy).
-    """
-    def proj(v6):
-        return P @ v6
-
-    seeds_m1 = [np.array([0, 0, 0, 0, 1, 0], float),
-                np.array([0, 0, 0, 0, 0, 1], float)]
-    seeds_m2 = [np.array([1, -1, 0, 0, 0, 0], float),
-                np.array([0, 0, 0, 1, 0, 0], float)]
-
-    def orthonormalize(seeds):
-        basis = []
-        for s in seeds:
-            v = proj(s)
-            for u in basis:
-                v = v - (u @ v) * u
-            n = np.linalg.norm(v)
-            if n > 1e-10:
-                basis.append(v / n)
-        return np.array(basis).T if basis else np.zeros((6, 0))
-
-    return orthonormalize(seeds_m1), orthonormalize(seeds_m2)
-
-
-# Physics normalization: V_mu is the coefficient of F_mu in
-#   sum_ij dD_ij S_iS_j = sum_mu V_mu F_mu  (+ isotropic S^2 term, dropped:
-#   constant within a multiplet, so it never drives transitions).
-# Each F_mu has an S-INDEPENDENT tensor representation f_mu (traceless
-# symmetric 3x3) obtained by rewriting the ladder expressions with
-# S^2 = S(S+1) 1:
-#   F_z  = 2 Sz^2 - Sx^2 - Sy^2          -> f = diag(2,-1,-1)
-#   F_x  = Sx^2 - Sy^2                   -> f = diag(1,-1, 0)
-#   F_y  = SxSy + SySx                   -> f_xy = f_yx = 1
-#   F_xp = sqrt(2)(SxSz + SzSx)          -> f_xz = f_zx = sqrt(2)
-#   F_yp = sqrt(2)(SySz + SzSy)          -> f_yz = f_zy = sqrt(2)
-# and V_mu = Tr(f_mu dD) / ||f_mu||_F^2. For S=1 these reproduce the
-# Appendix-A formulas exactly (validated in tests/test_projection.py).
 _F_TENSORS = {
     "F_z": np.diag([-1.0, -1.0, 2.0]),
     "F_x": np.diag([1.0, -1.0, 0.0]),
@@ -241,12 +137,17 @@ def _channel_values(dD: np.ndarray, names) -> np.ndarray:
     return np.array(vals)
 
 
-# Character table for C3v (3m), op order: E, C3, C3^2, sv1, sv2, sv3
-_C3V_CHARACTERS = {
-    "A1": [1, 1, 1, 1, 1, 1],
-    "A2": [1, 1, 1, -1, -1, -1],
-    "E": [2, -1, -1, 0, 0, 0],
-}
+def characters_for_group(symbol: str) -> dict[str, list[float]]:
+    """Flatten symmetry.CHARACTER_TABLES into {irrep: class_chars}.
+
+    Uses the same operation order as symmetry._operation_keys. Entries that
+    are dicts (2D irreps with sublabel machinery) expose 'class_chars'.
+    """
+    raw = CHARACTER_TABLES[symbol]
+    out = {}
+    for irrep, val in raw.items():
+        out[irrep] = val["class_chars"] if isinstance(val, dict) else val
+    return out
 
 # Symmetric 3x3 monomial basis used by the generic projector. Coordinates:
 # (xx, yy, zz, xy, xz, yz); each monomial is the symmetrized matrix, so a
@@ -353,7 +254,7 @@ def project_tensor(dD: np.ndarray, operations, characters=None,
     if characters is None:
         if len(operations) != 6:
             raise ValueError("characters required for non-C3v groups")
-        characters = _C3V_CHARACTERS
+        characters = C3V_CLASS_CHARS
     Ms = _group_action(operations)
 
     # Assign the F tensors to irreps (verifies or derives the pairing).
@@ -408,3 +309,6 @@ def _assign_f_to_irreps(spin_operators, Ms, characters):
                 names.append(name)
         f_assign[irrep] = names
     return f_assign
+
+
+C3V_CLASS_CHARS = characters_for_group("3m")
