@@ -1,4 +1,5 @@
 """Tests for beyblade.vasp.structures.compare_displacement."""
+
 import numpy as np
 import pytest
 from pymatgen.core import Lattice, Structure
@@ -11,8 +12,7 @@ from beyblade.vasp import compare_displacement, compare_displacement_cli
 def ref_poscar(tmp_path):
     lattice = Lattice.cubic(3.57)
     species = ["C"] * 4
-    coords = [[0, 0, 0], [0.25, 0.25, 0.25],
-              [0.5, 0.5, 0], [0.75, 0.75, 0.75]]
+    coords = [[0, 0, 0], [0.25, 0.25, 0.25], [0.5, 0.5, 0], [0.75, 0.75, 0.75]]
     struct = Structure(lattice, species, coords)
     path = tmp_path / "POSCAR_ref"
     Poscar(struct).write_file(path)
@@ -82,3 +82,15 @@ def test_cli_reports_missing_gracefully(ref_poscar, tmp_path, capsys):
     compare_displacement_cli(ref_path, [tmp_path / "nope"])
     out = capsys.readouterr().out
     assert "not found" in out or "No such file" in out
+
+
+def test_wrapped_structure_matches(ref_poscar, tmp_path):
+    """A structure shifted by a full lattice vector must compare as
+    identical (nearest-periodic-image wrapping)."""
+    ref_path, ref = ref_poscar
+    pert = ref.copy()
+    pert.sites[0].coords = ref.sites[0].coords + [3.57, 3.57, 0]
+    pert_path = _write(tmp_path / "POSCAR_wrapped", pert)
+    stats = compare_displacement(ref_path, pert_path)
+    assert stats["max"] == pytest.approx(0.0, abs=1e-10)
+    assert stats["rms"] == pytest.approx(0.0, abs=1e-10)

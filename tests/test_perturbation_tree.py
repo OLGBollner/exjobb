@@ -1,4 +1,5 @@
 """Tests for phonon resolution in create_perturbation_tree."""
+
 import re
 import subprocess
 
@@ -7,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from beyblade.vasp import (build_zfs_tree, default_phonon, resolve_sym_phonon, sbatch_time)
+from beyblade.vasp import build_zfs_tree, default_phonon, resolve_sym_phonon, sbatch_time
 
 
 @pytest.fixture
@@ -19,12 +20,14 @@ def defect(tmp_path):
 
 def _save(spec, path):
     from beyblade.parsers import save_phonon_npz
+
     save_phonon_npz(spec, path)
 
 
 def _tiny(freqs, syms):
     """Minimal PhononSpectrum with preset labels (bypasses classification)."""
     from beyblade.models import PhononSpectrum
+
     n = len(freqs)
     return PhononSpectrum(
         frequencies_mev=np.asarray(freqs, dtype=float),
@@ -97,9 +100,11 @@ def test_build_zfs_tree_refuses_overwrite(tmp_path):
 
 def test_patch_restart_incar_rewrites_flags():
     from beyblade.vasp.trees import patch_restart_incar
+
     def tag(text, name):
         vals = re.findall(rf"^\s*{name}\s*=\s*(.+?)\s*(?:!|#|$)", text, re.M | re.I)
         return vals[-1] if vals else None
+
     incar = "ISYM = 3\nISTART = 2\nICHARG = 2\nLWAVE = .FALSE.\nLCHARG = .FALSE.\n"
     out = patch_restart_incar(incar)
     assert tag(out, "ISTART") == "0"
@@ -111,6 +116,7 @@ def test_patch_restart_incar_rewrites_flags():
 
 def test_patch_restart_incar_appends_missing():
     from beyblade.vasp.trees import patch_restart_incar
+
     out = patch_restart_incar("ENCUT = 520\n")
     for name in ("ISTART", "ICHARG", "LWAVE", "LCHARG"):
         assert re.search(rf"^\s*{name}\s*=", out, re.M | re.I), name
@@ -119,6 +125,7 @@ def test_patch_restart_incar_appends_missing():
 
 def test_forbid_algo_none_corrects_and_warns():
     from beyblade.vasp.trees import forbid_algo_none
+
     incar = "ALGO = None\nENCUT = 520\n"
     out, warning = forbid_algo_none(incar)
     assert re.search(r"^\s*ALGO\s*=\s*Normal\b", out, re.M | re.I)
@@ -128,6 +135,7 @@ def test_forbid_algo_none_corrects_and_warns():
 
 def test_forbid_algo_none_leaves_scf_incar_alone():
     from beyblade.vasp.trees import forbid_algo_none
+
     out, warning = forbid_algo_none("ALGO = Normal\nENCUT = 520\n")
     assert warning is None
     assert out == "ALGO = Normal\nENCUT = 520\n"
@@ -138,10 +146,10 @@ def test_forbid_algo_none_leaves_scf_incar_alone():
 
 def test_perturbation_input_incar_is_restart_ready(tmp_path):
     from beyblade.vasp import build_perturbation_tree
+
     defect = tmp_path / "NV_512"
     (defect / "data").mkdir(parents=True)
-    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]),
-          defect / "data" / "phonon_data.npz")
+    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]), defect / "data" / "phonon_data.npz")
     for stage in ("ZFS_hyp", "ZFS_occup"):
         d = defect / stage
         d.mkdir()
@@ -150,14 +158,17 @@ def test_perturbation_input_incar_is_restart_ready(tmp_path):
             (d / name).write_text(name + "\n")
         (d / "OUTCAR").write_text("Elapsed time (sec):   100.000\n")
     failures = build_perturbation_tree(
-        out=defect, pert=[0.0001], phonon=defect / "data" / "phonon_data.npz",
-        scripts_dir=Path("scripts/cluster"), array_jobs=1, force=True,
-        vasp_binary=Path("/bin/true"))
+        out=defect,
+        pert=[0.0001],
+        phonon=defect / "data" / "phonon_data.npz",
+        scripts_dir=Path("scripts/cluster"),
+        array_jobs=1,
+        force=True,
+        vasp_binary=Path("/bin/true"),
+    )
     assert failures == []
-    incar = (defect / "first_order" / "pert_0.0001" / "all_bands"
-             / "input" / "INCAR").read_text()
-    for name, value in (("ISTART", "0"), ("ICHARG", "1"),
-                        ("LWAVE", ".TRUE."), ("LCHARG", ".TRUE.")):
+    incar = (defect / "first_order" / "pert_0.0001" / "all_bands" / "input" / "INCAR").read_text()
+    for name, value in (("ISTART", "0"), ("ICHARG", "1"), ("LWAVE", ".TRUE."), ("LCHARG", ".TRUE.")):
         vals = re.findall(rf"^\s*{name}\s*=\s*(.+?)\s*(?:!|#|$)", incar, re.M | re.I)
         assert vals, name
         assert vals[-1] == value, name
@@ -165,6 +176,7 @@ def test_perturbation_input_incar_is_restart_ready(tmp_path):
 
 def test_forbid_sym_ldmatrix_corrects_isym_12():
     from beyblade.vasp.trees import forbid_sym_ldmatrix
+
     for isym in ("1", "2"):
         out, warning = forbid_sym_ldmatrix(f"ISYM = {isym}\nLDMATRIX = .TRUE.\n")
         assert re.search(r"^\s*ISYM\s*=\s*3\b", out, re.M | re.I)
@@ -173,9 +185,12 @@ def test_forbid_sym_ldmatrix_corrects_isym_12():
 
 def test_forbid_sym_ldmatrix_leaves_valid_incars_alone():
     from beyblade.vasp.trees import forbid_sym_ldmatrix
-    cases = ("ISYM = 3\nLDMATRIX = .TRUE.\n",       # already safe
-             "LDMATRIX = .TRUE.\n",                  # no ISYM tag
-             "ISYM = 2\nENCUT = 520\n")              # no LDMATRIX
+
+    cases = (
+        "ISYM = 3\nLDMATRIX = .TRUE.\n",  # already safe
+        "LDMATRIX = .TRUE.\n",  # no ISYM tag
+        "ISYM = 2\nENCUT = 520\n",
+    )  # no LDMATRIX
     for incar in cases:
         out, warning = forbid_sym_ldmatrix(incar)
         assert warning is None and out == incar
@@ -184,10 +199,10 @@ def test_forbid_sym_ldmatrix_leaves_valid_incars_alone():
 def test_perturbation_input_incar_corrects_algo_none(tmp_path, capsys):
     """ALGO=None in the ZFS source INCAR is corrected to Normal with a log."""
     from beyblade.vasp import build_perturbation_tree
+
     defect = tmp_path / "NV_512"
     (defect / "data").mkdir(parents=True)
-    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]),
-          defect / "data" / "phonon_data.npz")
+    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]), defect / "data" / "phonon_data.npz")
     for stage in ("ZFS_hyp", "ZFS_occup"):
         d = defect / stage
         d.mkdir()
@@ -196,12 +211,16 @@ def test_perturbation_input_incar_corrects_algo_none(tmp_path, capsys):
             (d / name).write_text(name + "\n")
         (d / "OUTCAR").write_text("Elapsed time (sec):   100.000\n")
     failures = build_perturbation_tree(
-        out=defect, pert=[0.0001], phonon=defect / "data" / "phonon_data.npz",
-        scripts_dir=Path("scripts/cluster"), array_jobs=1, force=True,
-        vasp_binary=Path("/bin/true"))
+        out=defect,
+        pert=[0.0001],
+        phonon=defect / "data" / "phonon_data.npz",
+        scripts_dir=Path("scripts/cluster"),
+        array_jobs=1,
+        force=True,
+        vasp_binary=Path("/bin/true"),
+    )
     assert failures == []
-    incar = (defect / "first_order" / "pert_0.0001" / "all_bands"
-             / "input" / "INCAR").read_text()
+    incar = (defect / "first_order" / "pert_0.0001" / "all_bands" / "input" / "INCAR").read_text()
     assert re.search(r"^\s*ALGO\s*=\s*Normal\b", incar, re.M | re.I)
     assert "ALGO=None" not in incar
     out = capsys.readouterr().out
@@ -211,10 +230,10 @@ def test_perturbation_input_incar_corrects_algo_none(tmp_path, capsys):
 def test_perturbation_input_incar_corrects_isym_with_ldmatrix(tmp_path, capsys):
     """ISYM=1/2 with LDMATRIX in the source INCAR is corrected to 3."""
     from beyblade.vasp import build_perturbation_tree
+
     defect = tmp_path / "NV_512"
     (defect / "data").mkdir(parents=True)
-    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]),
-          defect / "data" / "phonon_data.npz")
+    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]), defect / "data" / "phonon_data.npz")
     for stage in ("ZFS_hyp", "ZFS_occup"):
         d = defect / stage
         d.mkdir()
@@ -223,12 +242,16 @@ def test_perturbation_input_incar_corrects_isym_with_ldmatrix(tmp_path, capsys):
             (d / name).write_text(name + "\n")
         (d / "OUTCAR").write_text("Elapsed time (sec):   100.000\n")
     failures = build_perturbation_tree(
-        out=defect, pert=[0.0001], phonon=defect / "data" / "phonon_data.npz",
-        scripts_dir=Path("scripts/cluster"), array_jobs=1, force=True,
-        vasp_binary=Path("/bin/true"))
+        out=defect,
+        pert=[0.0001],
+        phonon=defect / "data" / "phonon_data.npz",
+        scripts_dir=Path("scripts/cluster"),
+        array_jobs=1,
+        force=True,
+        vasp_binary=Path("/bin/true"),
+    )
     assert failures == []
-    incar = (defect / "first_order" / "pert_0.0001" / "all_bands"
-             / "input" / "INCAR").read_text()
+    incar = (defect / "first_order" / "pert_0.0001" / "all_bands" / "input" / "INCAR").read_text()
     assert re.search(r"^\s*ISYM\s*=\s*3\b", incar, re.M | re.I)
     out = capsys.readouterr().out
     assert "WARN" in out and "ISYM=2" in out and "LDMATRIX" in out
@@ -239,8 +262,7 @@ def test_cli_expands_tilde_binary(tmp_path, monkeypatch):
     sbatch scripts, like --phonon."""
     defect = tmp_path / "NV_512"
     (defect / "data").mkdir(parents=True)
-    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]),
-          defect / "data" / "phonon_data.npz")
+    _save(_tiny([10.0, 20.0, 30.0], ["A1", "Ex", "A2"]), defect / "data" / "phonon_data.npz")
     for stage in ("ZFS_hyp", "ZFS_occup"):
         d = defect / stage
         d.mkdir()
@@ -248,12 +270,36 @@ def test_cli_expands_tilde_binary(tmp_path, monkeypatch):
         for name in ("POSCAR", "KPOINTS", "POTCAR"):
             (d / name).write_text(name + "\n")
         (d / "OUTCAR").write_text("Elapsed time (sec):   100.000\n")
-    args = [str(defect), "--pert", "0.0001", "--array-jobs", "1",
-            "--vasp-binary", "../me/vasp_std"]
+    args = [str(defect), "--pert", "0.0001", "--array-jobs", "1", "--vasp-binary", "../me/vasp_std"]
     r = subprocess.run(
         ["python", str(Path("scripts/cluster/create_perturbation_tree.py").resolve()), *args],
-        capture_output=True, text=True, cwd=tmp_path,
-        env={"PYTHONPATH": str(Path("src").resolve()), "PATH": __import__("os").environ["PATH"]})
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={"PYTHONPATH": str(Path("src").resolve()), "PATH": __import__("os").environ["PATH"]},
+    )
     assert r.returncode == 0, r.stdout + r.stderr
     sbatch = next(defect.rglob("run_perturbation_first_order.sh"))
     assert f"binary={tmp_path.parent}/me/vasp_std" in sbatch.read_text()
+
+
+def test_forbid_relaxation_corrects_ibrion():
+    from beyblade.vasp.trees import forbid_relaxation
+
+    for incar in ("IBRION = 2\nNSW = 100\nLDMATRIX = .TRUE.\n", "NSW = 10\nLDMATRIX = .TRUE.\n"):
+        out, warning = forbid_relaxation(incar)
+        assert "IBRION = -1" in out.replace("IBRION=-1", "IBRION = -1") or "-1" in out
+        assert warning is not None and "IBRION=-1" in warning
+
+
+def test_forbid_relaxation_leaves_static_incars_alone():
+    from beyblade.vasp.trees import forbid_relaxation
+
+    for incar in (
+        "IBRION = -1\nLDMATRIX = .TRUE.\n",
+        "LDMATRIX = .TRUE.\n",
+        "IBRION = -1\nNSW = 0\nLDMATRIX = .TRUE.\n",
+        "IBRION = 2\nNSW = 100\n",
+    ):  # no LDMATRIX -> untouched
+        out, warning = forbid_relaxation(incar)
+        assert out == incar and warning is None

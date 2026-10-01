@@ -1,4 +1,5 @@
 """Build ready-to-run VASP directory trees on the cluster."""
+
 from __future__ import annotations
 
 import math
@@ -9,8 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from beyblade.parsers import parse_phonon_data, save_phonon_npz
-from beyblade.symmetry import (classify_and_pair, filter_degenerate_partners,
-                               symmetrize_degenerate_groups)
+from beyblade.symmetry import classify_and_pair, filter_degenerate_partners, symmetrize_degenerate_groups
 
 RUN_STAGES = ("relaxation_data", "ZFS_hyp", "ZFS_occup")
 
@@ -31,13 +31,11 @@ BASIS_SOURCE = {
 # --------------------------------------------------------------------------- #
 def replace_tag(incar: str, tag: str, value: str) -> str:
     """Replace the value of every occurrence of a tag."""
-    return re.sub(rf"^(\s*{tag}\s*=\s*)(.+?)[ \t]*(?=$|!|#)",
-                  rf"\g<1>{value}", incar, flags=re.M | re.I)
+    return re.sub(rf"^(\s*{tag}\s*=\s*)(.+?)[ \t]*(?=$|!|#)", rf"\g<1>{value}", incar, flags=re.M | re.I)
 
 
 RESTART_TAGS = ("ISTART", "ICHARG", "LWAVE", "LCHARG")
-RESTART_VALUES = {"ISTART": "0", "ICHARG": "1",
-                  "LWAVE": ".TRUE.", "LCHARG": ".TRUE."}
+RESTART_VALUES = {"ISTART": "0", "ICHARG": "1", "LWAVE": ".TRUE.", "LCHARG": ".TRUE."}
 
 
 def patch_restart_incar(incar: str) -> str:
@@ -66,9 +64,11 @@ def forbid_algo_none(incar: str) -> tuple[str, str | None]:
     if not re.search(r"^\s*ALGO\s*=\s*None\b", incar, re.M | re.I):
         return incar, None
     out = replace_tag(incar, "ALGO", "Normal")
-    warning = ("INCAR had ALGO=None (non-self-consistent single "
-               "diagonalization on the CHGCAR); corrected to ALGO=Normal "
-               "so the perturbed structure gets its own SCF density")
+    warning = (
+        "INCAR had ALGO=None (non-self-consistent single "
+        "diagonalization on the CHGCAR); corrected to ALGO=Normal "
+        "so the perturbed structure gets its own SCF density"
+    )
     return out, warning
 
 
@@ -86,16 +86,46 @@ def forbid_sym_ldmatrix(incar: str) -> tuple[str, str | None]:
     if isym is None:
         return incar, None
     out = replace_tag(incar, "ISYM", "3")
-    warning = (f"INCAR had ISYM={isym.group(1)} together with LDMATRIX; "
-               "corrected to ISYM=3 (ISYM=1/2 is not supported with "
-               "LDMATRIX)")
+    warning = (
+        f"INCAR had ISYM={isym.group(1)} together with LDMATRIX; "
+        "corrected to ISYM=3 (ISYM=1/2 is not supported with "
+        "LDMATRIX)"
+    )
     return out, warning
+
+
+def forbid_relaxation(incar: str) -> tuple[str, str | None]:
+    """Guard against ionic relaxation in a ZFS/perturbation INCAR.
+
+    The ZFS must be evaluated on the exact perturbed geometry, so no ion
+    may move: with IBRION>=0 (or NSW>0) VASP would relax the structure
+    before writing LDMATRIX results, silently mixing relaxation and
+    perturbation.  Correct IBRION to -1 (static run) and return a
+    warning message.
+    """
+    if not re.search(r"^\s*LDMATRIX\s*=\s*\.TRUE\.", incar, re.M | re.I):
+        return incar, None
+    ibrion = re.search(r"^\s*IBRION\s*=\s*([0-8]+)\b", incar, re.M | re.I)
+    nsw = re.search(r"^\s*NSW\s*=\s*(\d+)\b", incar, re.M | re.I)
+    relaxes = (ibrion is not None and int(ibrion.group(1)) >= 0) or (
+        ibrion is None and nsw is not None and int(nsw.group(1)) > 0
+    )
+    if not relaxes:
+        return incar, None
+    if ibrion is not None:
+        out = replace_tag(incar, "IBRION", "-1")
+    else:
+        out = incar.rstrip("\n") + "\nIBRION = -1\n"
+    return out, (
+        "INCAR had ionic relaxation enabled together with "
+        "LDMATRIX; corrected to IBRION=-1 (static run) so the "
+        "ZFS is evaluated on the exact perturbed geometry"
+    )
 
 
 def replace_sbatch(text: str, directive: str, value: str) -> str:
     """Replace the value of an #SBATCH directive (e.g. -J, -t, -a)."""
-    return re.sub(rf"(#SBATCH\s+{re.escape(directive)}\s+).*",
-                  rf"\g<1>{value}", text, flags=re.M)
+    return re.sub(rf"(#SBATCH\s+{re.escape(directive)}\s+).*", rf"\g<1>{value}", text, flags=re.M)
 
 
 def read_outcar_time(src: Path) -> float | None:
@@ -106,8 +136,7 @@ def read_outcar_time(src: Path) -> float | None:
     outcar = src / "OUTCAR"
     if not outcar.is_file():
         return None
-    times = re.findall(r"Elapsed time \(sec\):\s*([\d\.]+)",
-                       outcar.read_text(errors="replace"))
+    times = re.findall(r"Elapsed time \(sec\):\s*([\d\.]+)", outcar.read_text(errors="replace"))
     return sum(float(m) for m in times) if times else None
 
 
@@ -143,8 +172,7 @@ def resolve_sym_phonon(out: Path, phonon: Path) -> Path:
         print(f"  using existing symmetrised phonon file {target}")
         return target
     save_phonon_npz(filtered, target)
-    print(f"  symmetrised phonon data saved to {target} "
-          f"({filtered.n_modes} of {spectrum.n_modes} modes)")
+    print(f"  symmetrised phonon data saved to {target} ({filtered.n_modes} of {spectrum.n_modes} modes)")
     return target
 
 
@@ -168,8 +196,7 @@ def n_tasks_for(order: str, pair_mode: str | None, n_modes: int) -> int:
 # --------------------------------------------------------------------------- #
 # ZFS tree
 # --------------------------------------------------------------------------- #
-def build_zfs_tree(inp: Path, run_dirs: list[str] | tuple[str, ...] = RUN_STAGES,
-                   out: Path | None = None) -> Path:
+def build_zfs_tree(inp: Path, run_dirs: list[str] | tuple[str, ...] = RUN_STAGES, out: Path | None = None) -> Path:
     """Create the VASP directory tree for a point-defect calculation.
 
     `inp` holds data/ (POSCAR or structure.vasp) and template/relax/
@@ -191,8 +218,7 @@ def build_zfs_tree(inp: Path, run_dirs: list[str] | tuple[str, ...] = RUN_STAGES
 
     out = out if out is not None else Path(inp.name)
     if out.exists():
-        raise FileExistsError(f"output directory {out} already exists, "
-                              "refusing to overwrite")
+        raise FileExistsError(f"output directory {out} already exists, refusing to overwrite")
 
     print(f"Creating {out}/ from {inp}")
     shutil.copytree(data_src, out / "data")
@@ -208,12 +234,22 @@ def build_zfs_tree(inp: Path, run_dirs: list[str] | tuple[str, ...] = RUN_STAGES
 # --------------------------------------------------------------------------- #
 # perturbation tree
 # --------------------------------------------------------------------------- #
-def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
-                  defect: str, pert: float, order: str,
-                  n_array_jobs: int, n_modes: int, basis: str,
-                  scripts_dir: Path, vasp_binary: Path | None = None,
-                  pair_mode: str | None = None,
-                  max_hours: float | None = None) -> list[str]:
+def prepare_basis(
+    src: Path,
+    dst: Path,
+    script_name: str,
+    phonon: Path,
+    defect: str,
+    pert: float,
+    order: str,
+    n_array_jobs: int,
+    n_modes: int,
+    basis: str,
+    scripts_dir: Path,
+    vasp_binary: Path | None = None,
+    pair_mode: str | None = None,
+    max_hours: float | None = None,
+) -> list[str]:
     """Fill dst/input/ and write the prefilled SLURM script.
 
     `scripts_dir` is the folder holding the .sh templates and the helper
@@ -244,7 +280,7 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
     if incar_path.is_file():
         incar = incar_path.read_text()
         warnings = []
-        for guard in (forbid_algo_none, forbid_sym_ldmatrix):
+        for guard in (forbid_algo_none, forbid_sym_ldmatrix, forbid_relaxation):
             incar, warning = guard(incar)
             if warning:
                 warnings.append(warning)
@@ -258,8 +294,9 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
     per_sim = read_outcar_time(src)
     n_tasks = n_tasks_for(order, pair_mode, n_modes)
     if per_sim is None:
-        fail(f"no Elapsed time found in OUTCARs under {src} -- "
-             "leaving the template time limit and array size untouched")
+        fail(
+            f"no Elapsed time found in OUTCARs under {src} -- leaving the template time limit and array size untouched"
+        )
     total = per_sim * n_tasks if per_sim is not None else None
     per_job = total / n_array_jobs if total is not None else None
     if per_job is not None and max_hours is not None:
@@ -276,8 +313,7 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
         text = replace_tag(text, "BINARY", str(vasp_binary))
     if pair_mode:
         text = replace_tag(text, "PAIR_MODE", pair_mode)
-    name = "create_combined_phonon_struct.py" \
-        if "second_order" in script_name else "create_phonon_struct.py"
+    name = "create_combined_phonon_struct.py" if "second_order" in script_name else "create_phonon_struct.py"
     text = replace_tag(text, "CREATE_STRUCT", str(scripts_dir / name))
     text = replace_tag(text, "GET_N_MODES", str(scripts_dir / "get_n_modes.py"))
 
@@ -291,9 +327,11 @@ def prepare_basis(src: Path, dst: Path, script_name: str, phonon: Path,
     (dst / script_name).write_text(text)
 
     if per_sim is not None:
-        print(f"    time: {per_sim:.0f} s/sim x {n_tasks} tasks / "
-              f"{n_array_jobs} array jobs = {per_job:.0f} s/job "
-              f"-> {sbatch_time(per_job)}")
+        print(
+            f"    time: {per_sim:.0f} s/sim x {n_tasks} tasks / "
+            f"{n_array_jobs} array jobs = {per_job:.0f} s/job "
+            f"-> {sbatch_time(per_job)}"
+        )
     return failures
 
 
@@ -325,8 +363,8 @@ def build_perturbation_tree(
         src = out / folder
         if not src.is_dir():
             raise FileNotFoundError(
-                f"missing {src} -- both ZFS_hyp and ZFS_occup must exist "
-                "before creating perturbation folders")
+                f"missing {src} -- both ZFS_hyp and ZFS_occup must exist before creating perturbation folders"
+            )
         for name in REQUIRED_FILES:
             if not (src / name).is_file():
                 raise FileNotFoundError(f"missing {name} in {src}")
@@ -347,15 +385,23 @@ def build_perturbation_tree(
                         print(f"  note: {dst} already exists -- skipping")
                         continue
                 print(f"  creating {dst}")
-                script_name = FIRST_ORDER_SCRIPT if order == "first_order" \
-                    else SECOND_ORDER_SCRIPT
-                failures.extend(prepare_basis(
-                    src, dst, script_name, phonon,
-                    defect=defect, pert=p, order=order,
-                    n_array_jobs=array_jobs,
-                    n_modes=n_modes, basis=dst.name,
-                    scripts_dir=scripts_dir,
-                    vasp_binary=vasp_binary,
-                    pair_mode=pair_mode if order == "second_order" else None,
-                    max_hours=max_hours))
+                script_name = FIRST_ORDER_SCRIPT if order == "first_order" else SECOND_ORDER_SCRIPT
+                failures.extend(
+                    prepare_basis(
+                        src,
+                        dst,
+                        script_name,
+                        phonon,
+                        defect=defect,
+                        pert=p,
+                        order=order,
+                        n_array_jobs=array_jobs,
+                        n_modes=n_modes,
+                        basis=dst.name,
+                        scripts_dir=scripts_dir,
+                        vasp_binary=vasp_binary,
+                        pair_mode=pair_mode if order == "second_order" else None,
+                        max_hours=max_hours,
+                    )
+                )
     return failures
