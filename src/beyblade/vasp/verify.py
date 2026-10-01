@@ -38,17 +38,29 @@ def verify_setup(folder: Path, script_name: str) -> list[str]:
         problems.append(f"FAIL: missing run script {script}")
     else:
         text = _read(script)
+        # Lines that legitimately contain '<...>': comments and the
+        # script's own preflight checks (fail messages, case patterns).
+        skip = re.compile(r"^\s*#|^\s*fail\b|^\s*case \$", re.IGNORECASE)
         for line_no, line in enumerate(text.splitlines(), 1):
+            if skip.match(line):
+                continue
             for ph in PLACEHOLDER.findall(line):
                 problems.append(f"FAIL: {script_name}:{line_no} "
                                 f"placeholder not filled: {ph}")
-        # path existence for the four referenced files
+        # path existence for the referenced files (match assignments
+        # case-insensitively: scripts may use binary=, BINARY=, ...)
+        assigns: dict[str, str] = {}
+        for line in text.splitlines():
+            if skip.match(line):
+                continue
+            m = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
+            if m:
+                assigns[m.group(1).upper()] = m.group(2).strip()
         for key in ("BINARY", "PHONON_PATH", "CREATE_STRUCT", "GET_N_MODES"):
-            vals = re.findall(rf"^{key}=(.*)$", text.lower(), re.MULTILINE)
-            if not vals:
+            if key not in assigns:
                 problems.append(f"FAIL: {script_name}: {key} not set")
                 continue
-            val = vals[-1].strip().strip("'\"")
+            val = assigns[key].strip("'\"")
             if not val or PLACEHOLDER.search(val):
                 continue  # placeholder already reported above
             if not Path(val).exists():

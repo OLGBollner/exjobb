@@ -355,3 +355,31 @@ def test_verify_setup_warns_on_gamma_binary(tmp_path):
         tmp_path, script="BINARY=/opt/vasp/vasp.5.4.4_gam\n"
         "PHONON_PATH=" + str(tmp_path / "phon.npz") + "\nPERT=0.025\n")
     assert any(p.startswith("WARNING") and "gamma-only" in p for p in problems)
+
+
+def test_verify_setup_lowercase_vars_and_preflight_lines(tmp_path):
+    # Cluster-style script: lowercase config vars, preflight fail/case lines
+    # that legitimately contain '<...>' placeholders must not be flagged.
+    script = (
+        "#!/bin/sh\n"
+        "# config block\n"
+        "DEFECT=NV_512\n"
+        "binary=/bin/true\n"
+        "create_struct=/bin/true\n"
+        "get_n_modes=/bin/true\n"
+        "PHONON_PATH={phon}\n"
+        "PERT=0.025\n"
+        "fail() {{ echo \"FATAL: $*\"; exit 1; }}\n"
+        "case $DEFECT in *'<defect>'*) fail \"DEFECT placeholder\" ;; esac\n"
+        "case $binary in *'<path_to>'*) fail \"BINARY placeholder\" ;; esac\n"
+        "[ -x \"$binary\" ] || fail \"VASP binary missing: $binary\"\n"
+    )
+    problems = _verify_folder(tmp_path, script=script)
+    assert problems == []
+
+
+def test_verify_setup_flags_real_unfilled_placeholder(tmp_path):
+    problems = _verify_folder(
+        tmp_path, script="DEFECT=<defect>\nbinary=/bin/true\n"
+        "PHONON_PATH=/tmp/phon.npz\nPERT=0.025\n")
+    assert any(":1 placeholder not filled: <defect>" in p for p in problems)
