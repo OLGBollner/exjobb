@@ -350,16 +350,12 @@ def defect_frame_operations(spectrum) -> list[np.ndarray]:
 
     axis, normal = _defect_frame(spectrum)
     axis = axis / np.linalg.norm(axis)
-    ops = [np.eye(3)]
-    ops.append(MathUtils.rotation_around_symmetry_axis(axis, 3))
-    ops.append(MathUtils.rotation_around_symmetry_axis(axis, 3).T)  # C3^2
-    for sign in (+1.0, -1.0, -1.0):  # three sigma_v mirrors of C3v
-        n = normal / np.linalg.norm(normal)
-        M = np.eye(3) - 2.0 * np.outer(n, n)
-        if sign < 0:  # rotate plane about axis by +-120 deg for the other mirrors
-            C = ops[1]
-            M = C @ M
-        ops.append(M)
+    C = MathUtils.rotation_around_symmetry_axis(axis, 3)
+    ops = [np.eye(3), C, C.T]  # E, C3, C3^2
+    n = normal / np.linalg.norm(normal)
+    M = np.eye(3) - 2.0 * np.outer(n, n)
+    for R in (np.eye(3), C, C.T):  # three sigma_v mirrors of C3v
+        ops.append(R @ M)
     return ops
 
 
@@ -412,6 +408,98 @@ def _atom_mapping(R, cart_atoms, frac, inv_lat, symbols, lattice):
         valid = np.where(symbols == symbols[i])[0]
         mapping[i] = valid[np.argmin(dists[valid])] if len(valid) else i
     return mapping
+
+
+def _irrep_characters(spectrum, labels: list[str]) -> list[float]:
+    """Per-operation characters for one mode label or a product of two.
+
+    A single label resolves to its parent irrep's per-operation characters
+    (a 2D component like Ex maps to the parent E characters (2, -1, -1,
+    0, ...), which project onto the full E subspace). A pair of labels
+    gives the product characters chi_AB(g) = chi_A(g) * chi_B(g), which
+    equal the sum over the product decomposition's components
+    (E x E -> A1 + A2 + E) and therefore project onto the full product
+    space. Order matches defect_frame_operations(spectrum).
+    """
+    ops = defect_frame_operations(spectrum)
+    table = _table_for(spectrum)
+    def chi_for(name: str) -> list[float]:
+        entry = table[name]
+        if isinstance(entry, dict):  # 2D irrep: use true class characters
+            return list(entry["class_chars"])
+        return list(entry)
+    out = [1.0] * len(ops)
+    for lab in labels:
+        chi = chi_for(_parent_label(lab))
+        out = [c * x for c, x in zip(out, chi)]
+    if len(labels) == 1:
+        # Projector for a single irrep Gamma carries its dimension:
+        # P_Gamma = (d_Gamma/|G|) sum_g chi_Gamma(g) g, d = chi(E).
+        # A product label's characters chi_AB = sum_Gamma d_Gamma chi_Gamma
+        # already include the dimension factors, so no extra scaling there.
+        out = [out[0] * x for x in out]
+    return out
+
+
+def _table_for(spectrum):
+    pg = detect_point_group_from_spectrum(spectrum)
+    table = CHARACTER_TABLES.get(pg.symbol)
+    if table is None:
+        raise ValueError(f"No character table for point group '{pg.symbol}'")
+    return table
+
+
+def tensor_symmetry_purity(spectrum, tensor: np.ndarray, labels: list[str]) -> tuple[float, dict[str, float]]:
+    """Fraction of a rank-2 tensor lying in the allowed irrep subspace.
+
+    Projects ``tensor`` (transforming as R T R^T under group operations)
+    onto the subspace selected by ``labels`` — one mode label, or a pair
+    whose product space is meant (e.g. ["Ex", "Ey"] -> E x E). Returns
+    (purity, residual decomposition): purity is ||P T||_F / ||T||_F with
+    P built from the allowed characters; the residual is decomposed onto
+    every other irrep of the group, so a warning can say *where* the
+    leakage went (a mislabeled mode shows up as one dominant foreign
+    irrep; numerical noise spreads thinly).
+    """
+    table = _table_for(spectrum)
+    ops = defect_frame_operations(spectrum)
+    allowed = _irrep_characters(spectrum, labels)
+    t_norm = np.linalg.norm(tensor)
+    if t_norm == 0:
+        return 1.0, {}
+    projected = sum(
+        chi * R @ tensor @ R.T for chi, R in zip(allowed, ops)
+    ) / len(ops)
+    purity = np.linalg.norm(projected) / t_norm
+    residual = tensor - projected
+    decomposition: dict[str, float] = {}
+    allowed_names = _product_components(spectrum, labels)
+    for name in table:
+        if name in allowed_names:
+            continue
+        chi = _irrep_characters(spectrum, [name])
+        proj = sum(c * R @ residual @ R.T for c, R in zip(chi, ops)) / len(ops)
+        frac = np.linalg.norm(proj) / t_norm
+        if frac > 1e-12:
+            decomposition[name] = float(frac)
+    return float(purity), decomposition
+
+
+def _product_components(spectrum, labels: list[str]) -> list[str]:
+    """Irreps appearing in the product of ``labels`` (via orthogonality).
+
+    E x E -> A1 + A2 + E for C3v, computed from the character tables
+    rather than hardcoded, so any group/product combination works.
+    """
+    table = _table_for(spectrum)
+    prod = _irrep_characters(spectrum, labels)
+    components = []
+    for name in table:
+        chi = _irrep_characters(spectrum, [name])
+        overlap = sum(p * c for p, c in zip(prod, chi)) / len(prod)
+        if abs(overlap) > 1e-9:
+            components.append(name)
+    return components
 
 
 def _parent_label(label: str) -> str:
