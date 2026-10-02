@@ -55,7 +55,7 @@ def _resolve_mode(mode_index: int, original_indices: np.ndarray | None, n_modes:
         if not (1 <= mode_index <= n_modes):
             raise ValueError(f"Mode {mode_index} out of range [1, {n_modes}]")
         return mode_index - 1
-    hits = np.flatnonzero(original_indices == mode_index)
+    hits = np.flatnonzero(original_indices == mode_index - 1)
     if len(hits) == 0:
         raise ValueError(
             f"Mode {mode_index} not present in trimmed phonon data "

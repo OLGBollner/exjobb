@@ -16,6 +16,7 @@ Enforced here so the convention cannot silently regress if
 """
 
 from argparse import ArgumentParser as Parser
+from pathlib import Path
 
 from beyblade.parsers import parse_phonon_npz, save_phonon_npz
 from beyblade.symmetry import (
@@ -27,19 +28,26 @@ from beyblade.symmetry import (
 
 
 if __name__ == "__main__":
-  parser = Parser("Determine symmetry of phonon modes.")
-  parser.add_argument("phonon_path", metavar="phonon_path", help="Path to phonon data.")
-  parser.add_argument("out_path", metavar="out_path", nargs="?",
-                      help="Where to save the filtered spectrum (default: overwrite phonon_path).")
+    parser = Parser("Determine symmetry of phonon modes.")
+    parser.add_argument("phonon_path", metavar="phonon_path", help="Path to phonon data.")
+    parser.add_argument(
+        "out_path",
+        metavar="out_path",
+        nargs="?",
+        help="Where to save the filtered spectrum (default: <phonon_path stem>_sym.npz).",
+    )
 
-  args = parser.parse_args()
+    args = parser.parse_args()
 
-  spectrum = parse_phonon_npz(args.phonon_path)
-  classify_and_pair(spectrum)
-  symmetrized = symmetrize_degenerate_groups(spectrum)
-  filtered = filter_degenerate_partners(symmetrized)
-  save_phonon_npz(filtered, args.out_path or args.phonon_path)
-  check = sym_check_summary(getattr(spectrum, "sym_check", None))
-  note = "" if not check else f"; sym_check: {check}"
-  print(f"saved filtered spectrum ({filtered.n_modes} of {spectrum.n_modes} modes) "
-        f"to {args.out_path or args.phonon_path}{note}")
+    spectrum = parse_phonon_npz(args.phonon_path)
+    classify_and_pair(spectrum)
+    symmetrized = symmetrize_degenerate_groups(spectrum)
+    filtered = filter_degenerate_partners(symmetrized)
+    out_path = args.out_path
+    if out_path is None:
+        stem = Path(args.phonon_path).stem
+        out_path = str(Path(args.phonon_path).with_name(f"{stem}_sym.npz"))
+    save_phonon_npz(filtered, out_path)
+    check = sym_check_summary(getattr(spectrum, "sym_check", None))
+    note = "" if not check else f"; sym_check: {check}"
+    print(f"saved filtered spectrum ({filtered.n_modes} of {spectrum.n_modes} modes) to {out_path}{note}")
