@@ -518,16 +518,63 @@ def tensor_irrep_fractions(
     table = CHARACTER_TABLES.get(pg_symbol)
     if table is None:
         raise ValueError(f"No character table for point group '{pg_symbol}'.")
+    out = {}
     ops = _canonical_operations(pg_symbol)
     norm = np.linalg.norm(tensor)
     if norm == 0:
-        return {name: 0.0 for name in table}
-    out = {}
+        return {name: 0.0 for name in table if name != "class_sizes"}
     for name, chi in table.items():
+        if name == "class_sizes":
+            continue
         if isinstance(chi, dict):  # degenerate irrep: use class characters
             chi = chi["class_chars"]
-        projected = sum(c * R @ tensor @ R.T for c, R in zip(chi, ops)) / len(ops)
+        sizes = table["class_sizes"]
+        if len(chi) == len(ops) and all(s == 1 for s in sizes):
+            chars = chi
+        elif len(chi) == len(sizes) and sum(sizes) == len(ops):
+            chars = [c for c, s in zip(chi, sizes) for _ in range(s)]
+        else:
+            raise ValueError(f"Characters for {name} do not match operations of {pg_symbol}.")
+        projected = sum(c * R @ tensor @ R.T for c, R in zip(chars, ops)) / len(ops)
         out[name] = float(np.linalg.norm(projected)) / norm
+    return out
+
+
+def direct_product(pg_symbol: str, sym_a: str, sym_b: str) -> list[str]:
+    """Irreps contained in the direct product of two irrep labels.
+
+    General: uses character orthogonality,
+    n_Gamma = (1/|G|) sum_g chi_A(g) chi_B(g) chi_Gamma(g)*, so it works
+    for any point group in CHARACTER_TABLES, including groups with
+    complex/antisymmetric irreps (e.g. D3h E' x E''). Each irrep appears
+    once per unit multiplicity.
+    """
+    table = CHARACTER_TABLES.get(pg_symbol)
+    if table is None:
+        raise ValueError(f"No character table for point group '{pg_symbol}'.")
+
+    def class_chars(name: str) -> np.ndarray:
+        if name.upper() in ("EX", "EY"):
+            name = "E"  # component labels resolve to the parent irrep
+        entry = table[name]
+        if isinstance(entry, dict):  # degenerate irrep: true class characters
+            return np.asarray(entry["class_chars"], dtype=float)
+        return np.asarray(entry, dtype=float)
+
+    sizes = np.asarray(table["class_sizes"], dtype=float)
+    a, b = class_chars(sym_a), class_chars(sym_b)
+    if len(a) != len(b) or len(sizes) != len(a):
+        raise ValueError(f"{sym_a} and {sym_b} are not irreps of the same group '{pg_symbol}'.")
+    order = float(sizes.sum())
+    out: list[str] = []
+    for name in table:
+        if name == "class_sizes":
+            continue
+        n = float(np.dot(sizes * a * b, class_chars(name).conjugate())) / order
+        reps = int(round(n))
+        if abs(n - reps) > 1e-9 or reps < 0:
+            raise ValueError(f"Invalid irreps {sym_a}, {sym_b} for group '{pg_symbol}'.")
+        out.extend([name] * reps)
     return out
 
 
