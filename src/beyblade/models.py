@@ -755,6 +755,135 @@ def _decode_2d_array(value: Any, data: Any) -> Optional[np.ndarray]:
     return arr if arr.ndim >= 2 and arr.size > 0 else None
 
 
+def _decode_packed_2nd(value: Any, data: Any) -> Optional[np.ndarray]:
+    """Rebuild the symmetric dense (n, n, 3, 3) tensor from the packed on-disk form.
+
+    Packed form: arrays "pair_indices" (K, 2, int64) and "pair_values"
+    (K, 3, 3) holding only canonical i <= j entries over computed 2d
+    perturbation pairs. Falls back to legacy dense storage unchanged.
+    """
+    if isinstance(value, np.ndarray):
+        value = value[()]
+    if isinstance(value, np.ndarray) and value.dtype.names and {"i", "j", "tensor"} <= set(value.dtype.names):
+        if value.size == 0:
+            return None
+        return SymmetricArray.from_packed(value)
+    return _decode_2d_array(value, data)
+
+
+def _encode_packed_2nd(value: Any) -> Any:
+    """Pack the symmetric second-order tensor to canonical i <= j entries."""
+    if value is None:
+        return None
+    if isinstance(value, SymmetricArray):
+        return value.to_packed()
+    arr = np.asarray(value)
+    if arr.ndim != 4:
+        return value  # already packed or malformed; let validation catch it
+    n = arr.shape[0]
+    rows = [(i, j, arr[i, j]) for i in range(n) for j in range(i, n) if arr[i, j].any()]
+    if not rows:
+        return None
+    packed = np.zeros(len(rows), dtype=[("i", np.int64), ("j", np.int64), ("tensor", float, (3, 3))])
+    for k, (i, j, t) in enumerate(rows):
+        packed[k] = (i, j, t)
+    return packed
+
+
+class SymmetricArray:
+    """Memory-frugal holder for a symmetric (n, n, 3, 3) tensor array.
+
+    Only canonical i <= j entries are stored; reads of [j, i] redirect to
+    [i, j]. Designed for the second-order ZFS derivative tensor over phonon
+    mode pairs, where n can reach ~1150 (a ~95 MB dense array).
+
+    Consumers that need a real ndarray call np.asarray(arr) (or slice through
+    __array__), which materializes the dense form on demand. Arithmetic with
+    a scalar returns another SymmetricArray, so symmetry survives unit
+    conversion; anything fancier should convert to dense first.
+    """
+
+    def __init__(self, n_modes: int):
+        self._n = int(n_modes)
+        self._rows: dict[tuple[int, int], np.ndarray] = {}
+
+    # -- construction / packing -------------------------------------------
+
+    @classmethod
+    def from_packed(cls, packed: np.ndarray) -> "SymmetricArray":
+        """Build from a structured (K,) array with fields i, j, tensor."""
+        i_max = int(packed["i"].max()) if packed.size else 0
+        j_max = int(packed["j"].max()) if packed.size else 0
+        arr = cls(max(i_max, j_max) + 1)
+        for row in packed:
+            arr[int(row["i"]), int(row["j"])] = np.array(row["tensor"])
+        return arr
+
+    def to_packed(self) -> np.ndarray:
+        """Structured (K,) array over canonical i <= j entries, disk format."""
+        packed = np.zeros(len(self._rows),
+                          dtype=[("i", np.int64), ("j", np.int64), ("tensor", float, (3, 3))])
+        for k, ((i, j), t) in enumerate(sorted(self._rows.items())):
+            packed[k] = (i, j, t)
+        return packed
+
+    # -- access ------------------------------------------------------------
+
+    def _canon(self, i: int, j: int) -> tuple[int, int]:
+        return (i, j) if i <= j else (j, i)
+
+    def __setitem__(self, key, value):
+        i, j = key
+        self._rows[self._canon(i, j)] = np.asarray(value, dtype=float)
+
+    def __getitem__(self, key):
+        i, j = key
+        entry = self._rows.get(self._canon(i, j))
+        if entry is None:
+            return np.zeros((3, 3))
+        return entry.copy()
+
+    # -- numpy interop -----------------------------------------------------
+
+    @property
+    def shape(self):
+        return (self._n, self._n, 3, 3)
+
+    @property
+    def ndim(self):
+        return 4
+
+    @property
+    def n_packed(self) -> int:
+        return len(self._rows)
+
+    def any_entry(self) -> bool:
+        return bool(self._rows)
+
+    @property
+    def nbytes_stored(self) -> int:
+        return sum(t.nbytes for t in self._rows.values())
+
+    def __array__(self, dtype=None):
+        dense = np.zeros(self.shape, dtype=dtype or float)
+        for (i, j), t in self._rows.items():
+            dense[i, j] = t
+            dense[j, i] = t
+        return dense
+
+    def __mul__(self, factor):
+        out = SymmetricArray(self._n)
+        out._rows = {k: v * factor for k, v in self._rows.items()}
+        return out
+
+    __rmul__ = __mul__
+
+    def copy(self) -> "SymmetricArray":
+        out = SymmetricArray(self._n)
+        out._rows = {k: v.copy() for k, v in self._rows.items()}
+        return out
+
+
 def _decode_calc_method(value: str, data: Any) -> Optional[str]:
     """Legacy files may store the string "None" or "" for an absent method."""
     return None if value in ("None", "") else value
@@ -1267,7 +1396,7 @@ class SpinPhononCouplingData:
         FieldSpec("V2_0_0", "array", optional=True, decode=_decode_2d_array),
         FieldSpec("V2_p_m", "array", optional=True, decode=_decode_2d_array),
         FieldSpec("V2_0_pm", "array", optional=True, decode=_decode_2d_array),
-        FieldSpec("zfs_2nd_derivs", "array", optional=True, decode=_decode_2d_array),
+        FieldSpec("zfs_2nd_derivs", "dict", optional=True, encode=_encode_packed_2nd, decode=_decode_packed_2nd),
     ]
 
     def save(self, out_path: Union[str, Path]) -> str:
@@ -1301,7 +1430,8 @@ class SpinPhononCouplingData:
                 kwargs["V2_0_0"] = kwargs.get("V_0_0")
                 kwargs["V2_p_m"] = kwargs.get("V_p_m")
                 kwargs["V2_0_pm"] = kwargs.get("V_0_pm")
-                kwargs["zfs_2nd_derivs"] = kwargs.get("zfs_2nd_derivs") or kwargs.get("zfs_derivs")
+                if kwargs.get("zfs_2nd_derivs") is None:
+                    kwargs["zfs_2nd_derivs"] = kwargs.get("zfs_derivs")
 
             # Legacy scalar D in Joules -> diagonal ZFSTensor
             if kwargs.get("ground_state_zfs") is None and "zfs" in d:
