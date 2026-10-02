@@ -58,25 +58,42 @@ def apply_combined_perturbation(structure: Structure,
                                mode_i: int,
                                mode_j: int,
                                masses: np.ndarray,
-                               amplitude: float) -> Structure:
+                               amplitude: float,
+                               original_indices: np.ndarray | None = None) -> Structure:
     """
     Apply a combined phonon perturbation (Mode I + Mode J) to a structure.
 
     Args:
         structure: pymatgen Structure object
-        eigenvectors: phonon eigenvectors array (n_modes, n_atoms, 3)
-        mode_i: First phonon mode index (1-based)
-        mode_j: Second phonon mode index (1-based)
+        eigenvectors: phonon eigenvectors array (n_modes, n_atoms, 3), trimmed
+        mode_i: First phonon mode index (1-based, in the original DFT numbering)
+        mode_j: Second phonon mode index (1-based, in the original DFT numbering)
         amplitude: Perturbation amplitude in Angstroms
+        original_indices: original-mode index of each row of `eigenvectors` (the
+            "idx" array of the sym-classified file). When given, `mode_i`/`mode_j`
+            are resolved to array rows via this mapping instead of assumed contiguous.
     """
     n_modes, n_atoms, _ = eigenvectors.shape
 
-    # Convert to 0-based indexing
-    idx_i = mode_i - 1
-    idx_j = mode_j - 1
+    # Resolve 1-based original-mode labels to rows of the (possibly trimmed)
+    # eigenvector array. Without the mapping the labels are 1-based rows.
+    if original_indices is not None:
+        def _row(label: int) -> int:
+            hits = np.flatnonzero(original_indices == label - 1)
+            if hits.size != 1:
+                raise ValueError(
+                    f"Mode {label} not found (or not unique) in original indices "
+                    f"[1..{int(original_indices.max()) + 1}]"
+                )
+            return int(hits[0])
+    else:
+        def _row(label: int) -> int:
+            if not (1 <= label <= n_modes):
+                raise ValueError(f"Mode indices must be between 1 and {n_modes}")
+            return label - 1
 
-    if not (0 <= idx_i < n_modes) or not (0 <= idx_j < n_modes):
-        raise ValueError(f"Mode indices must be between 1 and {n_modes}")
+    idx_i = _row(mode_i)
+    idx_j = _row(mode_j)
 
     if len(structure) != n_atoms:
         raise ValueError(f"Structure atoms ({len(structure)}) != Eigenvector atoms ({n_atoms})")
@@ -144,7 +161,8 @@ Example:
             args.mode_i, 
             args.mode_j, 
             masses,
-            args.amplitude
+            args.amplitude,
+            original_indices=phonon_data.original_indices,
         )
 
         if args.output is None:
@@ -163,7 +181,7 @@ Example:
         print("\nSuccess!")
 
     except Exception as e:
-        print(f"Error: {e!s}", file=sys.stderr)
+        print(f"Error: {e!s}")   # stdout: the slurm wrapper greps $MSG
         sys.exit(1)
 
 

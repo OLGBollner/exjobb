@@ -55,7 +55,8 @@ def apply_perturbation(structure: Structure,
                        eigs: np.ndarray,
                        masses: np.ndarray,
                        mode_index: int,
-                       amplitude: float) -> Structure:
+                       amplitude: float,
+                       original_indices: np.ndarray | None = None) -> Structure:
     """
     Applies a mass-weighted phonon perturbation to a structure.
 
@@ -69,10 +70,21 @@ def apply_perturbation(structure: Structure,
     Q=0.1 gives per-atom displacements on the order of 0.1/sqrt(12) ~ 0.029 Angstrom.
     """
     n_modes, n_atoms, _ = eigs.shape
-    idx = mode_index - 1
 
-    if not (0 <= idx < n_modes):
-        raise ValueError(f"Mode {mode_index} out of range [1, {n_modes}]")
+    # Resolve a 1-based original-mode label to a row of the (possibly trimmed)
+    # eigenvector array via the "idx" mapping when present.
+    if original_indices is not None:
+        hits = np.flatnonzero(original_indices == mode_index - 1)
+        if hits.size != 1:
+            raise ValueError(
+                f"Mode {mode_index} not found (or not unique) in original indices "
+                f"[1..{int(original_indices.max()) + 1}]"
+            )
+        idx = int(hits[0])
+    else:
+        idx = mode_index - 1
+        if not (0 <= idx < n_modes):
+            raise ValueError(f"Mode {mode_index} out of range [1, {n_modes}]")
     if len(structure) != n_atoms:
         raise ValueError(f"Atom count mismatch: structure={len(structure)}, eigs={n_atoms}")
     if len(masses) != n_atoms:
@@ -106,7 +118,8 @@ def main():
     masses = data['masses']
 
     for idx in args.mode_indices:
-        perturbed = apply_perturbation(structure, eigs, masses, idx, args.amplitude)
+        perturbed = apply_perturbation(structure, eigs, masses, idx, args.amplitude,
+                                       original_indices=data.get('idx'))
         out = args.output if args.output else f"POSCAR_pert_{args.amplitude}_mode_{idx}"
         poscar = Poscar(perturbed)
         poscar.comment = f"Mode {idx}, Q={args.amplitude} Ang*sqrt(amu)"
