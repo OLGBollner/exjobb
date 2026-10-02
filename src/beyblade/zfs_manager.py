@@ -6,7 +6,7 @@ from typing import Any, ClassVar, Optional, Union
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.symmetry import twin_of, _build_groups_from_labels
+from beyblade.symmetry import tensor_irrep_fractions, twin_of, _build_groups_from_labels
 from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, SymmetricArray
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
@@ -744,54 +744,18 @@ class ZFSManager:
         print(f"Saved ZFS data to: {save_name}")
         return save_name
 
-    # C3v ops in the defect frame (z = defect axis). Any mirror orientation
-    # works: the isotypic projectors below are independent of the E basis choice.
-    _C3V_OPS: ClassVar[list[np.ndarray]] = None  # type: ignore[assignment]
-
-    @classmethod
-    def _c3v_ops(cls) -> list[np.ndarray]:
-        if cls._C3V_OPS is None:
-            c, s = np.cos(2 * np.pi / 3), np.sin(2 * np.pi / 3)
-            C3 = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
-            mx = np.diag([1.0, -1.0, 1.0])
-            cls._C3V_OPS = [np.eye(3), C3, C3 @ C3, mx, C3 @ mx, C3 @ C3 @ mx]
-        return cls._C3V_OPS
-
-    _C3V_CHARS: ClassVar[dict[str, list[float]]] = {
-        "A1": [1, 1, 1, 1, 1, 1],
-        "A2": [1, 1, 1, -1, -1, -1],
-        "E": [2, -1, -1, 0, 0, 0],
-    }
-
-    # Max absolute forbidden-irrep content (in the tensor's own units) before a
-    # symmetry warning fires. Measured relative to the full tensor norm so that
-    # small legitimate admixtures (finite-step q^2 leakage in a forward
-    # difference, A2 responses that are pure SCF noise) pass and O(1) mislabels
-    # warn.
+    # Max forbidden-irrep content (fraction of the tensor norm) before a
+    # symmetry warning fires. Relative to the full tensor norm so that small
+    # legitimate admixtures (finite-step q^2 leakage in a forward difference,
+    # A2 responses that are pure SCF noise) pass and O(1) mislabels warn.
     _C3V_REL_TOL: ClassVar[float] = 0.1
-
-    @classmethod
-    def _project_irrep_fractions(cls, tensor: np.ndarray) -> dict[str, float]:
-        """Norm fraction of `tensor` in each C3v irrep, via the character projector
-        P_Gamma = (d_Gamma/|G|) sum_g chi_Gamma(g) R(g) T R(g)^T. P is a genuine
-        projector (idempotent) for each single irrep, so fractions are
-        interpretable and sum to ~1 over {A1, A2, E} for any 3x3 tensor."""
-        ops = cls._c3v_ops()
-        norm = np.linalg.norm(tensor)
-        if norm == 0:
-            return {"A1": 0.0, "A2": 0.0, "E": 0.0}
-        out = {}
-        for irrep, chi in cls._C3V_CHARS.items():
-            projected = sum(c * R @ tensor @ R.T for c, R in zip(chi, ops)) / len(ops)
-            out[irrep] = float(np.linalg.norm(projected)) / norm
-        return out
 
     @classmethod
     def _check_symmetry(cls, d_tensor: np.ndarray, symmetry: Union[str, tuple[str, str]], idx: Any) -> None:
         """Verify the derivative tensor carries only the irrep(s) its mode label
-        allows. Uses the C3v character projectors instead of hardcoded A1
-        structure checks, so Ex/Ey/A2 and all second-order products are
-        validated too."""
+        allows. Delegates to symmetry.tensor_irrep_fractions (character
+        projectors), so Ex/Ey/A2 and all second-order products are validated
+        too."""
         sym_prod = (
             MathUtils.calc_symmetry(*symmetry) if isinstance(symmetry, tuple) else [symmetry]
         )
@@ -801,18 +765,14 @@ class ZFSManager:
         scale = np.linalg.norm(tensor)
         if scale == 0:
             return
-        fracs = cls._project_irrep_fractions(tensor)
-        # Forbidden content relative to the FULL tensor scale, so that a
-        # mislabeled mode (O(1) contamination) warns while legitimate small
-        # admixtures — finite-step q^2 leakage into a forward difference,
-        # A2 responses that are pure SCF noise — pass silently.
+        fracs = tensor_irrep_fractions(tensor)
         forbidden = {ir: f for ir, f in fracs.items() if ir not in allowed}
-        forbidden_abs = np.linalg.norm([scale * f for f in forbidden.values()])
-        tol = cls._C3V_REL_TOL * max(scale, 1.0)
-        if forbidden_abs > tol:
-            details = ", ".join(f"{ir}={scale * f:.2e}" for ir, f in sorted(forbidden.items()))
+        forbidden_frac = np.linalg.norm([f for f in forbidden.values()])
+        tol = cls._C3V_REL_TOL
+        if forbidden_frac > tol:
+            details = ", ".join(f"{ir}={f:.2f}" for ir, f in sorted(forbidden.items()))
             print(f"\nWarning: Symmetry mismatch at index {idx} with symmetry {sym_prod}")
-            print(f"  Forbidden content: {details} (total {forbidden_abs:.2e}, scale {scale:.2e}, tol {tol:.2e})")
+            print(f"  Forbidden content: {details} (total {forbidden_frac:.2f}, tol {tol})")
 
     def _debug_derivs(self, dD, q, symmetry, idx, V_0_0, V_0_pm, V_p_m):
         max_val = np.max(np.abs(dD))
