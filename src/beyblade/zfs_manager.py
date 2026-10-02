@@ -6,7 +6,7 @@ from typing import Any, ClassVar, Optional, Union
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.symmetry import tensor_irrep_fractions, twin_of, _build_groups_from_labels
+from beyblade.symmetry import direct_product, tensor_irrep_fractions, twin_of, _build_groups_from_labels
 from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, SymmetricArray
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
@@ -483,7 +483,7 @@ class ZFSManager:
             dD_qi = zfs_1d_derivs[i]
             dD_qj = zfs_1d_derivs[j]
             sym_i, sym_j = item["symmetry"]
-            sym = MathUtils.calc_symmetry(sym_i, sym_j)
+            sym = direct_product("3m", sym_i, sym_j)
 
             D_qi_qj = item["tensor"]
             d2D_dqidqj = (D_qi_qj - self.zfs_relaxed) / (q_i * q_j) - dD_qi / q_j - dD_qj / q_i
@@ -757,7 +757,7 @@ class ZFSManager:
         projectors), so Ex/Ey/A2 and all second-order products are validated
         too."""
         sym_prod = (
-            MathUtils.calc_symmetry(*symmetry) if isinstance(symmetry, tuple) else [symmetry]
+            direct_product("3m", *symmetry) if isinstance(symmetry, tuple) else [symmetry]
         )
         # 'Ex'/'Ey' label single E components; the isotypic content is 'E'.
         allowed = {"E" if s.upper() in ("EX", "EY") else s.upper() for s in sym_prod}
