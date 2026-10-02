@@ -782,7 +782,7 @@ class ZFSManager:
     def _print_tensor(tensor: np.ndarray) -> None:
         """Print a 3x3 tensor with aligned columns, values converted J -> MHz."""
         col_width = 12
-        J_TO_MHZ = 1.5091902e21  # 1/(h) * 1e-6
+        J_TO_MHZ = 1.5091902e27  # (1/h) * 1e-6
         for row in np.asarray(tensor, dtype=float) * J_TO_MHZ:
             print("   " + "".join(f"{v:<{col_width}.6f} " for v in row))
 
