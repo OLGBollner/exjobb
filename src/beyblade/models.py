@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Union
 import numpy as np
 from scipy import constants as Cn
 
 from beyblade.constants import CONSTANTS
+from beyblade.serialization import FieldSpec, SchemaError, load_npz, save_npz, _fields_from_npz, warn_unknown_keys
 
 
 class EnergyUnit(str, Enum):
@@ -217,6 +218,7 @@ class PhononSpectrum:
     pair_ids: Optional[np.ndarray] = None   # Shape (N_modes,): degenerate partner index, n_modes if unpaired (out-of-bounds sentinel)
     deg_groups: Optional[list] = None       # Lists of mode indices forming complete irrep component sets
     original_indices: Optional[np.ndarray] = None  # Shape (N_modes,): mode index in the full DFT run
+    n_full: Optional[int] = None  # size of the full spectrum original_indices point into
     frequency_unit: str = "meV"
 
     def __post_init__(self):
@@ -235,6 +237,8 @@ class PhononSpectrum:
             self.check_e_pair_completeness()
         if self.original_indices is None:
             self.original_indices = np.arange(self.n_modes, dtype=int)
+        if self.n_full is None:
+            self.n_full = self.n_modes
 
     @property
     def n_modes(self) -> int:
@@ -660,6 +664,12 @@ class PhononSpectrum:
                 skip_indices.add(i)
 
         mask = np.array([i not in skip_indices for i in range(n)])
+        # 0-based indices into the ORIGINAL (full) spectrum: when this
+        # spectrum is itself already reduced, map through its own indices
+        original = self.original_indices
+        kept = np.where(mask)[0]
+        if original is not None:
+            kept = np.asarray(original, dtype=int)[kept]
         reduced = PhononSpectrum(
             frequencies_mev=freqs[mask],
             eigenvectors=self.eigenvectors[mask],
@@ -671,74 +681,58 @@ class PhononSpectrum:
             iprs=self.iprs[mask] if self.iprs is not None else None,
             # 0-based indices into the ORIGINAL (full) spectrum, so downstream
             # code can map each reduced mode back to its source position.
-            original_indices=np.where(mask)[0],
+            original_indices=kept,
+            n_full=(
+                (self.n_full if self.n_full is not None else len(original))
+                if original is not None else n
+            ),
+        )
+        n_full = (
+            self.n_full if self.n_full is not None
+            else (len(original) if original is not None else n)
         )
         check_original_indices(
-            reduced.original_indices, reduced.n_modes, n_full=n
+            reduced.original_indices, reduced.n_modes, n_full=n_full
         )
         return reduced
 
+    SCHEMA = [
+        FieldSpec("frequencies_mev", "array", npz_key="frequencies", shape=("n_modes",), save_aliases=("frequencies_mev", "freqs")),
+        FieldSpec("frequency_unit", "str", optional=True),
+        FieldSpec("eigenvectors", "array", shape=("n_modes", "n_atoms", 3), save_aliases=("eigs",)),
+        FieldSpec("atom_frac_coords", "array", shape=("n_atoms", 3)),
+        FieldSpec("atom_symbols", "list_str"),
+        FieldSpec("atomic_masses", "array", shape=("n_atoms",), save_aliases=("masses",)),
+        FieldSpec("lattice", "array", shape=(3, 3)),
+        FieldSpec("symmetries", "list_str", optional=True),
+        FieldSpec("iprs", "array", shape=("n_modes",), optional=True),
+        FieldSpec("e_pair_complete", "list_bool", optional=True),
+        FieldSpec("pair_ids", "array", shape=("n_modes",), optional=True),
+        FieldSpec("deg_groups", "array", optional=True),
+        FieldSpec("original_indices", "array", shape=("n_modes",), optional=True, save_aliases=("idx",)),
+        FieldSpec("n_full", "int", optional=True),
+    ]
+
     def save(self, out_path: Union[str, Path]) -> str:
         """Saves spectrum to .npz file with explicit frequency unit tag."""
-        path = str(out_path)
-        if not path.endswith(".npz"):
-            path += ".npz"
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            path,
-            frequencies=self.frequencies_mev,
-            frequencies_mev=self.frequencies_mev,
-            frequency_unit="meV",
-            eigenvectors=self.eigenvectors,
-            atom_frac_coords=self.atom_frac_coords,
-            atom_symbols=self.atom_symbols,
-            atomic_masses=self.atomic_masses,
-            lattice=self.lattice,
-            symmetries=self.symmetries,
-            iprs=self.iprs,
-            e_pair_complete=self.e_pair_complete,
-            pair_ids=self.pair_ids,
-            original_indices=self.original_indices,
-            # Legacy aliases consumed by the supercomputer VASP scripts:
-            #   scripts/cluster/get_n_modes.py reads 'idx' (0-based, printed +1 as
-            #   VASP folder numbers) and 'freqs';
-            #   scripts/cluster/create_combined_phonon_struct.py reads 'eigs' and
-            #   'masses'. Keep these keys in sync with the modern ones.
-            eigs=self.eigenvectors,
-            masses=self.atomic_masses,
-            idx=self.original_indices if self.original_indices is not None else np.arange(self.n_modes),
-            freqs=self.frequencies_mev,
-        )
-        return path
+        return save_npz(self, out_path, self.SCHEMA)
 
     @classmethod
     def load(cls, in_path: Union[str, Path]) -> PhononSpectrum:
         """Loads spectrum from .npz file, converting frequencies using explicit unit tags."""
         data = np.load(str(in_path), allow_pickle=True)
-        unit = str(data["frequency_unit"]) if "frequency_unit" in data else "meV"
-        freqs_raw = data["frequencies"] if "frequencies" in data else data["frequencies_mev"]
-        freqs_mev = convert_energy(freqs_raw, unit, "meV")
 
-        syms = list(data["symmetries"]) if "symmetries" in data and data["symmetries"] is not None else None
-        iprs = data["iprs"] if "iprs" in data else None
-        e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"].ndim > 0 else None
-        pair_ids = np.asarray(data["pair_ids"], dtype=int) if "pair_ids" in data and data["pair_ids"].ndim > 0 else None
-        original_indices = np.asarray(data["original_indices"], dtype=int) if "original_indices" in data and data["original_indices"] is not None else None
+        def _pre(d: Any, kw: Dict[str, Any]) -> Dict[str, Any]:
+            unit = str(d["frequency_unit"]) if "frequency_unit" in d else "meV"
+            freqs_raw = d["frequencies"] if "frequencies" in d else d["frequencies_mev"]
+            kw["frequencies_mev"] = convert_energy(freqs_raw, unit, "meV")
+            kw["frequency_unit"] = "meV"
+            if kw.get("symmetries") is not None:
+                kw["symmetries"] = list(kw["symmetries"])
+            return kw
 
-        return cls(
-            frequencies_mev=freqs_mev,
-            eigenvectors=data["eigenvectors"],
-            atom_frac_coords=data["atom_frac_coords"],
-            atom_symbols=list(data["atom_symbols"]),
-            atomic_masses=data["atomic_masses"],
-            lattice=data["lattice"],
-            symmetries=syms,
-            iprs=iprs,
-            frequency_unit="meV",
-            e_pair_complete=e_pair_complete,
-            pair_ids=pair_ids,
-            original_indices=original_indices,
-        )
+        warn_unknown_keys(data.files, cls.SCHEMA)
+        return load_npz(cls, in_path, cls.SCHEMA, pre_decode=_pre)
 
 
 @dataclass
@@ -751,9 +745,77 @@ class PerturbationEntry:
     energy: Optional[float] = None
 
 
+def _decode_2d_array(value: Any, data: Any) -> Optional[np.ndarray]:
+    """2-d coupling arrays: empty or malformed arrays come back as None."""
+    if value is None:
+        return None
+    arr = np.asarray(value)
+    if arr.ndim == 0:
+        return None
+    return arr if arr.ndim >= 2 and arr.size > 0 else None
+
+
+def _decode_calc_method(value: str, data: Any) -> Optional[str]:
+    """Legacy files may store the string "None" or "" for an absent method."""
+    return None if value in ("None", "") else value
+
+
+def _encode_first_order(d: dict) -> dict:
+    """PerturbationEntry -> plain dict; amplitude Å*sqrt(amu) -> SI when unconverted."""
+    if not d:
+        return None
+    saved = {}
+    for idx, entry in d.items():
+        if isinstance(entry, PerturbationEntry):
+            amp = entry.amplitude
+            if isinstance(amp, (int, float)) and amp > 1e-4:
+                amp = amp * CONSTANTS["ang_amu2SI"]
+            saved[idx] = {"tensor": entry.zfs_tensor.matrix, "unit": entry.zfs_tensor.unit, "pert": amp}
+        elif isinstance(entry, dict):
+            saved[idx] = entry
+        else:
+            raise SchemaError(f"first_order[{idx}]: unsupported entry type {type(entry).__name__}")
+    return saved
+
+
+def _encode_second_order(d: dict) -> dict:
+    """2D entries: tuple keys -> "i_j" strings; amplitude conversion as in 1D."""
+    if not d:
+        return None
+    saved = {}
+    for idx, entry in d.items():
+        key = f"{idx[0]}_{idx[1]}" if isinstance(idx, tuple) else str(idx)
+        if isinstance(entry, PerturbationEntry):
+            amp = entry.amplitude
+            if isinstance(amp, (tuple, list)):
+                amp = tuple(a * CONSTANTS["ang_amu2SI"] if (isinstance(a, (int, float)) and a > 1e-4) else a for a in amp)
+            elif isinstance(amp, (int, float)) and amp > 1e-4:
+                amp = (amp * CONSTANTS["ang_amu2SI"], amp * CONSTANTS["ang_amu2SI"])
+            saved[key] = {"tensor": entry.zfs_tensor.matrix, "unit": entry.zfs_tensor.unit, "pert": amp}
+        elif isinstance(entry, dict):
+            saved[key] = entry
+        else:
+            raise SchemaError(f"second_order[{key}]: unsupported entry type {type(entry).__name__}")
+    return saved
+
+
+def _decode_order_dict(value: Any, data: Any) -> dict:
+    """Parse "i_j" string keys back into integer tuples."""
+    if isinstance(value, np.ndarray):
+        value = value[()]
+    if not isinstance(value, dict):
+        raise SchemaError(f"expected dict of perturbation entries, got {type(value).__name__}")
+    out = {}
+    for k, v in value.items():
+        parsed = tuple(int(x) for x in k.split("_")) if isinstance(k, str) and "_" in k else k
+        out[parsed] = v
+    return out
+
+
 @dataclass
 class RawZFSData:
     """Container for raw unperturbed and perturbed ZFS simulation data."""
+
     defect: str
     cell_size: int
     pert_scale: float
@@ -989,6 +1051,18 @@ class RawZFSData:
     def _default_name(self):
         return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.order}d.npz"
 
+    SCHEMA = [
+        FieldSpec("defect", "str"),
+        FieldSpec("cell_size", "int"),
+        FieldSpec("pert_scale", "float"),
+        FieldSpec("calc_method", "str", optional=True, decode=_decode_calc_method),
+        FieldSpec("order", "int", optional=True),
+        FieldSpec("ground_state_zfs", "zfstensor", optional=True, legacy_keys=("zfs_relaxed",)),
+        FieldSpec("eigen_rotation", "array", optional=True),
+        FieldSpec("first_order", "dict", optional=True, legacy_keys=("zfs_tensors",), encode=_encode_first_order, decode=_decode_order_dict),
+        FieldSpec("second_order", "dict", optional=True, legacy_keys=("zfs_tensors_2d",), encode=_encode_second_order, decode=_decode_order_dict),
+    ]
+
     def save(
         self,
         out_path: Optional[Union[str, Path]] = None,
@@ -998,48 +1072,7 @@ class RawZFSData:
         if spectrum is not None:
             self.enrich_with_spectrum(spectrum)
 
-        path = self._default_name() if out_path is None else str(out_path)
-        if not path.endswith(".npz"):
-            path += ".npz"
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-
-        gs_mat = self.ground_state_zfs.matrix if self.ground_state_zfs else None
-        gs_unit = self.ground_state_zfs.unit if self.ground_state_zfs else "MHz"
-
-        # Format dictionaries into clean serializable entries
-        saved_1d = {}
-        for idx, entry in self.first_order.items():
-            if isinstance(entry, PerturbationEntry):
-                amp = entry.amplitude
-                # Convert amplitude from Å*sqrt(amu) to SI units if it has not yet been converted/enriched
-                if isinstance(amp, (int, float)) and amp > 1e-4:
-                    amp = amp * CONSTANTS["ang_amu2SI"]
-                saved_1d[idx] = {
-                    "tensor": entry.zfs_tensor.matrix,
-                    "unit": entry.zfs_tensor.unit,
-                    "pert": amp,
-                }
-            elif isinstance(entry, dict):
-                saved_1d[idx] = entry
-
-        saved_2d = {}
-        for idx, entry in self.second_order.items():
-            # For 2D keys, tuple (i, j) can be stored as "i_j" string for numpy compatibility
-            key = f"{idx[0]}_{idx[1]}" if isinstance(idx, tuple) else str(idx)
-            if isinstance(entry, PerturbationEntry):
-                amp = entry.amplitude
-                if isinstance(amp, (tuple, list)):
-                    amp = tuple(a * CONSTANTS["ang_amu2SI"] if (isinstance(a, (int, float)) and a > 1e-4) else a for a in amp)
-                elif isinstance(amp, (int, float)) and amp > 1e-4:
-                    amp = (amp * CONSTANTS["ang_amu2SI"], amp * CONSTANTS["ang_amu2SI"])
-                saved_2d[key] = {
-                    "tensor": entry.zfs_tensor.matrix,
-                    "unit": entry.zfs_tensor.unit,
-                    "pert": amp,
-                }
-            elif isinstance(entry, dict):
-                saved_2d[key] = entry
-
+        # Effective order derived from which perturbation dicts are present
         eff_order = self.order
         if eff_order is None or eff_order == 1:
             if self.second_order:
@@ -1047,20 +1080,7 @@ class RawZFSData:
             elif self.first_order:
                 eff_order = 1
 
-        np.savez(
-            path,
-            order=eff_order,
-            defect=self.defect,
-            cell_size=self.cell_size,
-            pert_scale=self.pert_scale,
-            calc_method=self.calc_method,
-            eigen_rotation=self.eigen_rotation,
-            ground_state_zfs_matrix=gs_mat,
-            ground_state_zfs_unit=gs_unit,
-            first_order=saved_1d if saved_1d else None,
-            second_order=saved_2d if saved_2d else None,
-        )
-        return path
+        return save_npz(self, self._default_name() if out_path is None else out_path, self.SCHEMA, overrides={"order": eff_order})
 
     @classmethod
     def load(cls, in_path: Union[str, Path, Sequence[Union[str, Path]]]) -> RawZFSData:
@@ -1074,84 +1094,37 @@ class RawZFSData:
             paths = [Path(in_path)]
 
         raw_data = [np.load(str(p), allow_pickle=True) for p in paths]
-        base = raw_data[0]
+        warn_unknown_keys(raw_data[0].files, cls.SCHEMA)
 
-        defect = str(base["defect"])
-        cell_size = int(base["cell_size"])
-        pert_scale = float(base["pert_scale"])
-        calc_method = None
-        if "calc_method" in base and base["calc_method"] is not None:
-            cm = str(base["calc_method"])
-            if cm != "None" and cm != "":
-                calc_method = cm
+        base = _fields_from_npz(raw_data[0], cls, cls.SCHEMA)
+        first_order = dict(base.get("first_order") or {})
+        second_order = dict(base.get("second_order") or {})
 
-        order = None
-        if "order" in base and base["order"] is not None:
-            try:
-                ord_str = str(base["order"])
-                if ord_str != "None" and ord_str != "":
-                    order = int(ord_str)
-            except (ValueError, TypeError):
-                order = None
-        eigen_rot = base["eigen_rotation"] if "eigen_rotation" in base and base["eigen_rotation"] is not None else None
+        for data in raw_data[1:]:
+            kw = _fields_from_npz(data, cls, cls.SCHEMA, strict=False)
+            for k, v in (kw.get("first_order") or {}).items():
+                first_order.setdefault(k, v)
+            for k, v in (kw.get("second_order") or {}).items():
+                second_order.setdefault(k, v)
 
-        # Reconstruct ground state ZFSTensor with explicit unit
-        if "ground_state_zfs_matrix" in base and base["ground_state_zfs_matrix"] is not None:
-            mat = base["ground_state_zfs_matrix"]
-            unit = str(base.get("ground_state_zfs_unit", "MHz"))
-            gs_tensor = ZFSTensor(matrix=mat, unit=unit)
-        elif "zfs_relaxed" in base and base["zfs_relaxed"] is not None:
-            # Legacy files store zfs_relaxed in Joules
-            mat_j = base["zfs_relaxed"]
-            gs_tensor = ZFSTensor(matrix=mat_j, unit="J")
-        else:
-            gs_tensor = None
-
-        first_order = {}
-        second_order = {}
-
-        for data in raw_data:
-            # Check latest key first, fallback to legacy
-            if "first_order" in data and data["first_order"] is not None:
-                d1 = data["first_order"][()]
-                if isinstance(d1, dict):
-                    first_order.update(d1)
-            elif "zfs_tensors" in data and data["zfs_tensors"] is not None:
-                d1 = data["zfs_tensors"][()]
-                if isinstance(d1, dict):
-                    first_order.update(d1)
-
-            if "second_order" in data and data["second_order"] is not None:
-                d2 = data["second_order"][()]
-                if isinstance(d2, dict):
-                    for k, v in d2.items():
-                        # Parse tuple key from string "i_j" if needed
-                        parsed_key = tuple(int(x) for x in k.split("_")) if isinstance(k, str) and "_" in k else k
-                        second_order[parsed_key] = v
-            elif "zfs_tensors_2d" in data and data["zfs_tensors_2d"] is not None:
-                d2 = data["zfs_tensors_2d"][()]
-                if isinstance(d2, dict):
-                    for k, v in d2.items():
-                        parsed_key = tuple(int(x) for x in k.split("_")) if isinstance(k, str) and "_" in k else k
-                        second_order[parsed_key] = v
-
-        # Determine effective order from loaded perturbation data
+        order = base.get("order")
         if second_order:
             order = 2
         elif order is None:
             order = 1 if first_order else None
 
-        return cls(
-            defect=defect,
-            cell_size=cell_size,
-            pert_scale=pert_scale,
-            calc_method=calc_method,
+        obj = cls(
+            defect=base["defect"],
+            cell_size=base["cell_size"],
+            pert_scale=base["pert_scale"],
+            calc_method=base.get("calc_method"),
             order=order,
-            ground_state_zfs=gs_tensor,
-            eigen_rotation=eigen_rot,
+            ground_state_zfs=base.get("ground_state_zfs"),
+            eigen_rotation=base.get("eigen_rotation"),
             first_order=first_order,
             second_order=second_order,
-        ).to_unit("J")
+        )
+        return obj.to_unit("J")
 
 
 @dataclass
@@ -1274,138 +1247,78 @@ class SpinPhononCouplingData:
             zfs_2nd_derivs=self.zfs_2nd_derivs.copy() if self.zfs_2nd_derivs is not None else None,
         )
 
+    SCHEMA = [
+        FieldSpec("order", "int", optional=True),
+        FieldSpec("defect", "str", optional=True),
+        FieldSpec("cell_size", "int", optional=True),
+        FieldSpec("pert_scale", "float", optional=True),
+        FieldSpec("calc_method", "str", optional=True, decode=_decode_calc_method),
+        FieldSpec("frequencies", "array", legacy_keys=("freqs",)),
+        FieldSpec("frequency_unit", "str", optional=True),
+        FieldSpec("V_0_0", "array"),
+        FieldSpec("V_p_m", "array"),
+        FieldSpec("V_0_pm", "array"),
+        FieldSpec("coupling_unit", "str", optional=True),
+        FieldSpec("ground_state_zfs", "zfstensor", optional=True),
+        FieldSpec("zfs_derivs", "array", optional=True),
+        FieldSpec("derivs_unit", "str", optional=True),
+        FieldSpec("symmetries", "list_str", optional=True, legacy_keys=("sym",), save_aliases=("sym",)),
+        FieldSpec("iprs", "array", optional=True, legacy_keys=("ipr",), save_aliases=("ipr",)),
+        FieldSpec("V2_0_0", "array", optional=True, decode=_decode_2d_array),
+        FieldSpec("V2_p_m", "array", optional=True, decode=_decode_2d_array),
+        FieldSpec("V2_0_pm", "array", optional=True, decode=_decode_2d_array),
+        FieldSpec("zfs_2nd_derivs", "array", optional=True, decode=_decode_2d_array),
+    ]
+
     def save(self, out_path: Union[str, Path]) -> str:
         """Saves coupling data to .npz file with explicit unit metadata and legacy keys."""
-        path = str(out_path)
-        if not path.endswith(".npz"):
-            path += ".npz"
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-
-        gs_mat = self.ground_state_zfs.matrix if self.ground_state_zfs else None
-        gs_unit = self.ground_state_zfs.unit if self.ground_state_zfs else None
         gs_d_joule = self.ground_state_zfs.to_unit("J").D if self.ground_state_zfs else 0.0
-
-        np.savez(
-            path,
-            order=self.order,
-            defect=self.defect,
-            cell_size=self.cell_size,
-            pert_scale=self.pert_scale,
-            calc_method=self.calc_method,
-            # Frequencies
-            frequencies=self.frequencies,
-            freqs=self.frequencies,  # legacy alias
-            frequency_unit=self.frequency_unit,
-            # Coupling coefficients (first order)
-            V_0_0=self.V_0_0,
-            V_p_m=self.V_p_m,
-            V_0_pm=self.V_0_pm,
-            coupling_unit=self.coupling_unit,
-            # Coupling coefficients (second order, when present)
-            V2_0_0=self.V2_0_0,
-            V2_p_m=self.V2_p_m,
-            V2_0_pm=self.V2_0_pm,
-            zfs_2nd_derivs=self.zfs_2nd_derivs,
-            # Ground state
-            ground_state_zfs_matrix=gs_mat,
-            ground_state_zfs_unit=gs_unit,
-            zfs=gs_d_joule,          # legacy scalar in Joules
-            # Derivatives
-            zfs_derivs=self.zfs_derivs,
-            derivs_unit=self.derivs_unit,
-            # Symmetry and locality
-            sym=self.symmetries,
-            symmetries=self.symmetries,
-            ipr=self.iprs,
-            iprs=self.iprs,
+        return save_npz(
+            self,
+            out_path,
+            self.SCHEMA,
+            extras={"zfs": gs_d_joule},  # legacy scalar D in Joules
         )
-        return path
 
     @classmethod
     def load(cls, in_path: Union[str, Path]) -> SpinPhononCouplingData:
         """Loads SpinPhononCouplingData from a .npz file, parsing explicit units."""
         data = np.load(str(in_path), allow_pickle=True)
+        warn_unknown_keys(data.files, cls.SCHEMA, extra_ignore=("zfs",))
 
-        # Frequencies and unit
-        freq_unit = str(data["frequency_unit"]) if "frequency_unit" in data else None
-        freqs = data["frequencies"] if "frequencies" in data else data["freqs"]
-        if freq_unit is None:
-            # Infer legacy: if values are tiny (~1e-20), they are in Joules; else meV
-            freq_unit = "J" if np.mean(freqs[freqs > 0]) < 1e-15 else "meV"
+        def _pre(d, kwargs):
+            # Legacy frequency unit inference when the tag is absent
+            if kwargs.get("frequency_unit") is None:
+                freqs = kwargs.get("frequencies")
+                freqs_pos = freqs[freqs > 0] if freqs is not None and getattr(freqs, "ndim", 0) else []
+                kwargs["frequency_unit"] = "J" if len(freqs_pos) and float(np.mean(freqs_pos)) < 1e-15 else "meV"
+            kwargs["coupling_unit"] = kwargs.get("coupling_unit") or "J"
+            kwargs["derivs_unit"] = kwargs.get("derivs_unit") or kwargs["coupling_unit"]
 
-        # Coupling coefficients and unit
-        coupling_unit = str(data["coupling_unit"]) if "coupling_unit" in data else "J"
-        V_0_0 = data["V_0_0"]
-        V_p_m = data["V_p_m"]
-        V_0_pm = data["V_0_pm"]
+            # Legacy 2d files stored their coefficients under the first-order
+            # keys with order=2 (no V2_* present). Detect and remap.
+            if kwargs.get("V2_0_0") is None and "V2_0_0" not in d and int(d.get("order", 1)) == 2:
+                kwargs["V2_0_0"] = kwargs.get("V_0_0")
+                kwargs["V2_p_m"] = kwargs.get("V_p_m")
+                kwargs["V2_0_pm"] = kwargs.get("V_0_pm")
+                kwargs["zfs_2nd_derivs"] = kwargs.get("zfs_2nd_derivs") or kwargs.get("zfs_derivs")
 
-        derivs = data["zfs_derivs"] if "zfs_derivs" in data else None
-        if derivs is not None and (getattr(derivs, "shape", None) == () and derivs.item() is None):
-            derivs = None
+            # Legacy scalar D in Joules -> diagonal ZFSTensor
+            if kwargs.get("ground_state_zfs") is None and "zfs" in d:
+                d_val_j = float(d["zfs"])
+                kwargs["ground_state_zfs"] = ZFSTensor(
+                    matrix=np.diag([-d_val_j / 3.0, -d_val_j / 3.0, 2.0 * d_val_j / 3.0]), unit="J"
+                )
 
-        # Second-order coupling coefficients (optional)
-        def _arr(key):
-            if key not in data:
-                return None
-            val = data[key]
-            if val is None or (getattr(val, "shape", None) == () and val.item() is None):
-                return None
-            arr = np.asarray(val)
-            return arr if arr.ndim >= 2 and arr.size > 0 else None
+            # Legacy defaults for base fields
+            if kwargs.get("defect") is None:
+                kwargs["defect"] = "unknown"
+            if kwargs.get("cell_size") is None:
+                kwargs["cell_size"] = 0
+            if kwargs.get("pert_scale") is None:
+                kwargs["pert_scale"] = 0.0
+            if kwargs.get("order") is None:
+                kwargs["order"] = 1
+            return kwargs
 
-        V2_0_0 = _arr("V2_0_0")
-        V2_p_m = _arr("V2_p_m")
-        V2_0_pm = _arr("V2_0_pm")
-        zfs_2nd = _arr("zfs_2nd_derivs")
-
-        # Backward compat: legacy 2d files saved their coefficients under the
-        # first-order keys with order=2 (no V2_* present). Detect and remap.
-        if V2_0_0 is None and "V2_0_0" not in data and int(data.get("order", 1)) == 2:
-            V2_0_0 = V_0_0
-            V2_p_m = V_p_m
-            V2_0_pm = V_0_pm
-            zfs_2nd = zfs_2nd or derivs
-
-        # Ground state ZFS
-        if "ground_state_zfs_matrix" in data and data["ground_state_zfs_matrix"] is not None:
-            gs_mat = data["ground_state_zfs_matrix"]
-            gs_unit = str(data.get("ground_state_zfs_unit", "MHz"))
-            gs = ZFSTensor(matrix=gs_mat, unit=gs_unit)
-        elif "zfs" in data:
-            # Legacy scalar D value in Joules
-            d_val_j = float(data["zfs"])
-            gs_mat = np.diag([-d_val_j / 3.0, -d_val_j / 3.0, 2.0 * d_val_j / 3.0])
-            gs = ZFSTensor(matrix=gs_mat, unit="J")
-        else:
-            gs = None
-
-        derivs_unit = str(data.get("derivs_unit", coupling_unit))
-
-        sym_arr = data["symmetries"] if "symmetries" in data else (data["sym"] if "sym" in data else None)
-        syms = list(sym_arr) if sym_arr is not None and getattr(sym_arr, "shape", None) != () else None
-
-        ipr_arr = data["iprs"] if "iprs" in data else (data["ipr"] if "ipr" in data else None)
-        iprs = ipr_arr if ipr_arr is not None and getattr(ipr_arr, "shape", None) != () else None
-
-        return cls(
-            order=int(data["order"]) if "order" in data else 1,
-            defect=str(data["defect"]) if "defect" in data else "unknown",
-            cell_size=int(data["cell_size"]) if "cell_size" in data else 0,
-            pert_scale=float(data["pert_scale"]) if "pert_scale" in data else 0.0,
-            calc_method=str(data["calc_method"]) if "calc_method" in data else None,
-            frequencies=freqs,
-            frequency_unit=freq_unit,
-            V_0_0=V_0_0,
-            V_p_m=V_p_m,
-            V_0_pm=V_0_pm,
-            coupling_unit=coupling_unit,
-            ground_state_zfs=gs,
-            zfs_derivs=derivs,
-            derivs_unit=derivs_unit,
-            symmetries=syms,
-            iprs=iprs,
-            V2_0_0=V2_0_0,
-            V2_p_m=V2_p_m,
-            V2_0_pm=V2_0_pm,
-            zfs_2nd_derivs=zfs_2nd,
-        )
+        return load_npz(cls, in_path, cls.SCHEMA, pre_decode=_pre)

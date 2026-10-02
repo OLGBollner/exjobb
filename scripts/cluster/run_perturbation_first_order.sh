@@ -12,9 +12,12 @@
 # the config variables below (or export them before sbatch). Personal paths
 # belong in the config block only, not in the loop logic.
 
-ml PDC/24.11
+ml PDC/26.03
 ml miniconda3
-source activate /cfs/klemming/projects/supr/adaq/obollner/conda-dirs/envs/sim-env
+source activate /cfs/klemming/projects/supr/adaq/obollner/conda-dirs/envs/sim-env || {
+  echo "FATAL: failed to activate conda env -- aborting before any VASP run" >&2
+  exit 1
+}
 
 # ---- config (override via environment, e.g. DEFECT=NV_512 sbatch ...) ----
 DEFECT=${DEFECT:-<defect>}
@@ -28,7 +31,27 @@ PERT=${PERT:-<pert_scale>}
 INPUT_DIR="input"
 HEAD_DIR=$(pwd)
 
-MODES=$(python $get_n_modes $PHONON_PATH)
+# ---- preflight: verify every dependency BEFORE burning core hours ----
+fail() { echo "FATAL (task ${SLURM_ARRAY_TASK_ID:-?}): $*" >&2; exit 1; }
+[ -d "$INPUT_DIR" ] || fail "input dir '$INPUT_DIR' missing (run this from the all_bands folder)"
+case $DEFECT in *'<defect>'*) fail "DEFECT still has placeholder: '$DEFECT'" ;; esac
+case $binary in *'<'*|*'/path/to/'*) fail "BINARY still has placeholder: '$binary'" ;; esac
+case $create_struct in *'<path_to>'*) fail "CREATE_STRUCT still has placeholder: '$create_struct'" ;; esac
+case $get_n_modes in *'<path_to>'*) fail "GET_N_MODES still has placeholder: '$get_n_modes'" ;; esac
+case $PHONON_PATH in *'<path_to_phonon_data.npz>'*) fail "PHONON_PATH still has placeholder: '$PHONON_PATH'" ;; esac
+case $PERT in *'<pert_scale>'*) fail "PERT still has placeholder: '$PERT'" ;; esac
+[ -x "$binary" ] || fail "VASP binary not found/executable: $binary"
+[ -f "$create_struct" ] || fail "create_struct script missing: $create_struct"
+[ -f "$get_n_modes" ] || fail "get_n_modes script missing: $get_n_modes"
+[ -f "$PHONON_PATH" ] || fail "phonon data file missing: $PHONON_PATH"
+python -c "import numpy, pymatgen.core" >/dev/null 2>&1 \
+  || fail "python env broken (numpy/pymatgen import failed) -- conda env did not activate?"
+python -c "import beyblade" >/dev/null 2>&1 \
+  || fail "python cannot import beyblade -- install/check sim-env"
+MODES=$(python "$get_n_modes" "$PHONON_PATH") || fail "get_n_modes exited nonzero on $PHONON_PATH"
+[ -n "$MODES" ] || fail "get_n_modes returned no modes for $PHONON_PATH"
+echo "Preflight OK: $(echo $MODES | wc -w) modes, binary=$binary"
+# ------------------------------------------------------------------------
 
 ID=$SLURM_ARRAY_TASK_ID
 NJOBS=$SLURM_ARRAY_TASK_COUNT
@@ -37,7 +60,9 @@ ZFS_REGEX_PATTERN='Spin-spin contribution to zero-field splitting tensor \(MHz\)
 echo $ID
 echo $NJOBS
 
-mkdir runs
+set -eu
+
+mkdir -p runs
 
 PAIR_ID=0
 for i in $MODES; do
@@ -65,7 +90,7 @@ for i in $MODES; do
     srun $binary
     echo "$ID: Done! $i"
     echo "$ID: removing excess WAVECAR"
-    rm WAVECAR
+    rm -f WAVECAR
     cd "$HEAD_DIR"
   fi
   PAIR_ID=$((PAIR_ID + 1))
