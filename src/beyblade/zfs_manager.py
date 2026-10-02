@@ -780,10 +780,11 @@ class ZFSManager:
 
     @staticmethod
     def _print_tensor(tensor: np.ndarray) -> None:
-        """Print a 3x3 tensor with aligned columns, matching the debug style."""
+        """Print a 3x3 tensor with aligned columns, values converted J -> MHz."""
         col_width = 12
-        for row in np.asarray(tensor, dtype=float):
-            print("   " + "".join(f"{v:<{col_width}.6e} " for v in row))
+        J_TO_MHZ = 1.5091902e21  # 1/(h) * 1e-6
+        for row in np.asarray(tensor, dtype=float) * J_TO_MHZ:
+            print("   " + "".join(f"{v:<{col_width}.6f} " for v in row))
 
     def _debug_derivs(self, dD, q, symmetry, idx, V_0_0, V_0_pm, V_p_m):
         max_val = np.max(np.abs(dD))
