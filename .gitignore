@@ -11,6 +11,3 @@ Thesis/
 
 # All txt files (use git add -f to include one)
 *.txt
-
-# Personal notes
-Notes/
