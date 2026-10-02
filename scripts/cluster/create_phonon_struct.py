@@ -37,7 +37,8 @@ def main() -> int:
 
     for idx in args.mode_indices:
         perturbed = apply_perturbation(structure, data.eigenvectors,
-                                       data.atomic_masses, idx, args.amplitude)
+                                       data.atomic_masses, idx, args.amplitude,
+                                       original_indices=data.original_indices)
         out = args.output if args.output else f"POSCAR_pert_{args.amplitude}_mode_{idx}"
         Poscar(perturbed).comment = f"Mode {idx}, Q={args.amplitude} Ang*sqrt(amu)"
         Poscar(perturbed).write_file(out)

@@ -41,6 +41,32 @@ def _displacement(eigenvectors: np.ndarray, masses: np.ndarray, index0: int, amp
     return amplitude * eigenvectors[index0] / np.sqrt(masses[:, None])
 
 
+def _resolve_mode(mode_index: int, original_indices: np.ndarray | None, n_modes: int) -> int:
+    """Resolve a 1-based mode label to an eigenvector array row.
+
+    Symmetry-filtered phonon files keep the *original* mode labels in
+    ``original_indices`` while the eigs array is trimmed, so the label is
+    not the array row. When original_indices is given (1-based labels,
+    same convention as get_n_modes.py), map label -> row by exact match;
+    a missing or non-unique label is a hard error. Otherwise the label
+    must simply be within [1, n_modes].
+    """
+    if original_indices is None or len(original_indices) == 0:
+        if not (1 <= mode_index <= n_modes):
+            raise ValueError(f"Mode {mode_index} out of range [1, {n_modes}]")
+        return mode_index - 1
+    hits = np.flatnonzero(original_indices == mode_index - 1)
+    if len(hits) == 0:
+        raise ValueError(
+            f"Mode {mode_index} not present in trimmed phonon data "
+            f"(original indices available: "
+            f"{int(original_indices.min()) + 1}..{int(original_indices.max()) + 1})"
+        )
+    if len(hits) > 1:
+        raise ValueError(f"Mode {mode_index} is ambiguous: matches rows {hits.tolist()}")
+    return int(hits[0])
+
+
 def _check_mode(eigenvectors: np.ndarray, structure: Structure, masses: np.ndarray, index0: int, n_modes: int) -> None:
     if not (0 <= index0 < n_modes):
         raise ValueError(f"Mode index {index0 + 1} out of range [1, {n_modes}]")
@@ -51,7 +77,12 @@ def _check_mode(eigenvectors: np.ndarray, structure: Structure, masses: np.ndarr
 
 
 def apply_perturbation(
-    structure: Structure, eigs: np.ndarray, masses: np.ndarray, mode_index: int, amplitude: float
+    structure: Structure,
+    eigs: np.ndarray,
+    masses: np.ndarray,
+    mode_index: int,
+    amplitude: float,
+    original_indices: np.ndarray | None = None,
 ) -> Structure:
     """Apply a mass-weighted single-mode perturbation to a structure.
 
@@ -60,7 +91,7 @@ def apply_perturbation(
     0.029 Angstrom.
     """
     n_modes, _, _ = eigs.shape
-    idx = mode_index - 1
+    idx = _resolve_mode(mode_index, original_indices, n_modes)
     _check_mode(eigs, structure, masses, idx, n_modes)
 
     disp = _displacement(eigs, masses, idx, amplitude)  # (n_atoms, 3)
@@ -74,11 +105,18 @@ def apply_perturbation(
 
 
 def apply_combined_perturbation(
-    structure: Structure, eigenvectors: np.ndarray, mode_i: int, mode_j: int, masses: np.ndarray, amplitude: float
+    structure: Structure,
+    eigenvectors: np.ndarray,
+    mode_i: int,
+    mode_j: int,
+    masses: np.ndarray,
+    amplitude: float,
+    original_indices: np.ndarray | None = None,
 ) -> Structure:
     """Apply a two-mode combined perturbation (Mode I + Mode J, 1-based)."""
     n_modes, _, _ = eigenvectors.shape
-    idx_i, idx_j = mode_i - 1, mode_j - 1
+    idx_i = _resolve_mode(mode_i, original_indices, n_modes)
+    idx_j = _resolve_mode(mode_j, original_indices, n_modes)
     _check_mode(eigenvectors, structure, masses, idx_i, n_modes)
     _check_mode(eigenvectors, structure, masses, idx_j, n_modes)
 

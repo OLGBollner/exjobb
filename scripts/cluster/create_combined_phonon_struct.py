@@ -27,7 +27,8 @@ def main() -> int:
         phonon_data = load_phonon_data(args.phonon_file)
         perturbed = apply_combined_perturbation(
             structure, phonon_data.eigenvectors, args.mode_i, args.mode_j,
-            phonon_data.atomic_masses, args.amplitude)
+            phonon_data.atomic_masses, args.amplitude,
+            original_indices=phonon_data.original_indices)
         output_file = args.output or \
             f"POSCAR_combined_{args.mode_i}_{args.mode_j}_amp_{args.amplitude}"
         write_perturbed_poscar(perturbed, output_file,
