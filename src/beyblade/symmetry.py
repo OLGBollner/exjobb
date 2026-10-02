@@ -449,6 +449,58 @@ def _table_for(spectrum):
     return table
 
 
+# Canonical group operations about the z axis, per point group symbol from
+# CHARACTER_TABLES. Tensors passed to the tensor_* helpers are assumed to
+# already be expressed in this frame (e.g. z = defect axis).
+def _canonical_operations(pg_symbol: str) -> list[np.ndarray]:
+    c, s = np.cos(2 * np.pi / 3), np.sin(2 * np.pi / 3)
+    C3 = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+    C2z = np.diag([-1.0, -1.0, 1.0])
+    mx = np.diag([1.0, -1.0, 1.0])
+    my = np.diag([-1.0, 1.0, 1.0])
+    if pg_symbol == "3m":  # C3v: E, 2C3, 3sv
+        return [np.eye(3), C3, C3 @ C3, mx, C3 @ mx, C3 @ C3 @ mx]
+    if pg_symbol == "mm2":  # C2v: E, C2, sv, sv'
+        return [np.eye(3), C2z, mx, my]
+    if pg_symbol == "-6m2":  # D3h: E, 2C3, 3C2', sigma_h, 2S3, 3sv
+        C2p = C2z @ mx
+        C2p2 = C2z @ (C3 @ mx)
+        C2p3 = C2z @ (C3 @ C3 @ mx)
+        Sh = np.diag([1.0, 1.0, -1.0])
+        S3 = Sh @ C3
+        return [np.eye(3), C3, C3 @ C3, C2p, C2p2, C2p3,
+                Sh, S3, S3 @ C3, mx, C3 @ mx, C3 @ C3 @ mx]
+    raise ValueError(f"No canonical operations for point group '{pg_symbol}'.")
+
+
+def tensor_irrep_fractions(
+    tensor: np.ndarray,
+    pg_symbol: str = "3m",
+) -> dict[str, float]:
+    """Norm fraction of a rank-2 tensor in each irrep of the point group.
+
+    Uses the character projector P_Gamma = (1/|G|) sum_g chi_Gamma(g)
+    R(g) T R(g)^T with canonical operations about the z axis; the tensor
+    must already be expressed in that frame (e.g. z = defect axis). P is
+    a genuine projector for each irrep, so fractions are interpretable
+    and sum to ~1 over the irreps of the group for any 3x3 tensor.
+    """
+    table = CHARACTER_TABLES.get(pg_symbol)
+    if table is None:
+        raise ValueError(f"No character table for point group '{pg_symbol}'.")
+    ops = _canonical_operations(pg_symbol)
+    norm = np.linalg.norm(tensor)
+    if norm == 0:
+        return {name: 0.0 for name in table}
+    out = {}
+    for name, chi in table.items():
+        if isinstance(chi, dict):  # degenerate irrep: use class characters
+            chi = chi["class_chars"]
+        projected = sum(c * R @ tensor @ R.T for c, R in zip(chi, ops)) / len(ops)
+        out[name] = float(np.linalg.norm(projected)) / norm
+    return out
+
+
 def tensor_symmetry_purity(spectrum, tensor: np.ndarray, labels: list[str]) -> tuple[float, dict[str, float]]:
     """Fraction of a rank-2 tensor lying in the allowed irrep subspace.
 
