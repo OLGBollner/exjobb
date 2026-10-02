@@ -768,10 +768,12 @@ class ZFSManager:
         fracs = tensor_irrep_fractions(tensor)
         forbidden = {ir: f for ir, f in fracs.items() if ir not in allowed}
         forbidden_frac = np.linalg.norm([f for f in forbidden.values()])
+        allowed_frac = np.linalg.norm([f for ir, f in fracs.items() if ir in allowed])
         tol = cls._C3V_REL_TOL
         if forbidden_frac > tol:
             details = ", ".join(f"{ir}={f:.2f}" for ir, f in sorted(forbidden.items()))
             print(f"\nWarning: Symmetry mismatch at index {idx} with symmetry {sym_prod}")
+            print(f"  Intended {allowed}: {', '.join(f'{ir}={fracs[ir]:.2f}' for ir in sorted(allowed))} (total {allowed_frac:.2f})")
             print(f"  Forbidden content: {details} (total {forbidden_frac:.2f}, tol {tol})")
             print("  Tensor:")
             cls._print_tensor(tensor)
