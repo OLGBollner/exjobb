@@ -773,6 +773,15 @@ class ZFSManager:
             details = ", ".join(f"{ir}={f:.2f}" for ir, f in sorted(forbidden.items()))
             print(f"\nWarning: Symmetry mismatch at index {idx} with symmetry {sym_prod}")
             print(f"  Forbidden content: {details} (total {forbidden_frac:.2f}, tol {tol})")
+            print("  Tensor:")
+            cls._print_tensor(tensor)
+
+    @staticmethod
+    def _print_tensor(tensor: np.ndarray) -> None:
+        """Print a 3x3 tensor with aligned columns, matching the debug style."""
+        col_width = 12
+        for row in np.asarray(tensor, dtype=float):
+            print("   " + "".join(f"{v:<{col_width}.6e} " for v in row))
 
     def _debug_derivs(self, dD, q, symmetry, idx, V_0_0, V_0_pm, V_p_m):
         max_val = np.max(np.abs(dD))
