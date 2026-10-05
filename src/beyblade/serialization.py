@@ -48,6 +48,24 @@ class FieldSpec:
         return self.npz_key if self.npz_key is not None else self.name
 
 
+def _npz_value(value: Any) -> Any:
+    """Make a value storable by np.savez.
+
+    np.savez (numpy >= 1.24) refuses ragged sequences (lists of
+    variable-length lists, e.g. deg_groups) with ValueError instead of
+    storing them. Convert such values to object arrays; object arrays
+    are written and read back faithfully (with allow_pickle=True).
+    """
+    if isinstance(value, np.ndarray):
+        return value
+    try:
+        return np.asarray(value)
+    except ValueError:
+        arr = np.empty(len(value), dtype=object)
+        arr[:] = [np.asarray(v) for v in value]
+        return arr
+
+
 def _unwrap(value: Any) -> Any:
     """Normalize np.load artefacts: a 0-d object array holding None -> None."""
     if isinstance(value, np.ndarray) and value.shape == () and value.dtype == object:
@@ -91,7 +109,12 @@ def _validate_value(spec: FieldSpec, value: Any, dims: Dict[str, int]) -> Any:
     if value is None:
         return None
     if kind == "array":
-        arr = np.asarray(value)
+        if isinstance(value, np.ndarray) and value.dtype == object:
+            return value
+        try:
+            arr = np.asarray(value)
+        except ValueError:
+            return value  # ragged stored object array; shape unchecked
         return _check_shape(kind, arr, spec, dims)
     if kind == "int":
         if isinstance(value, (int, np.integer)):
@@ -151,6 +174,7 @@ def save_npz(
             payload[f"{spec.key}_matrix"] = value.matrix
             payload[f"{spec.key}_unit"] = value.unit
             continue
+        value = _npz_value(value)
         payload[spec.key] = value
         for alias in spec.save_aliases:
             payload[alias] = value
@@ -230,6 +254,11 @@ def _fields_from_npz(
                         f"{cls.__name__}.load: required field '{spec.key}' is None in file"
                     )
                 continue
+
+            # ragged object arrays (e.g. deg_groups) read back as lists
+            if (isinstance(value, np.ndarray) and value.dtype == object
+                    and value.ndim >= 1):
+                value = value.tolist()
 
             # kind conversion
             if spec.kind == "int":
