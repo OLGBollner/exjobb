@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """plot_pert_convergence.py -- D vs displacement with residuals from pack npz.
 
-Loads the .npz written by pack_perturbation_runs.py, diagonalises each ZFS
-tensor, matches eigenvector branches across perturbations (by overlap with
-the smallest-|pert| reference), and plots each principal component against
-the perturbation scale together with the residuals from a linear fit.
+Loads the .npz written by pack_perturbation_runs.py, rotates each ZFS
+tensor into the ground-state principal frame (fixed rotation built once
+from the Q=0 tensor, as in beyblade's ZFSManager), and plots the diagonal
+components against the perturbation scale together with the residuals
+from a linear fit.
 
 Usage (anywhere, needs numpy + matplotlib):
     python plot_pert_convergence.py pert_runs.npz [-m MODE] [-o out.png]
@@ -28,51 +29,22 @@ from pathlib import Path
 import numpy as np
 
 
-def diagonalize_tensors(tensors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per (mode, pert) tensor: eigenvalues (ascending) and eigenvectors.
+def principal_frame(D0: np.ndarray) -> np.ndarray:
+    """Ground-state principal-axis rotation R (EPR convention).
 
-    Returns vals (..., 3) and vecs (..., 3, 3) with vecs[..., :, k] the
-    k-th eigenvector column, sorted by eigenvalue.
+    Same convention as beyblade.models.principal_components: traceless
+    tensor, eigh, columns of R sorted so |D_zz| >= |D_yy| >= |D_xx|,
+    right-handed. Built ONCE from the relaxed tensor; every perturbed
+    tensor is then rotated into this fixed frame (R.T @ D @ R), as in
+    ZFSManager._ingest_raw_data.
     """
-    vals, vecs = np.linalg.eigh(tensors)
-    order = np.argsort(vals, axis=-1)
-    vals = np.take_along_axis(vals, order, axis=-1)
-    vecs = np.take_along_axis(vecs, order[..., None, :], axis=-1)
-    # fix sign ambiguity: make the largest-|.| component positive
-    lead = np.argmax(np.abs(vecs), axis=-2, keepdims=True)
-    sign = np.sign(np.take_along_axis(vecs, lead, axis=-2))
-    vecs = vecs * sign
-    return vals, vecs
-
-
-def match_branches(vals: np.ndarray, vecs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Reorder branches along the pert axis so each tracks one eigenvector.
-
-    vals/vecs: (n_pert, 3) and (n_pert, 3, 3) for ONE mode. Branch k of each
-    perturbation is assigned to the reference branch it overlaps most with
-    (greedy, per perturbation). Returns reordered copies.
-    """
-    n_pert = vals.shape[0]
-    ref = 0  # smallest-|pert| index (npz perts are sorted)
-    order = np.zeros((n_pert, 3), dtype=int)
-    for j in range(n_pert):
-        ov = np.abs(vecs[ref].T @ vecs[j])  # (3, 3): ref branch k vs j branch l
-        # greedy assignment of ref branches to pert branches
-        assign = [-1] * 3
-        pairs = sorted(
-            ((ov[k, col], k, col) for k in range(3) for col in range(3)),
-            key=lambda t: (-t[0], t[1], t[2]),
-        )
-        used_k, used_col = set(), set()
-        for score, k, col in pairs:
-            if k in used_k or col in used_col:
-                continue
-            assign[k] = col
-            used_k.add(k)
-            used_col.add(col)
-        order[j] = assign
-    idx = np.arange(n_pert)[:, None], order
-    return vals[idx], vecs[idx]
+    dtl = D0 - np.trace(D0) / 3.0 * np.eye(3)
+    _, evecs = np.linalg.eigh(dtl)
+    order = np.argsort(np.abs(np.linalg.eigvalsh(dtl)))  # ix, iy, iz
+    R = np.column_stack([evecs[:, k] for k in order])
+    if np.linalg.det(R) < 0:
+        R[:, 0] = -R[:, 0]
+    return R
 
 
 def linear_fit(x: np.ndarray, y: np.ndarray) -> tuple[float, float, np.ndarray, np.ndarray]:
@@ -99,15 +71,22 @@ def one_sided_d2(p: np.ndarray, v: np.ndarray) -> float | None:
     """
     if len(p) < 3:
         return None
-    order = np.argsort(np.abs(p))
-    # three consecutive points on the same side of zero (monotone in |Q|);
-    # fall back to the global |Q|-sorted triple only if one side is short
-    side = p[p > 0] if (p > 0).sum() >= 3 else p[p < 0]
-    if len(side) >= 3:
-        srt = np.argsort(np.abs(side))
-        p3, v3 = side[srt[:3]], v[order[np.isin(p, side[srt[:3]])]]
+    srt = np.argsort(np.abs(p))
+    p_s, v_s = p[srt], v[srt]
+    if np.isclose(p_s[0], 0.0) and ((p_s > 0).sum() >= 2 or (p_s < 0).sum() >= 2):
+        # with a Q=0 anchor: triple (0, Q1, Q2) on whichever side has points,
+        # evaluated at Q=0 itself
+        pos_idx = np.where(p_s > 0)[0][:2]
+        neg_idx = np.where(p_s < 0)[0][:2]
+        idx = np.concatenate(([0], pos_idx if len(pos_idx) == 2 else neg_idx))
     else:
-        p3, v3 = p[order[:3]], v[order[:3]]
+        # no anchor: three consecutive same-side points, evaluated at the
+        # smallest-|Q| one
+        side = p_s > 0 if (p_s > 0).sum() >= 3 else p_s < 0
+        idx = np.where(side)[0][:3]
+    if len(idx) < 3:
+        return None
+    p3, v3 = p_s[idx], v_s[idx]
     h1, h2 = p3[1] - p3[0], p3[2] - p3[1]
     if h1 <= 0 or h2 <= 0:
         return None
@@ -176,11 +155,18 @@ def main() -> int:
             print(f"mode {mode}: fewer than 2 finished runs, skipping")
             continue
         p_all, t_all = perts[ok0], tensors[i][ok0]
-        # sort perts by |pert| so the reference branch is the smallest one
-        srt = np.argsort(np.abs(p_all))
-        p_use = p_all[srt]
-        vals, vecs = diagonalize_tensors(t_all[srt])
-        vals, _ = match_branches(vals, vecs)
+        # fixed principal frame from the Q=0 (relaxed) tensor; plot the
+        # diagonal components of every tensor rotated into that frame
+        izero = int(np.argmin(np.abs(p_all)))
+        if not np.isclose(p_all[izero], 0.0):
+            print(
+                f"mode {mode}: warning: no Q=0 tensor; principal frame taken "
+                "from the smallest-|Q| perturbation instead",
+                file=sys.stderr,
+            )
+        R = principal_frame(t_all[izero])
+        p_use = p_all
+        vals = np.stack([np.diag(R.T @ t @ R) for t in t_all])
         # plot order: ascending signed value / ascending |value|, so lines
         # connect monotonically instead of zigzagging between +Q and -Q
         sgn = np.argsort(p_use)
