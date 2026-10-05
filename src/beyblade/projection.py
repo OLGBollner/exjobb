@@ -143,9 +143,13 @@ def characters_for_group(symbol: str) -> dict[str, list[float]]:
     Uses the same operation order as symmetry._operation_keys. Entries that
     are dicts (2D irreps with sublabel machinery) expose 'class_chars'.
     """
+    from beyblade.symmetry import _TABLE_META_KEYS
+
     raw = CHARACTER_TABLES[symbol]
     out = {}
     for irrep, val in raw.items():
+        if irrep in _TABLE_META_KEYS:
+            continue
         out[irrep] = val["class_chars"] if isinstance(val, dict) else val
     return out
 

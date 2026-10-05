@@ -28,52 +28,104 @@ from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 # ---------------------------------------------------------------------------
 # Character tables (Hermann-Mauguin spglib point-group symbols as keys).
-# χ vectors are ordered to match _operation_keys().
+#
+# All 32 point groups are generated from the httk-symgen dataset by
+# scripts/data/generate_character_tables.py (source of truth: httk-sym/,
+# see ATTRIBUTION.md). CLASS_TABLES is class-level; CHARACTER_TABLES below
+# adapts it to what the pipeline consumes:
+#
+# - "3m" (the only group defect_frame_operations supports) is expanded to
+#   per-operation chi vectors in _operation_keys() order (E, C3, C3^2,
+#   σv1..σv3), because per-mode matching needs per-reflection resolution.
+# - Every other group stays class-level (per-class chi + class_sizes),
+#   which the character-orthogonality consumers use directly.
+#
+# Sublabel conventions (Ex/Ey component identities under the pipeline's
+# reflection ops) are pipeline legacy, NOT part of the httk data, and are
+# kept hand-maintained below.
 # ---------------------------------------------------------------------------
 
-CHARACTER_TABLES: dict[str, dict[str, Any]] = {
-    # C3v: operations (E, C3, C3^2, σv1, σv2, σv3)
-    # 2D irreps carry sublabels: the character pattern of each component,
-    # used for per-mode matching and for pairing (Ex/Ey etc.).
+from beyblade.symmetry_groups import get_symmetry_group, available_groups
+
+# Per-reflection identities of the 2D components (legacy convention:
+# chi(first reflection) > 0 -> Ex). class_chars are derived from the
+# generated class-level table, not duplicated here.
+_SUBLABEL_CONVENTIONS: dict[str, dict[str, Any]] = {
     "3m": {
-        "A1": [1, 1, 1, 1, 1, 1],
-        "A2": [1, 1, 1, -1, -1, -1],
-        "E": {
-            # The stored sublabel patterns are NOT physical characters (a 2D
-            # irrep's components are basis conventions). They only define the
-            # parent class characters via their sum, and are kept for pairing.
-            "sublabels": {
-                "Ex": [1, -1, -1, 1, 1, 1],
-                "Ey": [1, -1, -1, -1, -1, -1],
-            },
-            # True class characters of E (components mix under C3, so the
-            # sublabel proxy patterns double-count there). Used for the
-            # degenerate-group verification: Ex+Ey must sum to this.
-            "class_chars": [2, -1, -1, 0, 0, 0],
-            # Legacy convention: chi(first reflection) > 0 -> Ex, else Ey.
-            "sublabel_rule": (3, "Ex", "Ey"),
+        "sublabels": {
+            "Ex": [1, -1, -1, 1, 1, 1],
+            "Ey": [1, -1, -1, -1, -1, -1],
         },
-        "class_sizes": [1, 1, 1, 1, 1, 1],
-    },
-    # C2v: operations (E, C2, σv, σv')
-    "mm2": {
-        "A1": [1, 1, 1, 1],
-        "A2": [1, 1, -1, -1],
-        "B1": [1, -1, 1, -1],
-        "B2": [1, -1, -1, 1],
-        "class_sizes": [1, 1, 1, 1],
-    },
-    # D3h: operations (E, 2C3, 3C2', σh, 2S3, 3σv)
-    "-6m2": {
-        "A1'": [1, 1, 1, 1, 1, 1],
-        "A2'": [1, 1, -1, 1, 1, -1],
-        "E'": [2, -1, 0, 2, -1, 0],
-        "A1''": [1, 1, 1, -1, -1, -1],
-        "A2''": [1, 1, -1, -1, -1, 1],
-        "E''": [2, -1, 0, -2, 1, 0],
-        "class_sizes": [1, 2, 3, 1, 2, 3],
+        "sublabel_rule": (3, "Ex", "Ey"),
     },
 }
+
+
+# Metadata keys present in generated tables that are not irrep entries.
+_TABLE_META_KEYS = frozenset({"class_sizes", "complex_pair"})
+
+
+def _require_defect_frame(symbol: str, table: dict, n_ops: int) -> None:
+    """Reject tables whose irrep patterns do not match the defect frame.
+
+    defect_frame_operations() is C3v-specific: the pipeline can only match
+    modes against tables whose per-operation patterns have n_ops entries.
+    Class-level tables for larger groups (e.g. m-3m) cannot align and must
+    raise, mirroring the historical missing-table behaviour that callers
+    (ZFSManager) catch and fall back from.
+    """
+    for name, entry in table.items():
+        if name in _TABLE_META_KEYS:
+            continue
+        if isinstance(entry, dict):
+            length = len(entry["class_chars"])
+        else:
+            length = len(entry)
+        if length != n_ops:
+            raise NotImplementedError(
+                f"Point group '{symbol}' is not supported in the defect "
+                f"frame: irrep patterns have {length} entries, the defect "
+                f"frame has {n_ops} operations."
+            )
+
+
+def _per_op(chars: list[float], sizes: list[int]) -> list[float]:
+    """Expand class-level characters to the per-operation pipeline order."""
+    out: list[float] = []
+    for chi, size in zip(chars, sizes):
+        out.extend([chi] * size)
+    return out
+
+
+def _build_character_tables() -> dict[str, dict[str, Any]]:
+    """Adapt the dataclass groups to the pipeline's table format."""
+    tables: dict[str, dict[str, Any]] = {}
+    for hm in available_groups():
+        group = get_symmetry_group(hm)
+        sizes = list(group.class_sizes)
+        entry: dict[str, Any] = {"class_sizes": sizes}
+        if group.complex_pairs:
+            entry["complex_pair"] = {n: n in group.complex_pairs
+                                     for n in group.irrep_names}
+        conv = _SUBLABEL_CONVENTIONS.get(hm, {})
+        for ir in group.irreps:
+            chars = list(ir.characters)
+            if conv.get("sublabels") and chars[0] > 1:
+                # the degenerate irrep carries the component conventions
+                entry[ir.name] = {
+                    "sublabels": conv["sublabels"],
+                    "class_chars": _per_op(chars, sizes),
+                    "sublabel_rule": conv["sublabel_rule"],
+                }
+            elif hm in _SUBLABEL_CONVENTIONS:
+                entry[ir.name] = _per_op(chars, sizes)
+            else:
+                entry[ir.name] = chars
+        tables[hm] = entry
+    return tables
+
+
+CHARACTER_TABLES: dict[str, dict[str, Any]] = _build_character_tables()
 
 
 class SymmetryDetectionError(RuntimeError):
@@ -163,6 +215,7 @@ def classify_modes(spectrum, tol_mev: float = 0.01, symprec: float = 1e-3) -> tu
         )
 
     ops = defect_frame_operations(spectrum)
+    _require_defect_frame(pg.symbol, table, len(ops))
     chars = _mode_characters(spectrum, ops)
     # Sublabels of a 2D irrep (Ex/Ey) are a basis convention, not physics:
     # the stored convention (set by the legacy analyzer) is the sign of the
@@ -291,6 +344,11 @@ def classify_and_pair(
         table = {}
     if table:
         ops = defect_frame_operations(spectrum)
+        try:
+            _require_defect_frame(pg.symbol, table, len(ops))
+        except NotImplementedError:
+            table = {}
+    if table:
         chars = _mode_characters(spectrum, ops)
         spectrum.sym_check = verify_deg_groups(chars, labels, deg_groups, table)
     return labels, deg_groups
@@ -509,11 +567,13 @@ def tensor_irrep_fractions(
 ) -> dict[str, float]:
     """Norm fraction of a rank-2 tensor in each irrep of the point group.
 
-    Uses the character projector P_Gamma = (1/|G|) sum_g chi_Gamma(g)
-    R(g) T R(g)^T with canonical operations about the z axis; the tensor
-    must already be expressed in that frame (e.g. z = defect axis). P is
-    a genuine projector for each irrep, so fractions are interpretable
-    and sum to ~1 over the irreps of the group for any 3x3 tensor.
+    Uses the character projector P_Gamma = (d_Gamma/(m*|G|)) sum_g
+    chi_Gamma(g) R(g) T R(g)^T with canonical operations about the z
+    axis; the tensor must already be expressed in that frame (e.g. z =
+    defect axis). d_Gamma = chi(E) is the irrep dimension; m = 2 for
+    rows that combine complex-conjugate irreps, 1 otherwise. P is a
+    genuine projector for each irrep, so fractions are interpretable and
+    sum to ~1 over the irreps of the group for any 3x3 tensor.
     """
     table = CHARACTER_TABLES.get(pg_symbol)
     if table is None:
@@ -524,18 +584,23 @@ def tensor_irrep_fractions(
     if norm == 0:
         return {name: 0.0 for name in table if name != "class_sizes"}
     for name, chi in table.items():
-        if name == "class_sizes":
+        if name in ("class_sizes", "complex_pair"):
             continue
         if isinstance(chi, dict):  # degenerate irrep: use class characters
             chi = chi["class_chars"]
         sizes = table["class_sizes"]
-        if len(chi) == len(ops) and all(s == 1 for s in sizes):
+        if len(chi) == len(ops):  # already per-operation
             chars = chi
         elif len(chi) == len(sizes) and sum(sizes) == len(ops):
             chars = [c for c, s in zip(chi, sizes) for _ in range(s)]
         else:
             raise ValueError(f"Characters for {name} do not match operations of {pg_symbol}.")
-        projected = sum(c * R @ tensor @ R.T for c, R in zip(chars, ops)) / len(ops)
+        d = chars[0]  # chi(E) = dimension
+        m = 2 if table.get("complex_pair", {}).get(name) else 1
+        projected = (
+            sum(d * c * R @ tensor @ R.T for c, R in zip(chars, ops))
+            / (m * len(ops))
+        )
         out[name] = float(np.linalg.norm(projected)) / norm
     return out
 
@@ -544,10 +609,11 @@ def direct_product(pg_symbol: str, sym_a: str, sym_b: str) -> list[str]:
     """Irreps contained in the direct product of two irrep labels.
 
     General: uses character orthogonality,
-    n_Gamma = (1/|G|) sum_g chi_A(g) chi_B(g) chi_Gamma(g)*, so it works
+    n_Gamma = <chi_A chi_B, chi_Gamma>/(m*|G|), so it works
     for any point group in CHARACTER_TABLES, including groups with
     complex/antisymmetric irreps (e.g. D3h E' x E''). Each irrep appears
-    once per unit multiplicity.
+    once per unit multiplicity. Rows combining complex-conjugate
+    irreps count once (their real multiplicity).
     """
     table = CHARACTER_TABLES.get(pg_symbol)
     if table is None:
@@ -563,14 +629,17 @@ def direct_product(pg_symbol: str, sym_a: str, sym_b: str) -> list[str]:
 
     sizes = np.asarray(table["class_sizes"], dtype=float)
     a, b = class_chars(sym_a), class_chars(sym_b)
+    if len(sizes) != len(a) and int(sizes.sum()) == len(a):
+        sizes = np.asarray(_per_op([1] * len(table["class_sizes"]), table["class_sizes"]), dtype=float)
     if len(a) != len(b) or len(sizes) != len(a):
         raise ValueError(f"{sym_a} and {sym_b} are not irreps of the same group '{pg_symbol}'.")
     order = float(sizes.sum())
     out: list[str] = []
     for name in table:
-        if name == "class_sizes":
+        if name in ("class_sizes", "complex_pair"):
             continue
-        n = float(np.dot(sizes * a * b, class_chars(name).conjugate())) / order
+        m = 2 if table.get("complex_pair", {}).get(name) else 1
+        n = float(np.dot(sizes * a * b, class_chars(name).conjugate())) / (m * order)
         reps = int(round(n))
         if abs(n - reps) > 1e-9 or reps < 0:
             raise ValueError(f"Invalid irreps {sym_a}, {sym_b} for group '{pg_symbol}'.")
@@ -660,6 +729,8 @@ def _match_irreps(spectrum, chars, table, tol_mev, first_reflection=None):
     parent_of: dict[str, str] = {}
     sublabel_rule: dict[str, tuple[int, str, str]] = {}
     for name, entry in table.items():
+        if name in _TABLE_META_KEYS:
+            continue
         if isinstance(entry, dict):
             subs = list(entry["sublabels"].items())
             parent_chi = np.zeros(len(next(iter(subs))[1]), dtype=float)
