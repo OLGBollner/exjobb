@@ -153,6 +153,13 @@ def main() -> int:
         # drop unfinished runs (NaN tensors) BEFORE diagonalizing: eigh on a
         # NaN slot raises LinAlgError for the whole mode
         ok0 = ~np.isnan(tensors[i]).any(axis=(1, 2))
+        dropped = perts[~ok0]
+        if len(dropped):
+            print(
+                f"mode {mode}: dropping {len(dropped)} run(s) with no ZFS tensor "
+                f"(unfinished or failed): {np.array2string(dropped)}",
+                file=sys.stderr,
+            )
         if ok0.sum() < 2:
             print(f"mode {mode}: fewer than 2 finished runs, skipping")
             continue
