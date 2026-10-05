@@ -169,29 +169,33 @@ def main() -> int:
         if mode not in set(modes.tolist()):
             continue
         i = int(np.where(modes == mode)[0][0])
-        # sort perts by |pert| so the reference branch is the smallest one
-        srt = np.argsort(np.abs(perts))
-        p_sorted = perts[srt]
-        vals, vecs = diagonalize_tensors(tensors[i][srt])
-        # skip NaN slots (unfinished runs)
-        ok = ~np.isnan(vals).any(axis=1)
-        if ok.sum() < 2:
+        # drop unfinished runs (NaN tensors) BEFORE diagonalizing: eigh on a
+        # NaN slot raises LinAlgError for the whole mode
+        ok0 = ~np.isnan(tensors[i]).any(axis=(1, 2))
+        if ok0.sum() < 2:
             print(f"mode {mode}: fewer than 2 finished runs, skipping")
             continue
-        vals, vecs = vals[ok], vecs[ok]
-        p_use = p_sorted[ok]
+        p_all, t_all = perts[ok0], tensors[i][ok0]
+        # sort perts by |pert| so the reference branch is the smallest one
+        srt = np.argsort(np.abs(p_all))
+        p_use = p_all[srt]
+        vals, vecs = diagonalize_tensors(t_all[srt])
         vals, _ = match_branches(vals, vecs)
+        # plot order: ascending signed value / ascending |value|, so lines
+        # connect monotonically instead of zigzagging between +Q and -Q
+        sgn = np.argsort(p_use)
+        mag = np.argsort(np.abs(p_use))
 
         ncols = 2
         fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
         for k in range(3):
             a, b, y_fit, res = linear_fit(p_use, vals[:, k])
-            axes[0, 0].plot(p_use, vals[:, k], "o-", label=f"PC {k + 1}")
-            axes[1, 0].plot(p_use, res, "o-")
+            axes[0, 0].plot(p_use[sgn], vals[sgn, k], "o-", label=f"PC {k + 1}")
+            axes[1, 0].plot(p_use[sgn], res[sgn], "o-")
             # twin panel: D vs |p| (magnitude, catches even-order contamination)
             a2, b2, y_fit2, res2 = linear_fit(np.abs(p_use), vals[:, k])
-            axes[0, 1].plot(np.abs(p_use), vals[:, k], "o-")
-            axes[1, 1].plot(np.abs(p_use), res2, "o-")
+            axes[0, 1].plot(np.abs(p_use)[mag], vals[mag, k], "o-")
+            axes[1, 1].plot(np.abs(p_use)[mag], res2[mag], "o-")
             row: list = [mode, k + 1, f"{b:.6g}", f"{np.max(np.abs(res)):.4g}"]
             msg = (
                 f"mode {mode} PC {k + 1}: slope {b:.4g} MHz/unit-pert, max |res| {np.max(np.abs(res)):.4g} MHz (signed)"
