@@ -401,7 +401,7 @@ class ZFSManager:
                 continue
 
             dD = D_i - self.zfs_relaxed
-            self._check_symmetry(dD, sym, i)
+            self._check_symmetry(dD, sym, i, reference=self.zfs_relaxed)
 
             dD_dq = dD / q
             zfs_deriv[i] = dD_dq
@@ -488,7 +488,7 @@ class ZFSManager:
             D_qi_qj = item["tensor"]
             d2D_dqidqj = (D_qi_qj - self.zfs_relaxed) / (q_i * q_j) - dD_qi / q_j - dD_qj / q_i
 
-            self._check_symmetry(d2D_dqidqj, (sym_i, sym_j), (i, j))
+            self._check_symmetry(d2D_dqidqj, (sym_i, sym_j), (i, j), reference=self.zfs_relaxed)
 
             zfs_2nd_derivs[i, j] = d2D_dqidqj
             zfs_2nd_derivs[j, i] = d2D_dqidqj
@@ -749,9 +749,12 @@ class ZFSManager:
     # legitimate admixtures (finite-step q^2 leakage in a forward difference,
     # A2 responses that are pure SCF noise) pass and O(1) mislabels warn.
     _C3V_REL_TOL: ClassVar[float] = 0.1
+    # Responses below this fraction of the reference amplitude are numerical
+    # noise; their symmetry content is meaningless, so skip the check.
+    _MIN_AMP_FRAC: ClassVar[float] = 0.01
 
     @classmethod
-    def _check_symmetry(cls, d_tensor: np.ndarray, symmetry: Union[str, tuple[str, str]], idx: Any) -> None:
+    def _check_symmetry(cls, d_tensor: np.ndarray, symmetry: Union[str, tuple[str, str]], idx: Any, reference: np.ndarray | None = None) -> None:
         """Verify the derivative tensor carries only the irrep(s) its mode label
         allows. Delegates to symmetry.tensor_irrep_fractions (character
         projectors), so Ex/Ey/A2 and all second-order products are validated
@@ -759,12 +762,14 @@ class ZFSManager:
         sym_prod = (
             direct_product("3m", *symmetry) if isinstance(symmetry, tuple) else [symmetry]
         )
-        # 'Ex'/'Ey' label single E components; the isotypic content is 'E'.
-        allowed = {"E" if s.upper() in ("EX", "EY") else s.upper() for s in sym_prod}
         tensor = np.asarray(d_tensor, dtype=float)
         scale = np.linalg.norm(tensor)
         if scale == 0:
             return
+        if reference is not None and scale < cls._MIN_AMP_FRAC * np.linalg.norm(reference):
+            return
+        # 'Ex'/'Ey' label single E components; the isotypic content is 'E'.
+        allowed = {"E" if s.upper() in ("EX", "EY") else s.upper() for s in sym_prod}
         fracs = tensor_irrep_fractions(tensor)
         forbidden = {ir: f for ir, f in fracs.items() if ir not in allowed}
         forbidden_frac = np.linalg.norm([f for f in forbidden.values()])
