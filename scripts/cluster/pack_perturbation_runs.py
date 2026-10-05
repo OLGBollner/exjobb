@@ -70,7 +70,7 @@ def main() -> int:
     n_missing = n_empty = 0
     for mode, pert, outcar in runs:
         tensor = parse_outcar_zfs(outcar)
-        if tensor is None:
+        if tensor is None or bool(np.isnan(tensor.matrix).all()):
             print(f"warning: no ZFS tensor in {outcar} (run unfinished?)", file=sys.stderr)
             n_empty += 1
             continue
