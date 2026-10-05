@@ -9,6 +9,7 @@ the perturbation scale together with the residuals from a linear fit.
 Usage (anywhere, needs numpy + matplotlib):
     python plot_pert_convergence.py pert_runs.npz [-m MODE] [-o out.png]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,16 +51,16 @@ def match_branches(vals: np.ndarray, vecs: np.ndarray) -> tuple[np.ndarray, np.n
         # greedy assignment of ref branches to pert branches
         assign = [-1] * 3
         pairs = sorted(
-            ((ov[k, l], k, l) for k in range(3) for l in range(3)),
+            ((ov[k, col], k, col) for k in range(3) for col in range(3)),
             key=lambda t: (-t[0], t[1], t[2]),
         )
-        used_k, used_l = set(), set()
-        for score, k, l in pairs:
-            if k in used_k or l in used_l:
+        used_k, used_col = set(), set()
+        for score, k, col in pairs:
+            if k in used_k or col in used_col:
                 continue
-            assign[k] = l
+            assign[k] = col
             used_k.add(k)
-            used_l.add(l)
+            used_col.add(col)
         order[j] = assign
     idx = np.arange(n_pert)[:, None], order
     return vals[idx], vecs[idx]
@@ -74,19 +75,17 @@ def linear_fit(x: np.ndarray, y: np.ndarray) -> tuple[float, float, np.ndarray, 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Plot ZFS principal components vs perturbation scale "
-                    "with linear-fit residuals")
+        description="Plot ZFS principal components vs perturbation scale with linear-fit residuals"
+    )
     ap.add_argument("npz", type=Path, help="npz from pack_perturbation_runs.py")
-    ap.add_argument("-m", "--mode", type=int, action="append",
-                    help="plot only this mode (repeatable; default: all)")
-    ap.add_argument("-o", "--output", type=Path, default=None,
-                    help="output png (default: <npz stem>_convergence.png)")
-    ap.add_argument("--no-show", action="store_true",
-                    help="don't call plt.show() (useful on headless cluster)")
+    ap.add_argument("-m", "--mode", type=int, action="append", help="plot only this mode (repeatable; default: all)")
+    ap.add_argument("-o", "--output", type=Path, default=None, help="output png (default: <npz stem>_convergence.png)")
+    ap.add_argument("--no-show", action="store_true", help="don't call plt.show() (useful on headless cluster)")
     args = ap.parse_args()
 
     try:
         import matplotlib
+
         if args.no_show:
             matplotlib.use("Agg")
         import matplotlib.pyplot as plt
@@ -123,9 +122,7 @@ def main() -> int:
         vals, _ = match_branches(vals, vecs)
 
         ncols = 2
-        fig, axes = plt.subplots(
-            2, ncols, figsize=(5 * ncols, 6), sharex=True,
-            gridspec_kw={"height_ratios": [3, 1]})
+        fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
         for k in range(3):
             a, b, y_fit, res = linear_fit(p_use, vals[:, k])
             axes[0, 0].plot(p_use, vals[:, k], "o-", label=f"PC {k + 1}")
@@ -134,8 +131,9 @@ def main() -> int:
             a2, b2, y_fit2, res2 = linear_fit(np.abs(p_use), vals[:, k])
             axes[0, 1].plot(np.abs(p_use), vals[:, k], "o-")
             axes[1, 1].plot(np.abs(p_use), res2, "o-")
-            print(f"mode {mode} PC {k + 1}: slope {b:.4g} MHz/unit-pert, "
-                  f"max |res| {np.max(np.abs(res)):.4g} MHz (signed)")
+            print(
+                f"mode {mode} PC {k + 1}: slope {b:.4g} MHz/unit-pert, max |res| {np.max(np.abs(res)):.4g} MHz (signed)"
+            )
         for j, title in enumerate(["signed perturbation", "|perturbation|"]):
             axes[0, j].set_title(f"mode {mode}: ZFS PCs ({title})")
             axes[0, j].set_ylabel("principal component (MHz)")

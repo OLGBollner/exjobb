@@ -8,6 +8,7 @@ single compressed .npz for offline analysis (scp it off the cluster).
 Usage (from the folder holding runs/):
     python pack_perturbation_runs.py [-r RUN_ROOT] [-o OUT.npz]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,25 +27,23 @@ def discover_runs(run_root: Path) -> list[tuple[int, float, Path]]:
     for outcar in sorted(run_root.glob("runs/*/OUTCAR")):
         m = re.fullmatch(r"(\d+)_pert_(.+)", outcar.parent.name)
         if not m:
-            print(f"warning: skipping unrecognised run dir {outcar.parent.name}",
-                  file=sys.stderr)
+            print(f"warning: skipping unrecognised run dir {outcar.parent.name}", file=sys.stderr)
             continue
         try:
             runs.append((int(m.group(1)), float(m.group(2)), outcar))
         except ValueError:
-            print(f"warning: skipping unparsable run dir {outcar.parent.name}",
-                  file=sys.stderr)
+            print(f"warning: skipping unparsable run dir {outcar.parent.name}", file=sys.stderr)
     return sorted(runs, key=lambda r: (r[0], r[1]))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Parse runs/<mode>_pert_<p>/OUTCAR files and pack ZFS "
-                    "tensors + energies into one .npz")
-    ap.add_argument("-r", "--run-root", type=Path, default=Path("."),
-                    help="folder containing runs/ (default: .)")
-    ap.add_argument("-o", "--output", type=Path, default=Path("pert_runs.npz"),
-                    help="output .npz path (default: pert_runs.npz)")
+        description="Parse runs/<mode>_pert_<p>/OUTCAR files and pack ZFS tensors + energies into one .npz"
+    )
+    ap.add_argument("-r", "--run-root", type=Path, default=Path("."), help="folder containing runs/ (default: .)")
+    ap.add_argument(
+        "-o", "--output", type=Path, default=Path("pert_runs.npz"), help="output .npz path (default: pert_runs.npz)"
+    )
     args = ap.parse_args()
 
     if not (args.run_root / "runs").is_dir():
@@ -65,8 +64,7 @@ def main() -> int:
     for mode, pert, outcar in runs:
         tensor = parse_outcar_zfs(outcar)
         if tensor is None:
-            print(f"warning: no ZFS tensor in {outcar} (run unfinished?)",
-                  file=sys.stderr)
+            print(f"warning: no ZFS tensor in {outcar} (run unfinished?)", file=sys.stderr)
             n_empty += 1
             continue
         i, j = mode_idx[mode], pert_idx[pert]
@@ -81,13 +79,13 @@ def main() -> int:
         args.output,
         modes=np.array(modes, dtype=int),
         perts=np.array(perts, dtype=float),
-        tensors=tensors,          # (n_modes, n_perts, 3, 3), MHz
-        energies=energies,        # (n_modes, n_perts), eV
+        tensors=tensors,  # (n_modes, n_perts, 3, 3), MHz
+        energies=energies,  # (n_modes, n_perts), eV
     )
     n_done = tensors.size // 9 - n_empty
-    print(f"Packed {n_done}/{tensors.size // 9} runs "
-          f"({n_empty} unfinished, {n_missing} without energy) "
-          f"-> {args.output}")
+    print(
+        f"Packed {n_done}/{tensors.size // 9} runs ({n_empty} unfinished, {n_missing} without energy) -> {args.output}"
+    )
     print(f"modes: {modes}")
     print(f"perts: {perts}")
     return 0
