@@ -28,22 +28,24 @@ from pathlib import Path
 
 import numpy as np
 
+# allow running from anywhere: find the beyblade package on the repo's src/
+_repo = Path(__file__).resolve().parents[2]
+if (_repo / "src").is_dir():
+    sys.path.insert(0, str(_repo / "src"))
+
+from beyblade.models import ZFSTensor
+
 
 def principal_frame(D0: np.ndarray) -> np.ndarray:
-    """Ground-state principal-axis rotation R (EPR convention).
+    """Ground-state principal-axis rotation R, via beyblade.ZFSTensor.
 
-    Same convention as beyblade.models.principal_components: traceless
-    tensor, eigh, columns of R sorted so |D_zz| >= |D_yy| >= |D_xx|,
-    right-handed. Built ONCE from the relaxed tensor; every perturbed
-    tensor is then rotated into this fixed frame (R.T @ D @ R), as in
-    ZFSManager._ingest_raw_data.
+    ZFSTensor(D0).principal_components() returns (D_xx, D_yy, D_zz, R)
+    in EPR convention (|D_zz| >= |D_yy| >= |D_xx|, traceless), with R's
+    columns the ground-state eigenvectors. Built ONCE; every perturbed
+    tensor is then rotated into this fixed frame (R.T @ D @ R), exactly
+    as ZFSManager._ingest_raw_data does.
     """
-    dtl = D0 - np.trace(D0) / 3.0 * np.eye(3)
-    _, evecs = np.linalg.eigh(dtl)
-    order = np.argsort(np.abs(np.linalg.eigvalsh(dtl)))  # ix, iy, iz
-    R = np.column_stack([evecs[:, k] for k in order])
-    if np.linalg.det(R) < 0:
-        R[:, 0] = -R[:, 0]
+    _, _, _, R = ZFSTensor(matrix=D0).principal_components()
     return R
 
 
@@ -166,7 +168,7 @@ def main() -> int:
             )
         R = principal_frame(t_all[izero])
         p_use = p_all
-        vals = np.stack([np.diag(R.T @ t @ R) for t in t_all])
+        vals = np.stack([ZFSTensor(matrix=t).rotate(R.T).matrix.diagonal() for t in t_all])
         # plot order: ascending signed value / ascending |value|, so lines
         # connect monotonically instead of zigzagging between +Q and -Q
         sgn = np.argsort(p_use)
