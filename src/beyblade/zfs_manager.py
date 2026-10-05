@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 import numpy as np
 
 from beyblade.constants import CONSTANTS
-from beyblade.symmetry import twin_of, _build_groups_from_labels
-from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
+from beyblade.symmetry import direct_product, tensor_irrep_fractions, twin_of, _build_groups_from_labels
+from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, SymmetricArray
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
@@ -401,7 +401,7 @@ class ZFSManager:
                 continue
 
             dD = D_i - self.zfs_relaxed
-            self._check_symmetry(dD, sym, i)
+            self._check_symmetry(dD, sym, i, reference=self.zfs_relaxed)
 
             dD_dq = dD / q
             zfs_deriv[i] = dD_dq
@@ -462,7 +462,7 @@ class ZFSManager:
         n_modes = self.nmodes
         phonon_energies = self.get_phonon_frequencies()
 
-        zfs_2nd_derivs = np.zeros((n_modes, n_modes, 3, 3))
+        zfs_2nd_derivs = SymmetricArray(n_modes)
         V_0_0_2nd = np.zeros((n_modes, n_modes))
         V_p_m_2nd = np.zeros((n_modes, n_modes))
         V_0_pm_2nd = np.zeros((n_modes, n_modes))
@@ -483,12 +483,12 @@ class ZFSManager:
             dD_qi = zfs_1d_derivs[i]
             dD_qj = zfs_1d_derivs[j]
             sym_i, sym_j = item["symmetry"]
-            sym = MathUtils.calc_symmetry(sym_i, sym_j)
+            sym = direct_product("3m", sym_i, sym_j)
 
             D_qi_qj = item["tensor"]
             d2D_dqidqj = (D_qi_qj - self.zfs_relaxed) / (q_i * q_j) - dD_qi / q_j - dD_qj / q_i
 
-            self._check_symmetry(d2D_dqidqj, (sym_i, sym_j), (i, j))
+            self._check_symmetry(d2D_dqidqj, (sym_i, sym_j), (i, j), reference=self.zfs_relaxed)
 
             zfs_2nd_derivs[i, j] = d2D_dqidqj
             zfs_2nd_derivs[j, i] = d2D_dqidqj
@@ -744,25 +744,52 @@ class ZFSManager:
         print(f"Saved ZFS data to: {save_name}")
         return save_name
 
-    @staticmethod
-    def _check_symmetry(d_tensor: np.ndarray, symmetry: Union[str, tuple[str, str]], idx: Any) -> None:
+    # Max forbidden-irrep content (fraction of the tensor norm) before a
+    # symmetry warning fires. Relative to the full tensor norm so that small
+    # legitimate admixtures (finite-step q^2 leakage in a forward difference,
+    # A2 responses that are pure SCF noise) pass and O(1) mislabels warn.
+    _C3V_REL_TOL: ClassVar[float] = 0.1
+    # Responses below this fraction of the reference amplitude are numerical
+    # noise; their symmetry content is meaningless, so skip the check.
+    _MIN_AMP_FRAC: ClassVar[float] = 0.01
+
+    @classmethod
+    def _check_symmetry(cls, d_tensor: np.ndarray, symmetry: Union[str, tuple[str, str]], idx: Any, reference: np.ndarray | None = None) -> None:
+        """Verify the derivative tensor carries only the irrep(s) its mode label
+        allows. Delegates to symmetry.tensor_irrep_fractions (character
+        projectors), so Ex/Ey/A2 and all second-order products are validated
+        too."""
         sym_prod = (
-            MathUtils.calc_symmetry(*symmetry) if isinstance(symmetry, tuple) else [symmetry]
+            direct_product("3m", *symmetry) if isinstance(symmetry, tuple) else [symmetry]
         )
-        if sym_prod == ["A1"]:
-            diag = np.diag(d_tensor)
-            d_xx, d_yy, d_zz = diag
-            tensor_scale = np.max(np.abs(diag))
-            dyn_tol = 1.0 * tensor_scale + 1e-4
+        tensor = np.asarray(d_tensor, dtype=float)
+        scale = np.linalg.norm(tensor)
+        if scale == 0:
+            return
+        if reference is not None and scale < cls._MIN_AMP_FRAC * np.linalg.norm(reference):
+            return
+        # 'Ex'/'Ey' label single E components; the isotypic content is 'E'.
+        allowed = {"E" if s.upper() in ("EX", "EY") else s.upper() for s in sym_prod}
+        fracs = tensor_irrep_fractions(tensor)
+        forbidden = {ir: f for ir, f in fracs.items() if ir not in allowed}
+        forbidden_frac = np.linalg.norm([f for f in forbidden.values()])
+        allowed_frac = np.linalg.norm([f for ir, f in fracs.items() if ir in allowed])
+        tol = cls._C3V_REL_TOL
+        if forbidden_frac > tol:
+            details = ", ".join(f"{ir}={f:.2f}" for ir, f in sorted(forbidden.items()))
+            print(f"\nWarning: Symmetry mismatch at index {idx} with symmetry {sym_prod}")
+            print(f"  Intended {allowed}: {', '.join(f'{ir}={fracs[ir]:.2f}' for ir in sorted(allowed))} (total {allowed_frac:.2f})")
+            print(f"  Forbidden content: {details} (total {forbidden_frac:.2f}, tol {tol})")
+            print("  Tensor:")
+            cls._print_tensor(tensor)
 
-            is_axial = np.abs(d_xx - d_yy) <= dyn_tol
-            is_traceless_axial = np.abs(2 * d_xx + d_zz) <= dyn_tol
-            off_diag_mask = ~np.eye(3, dtype=bool)
-            off_diags_zero = np.all(np.abs(d_tensor[off_diag_mask]) <= dyn_tol)
-
-            if not (is_axial and is_traceless_axial and off_diags_zero):
-                print(f"\nWarning: Symmetry mismatch at index {idx} with symmetry {sym_prod}")
-                print(f"Threshold: {dyn_tol:.2e} | Scale: {tensor_scale:.2f}")
+    @staticmethod
+    def _print_tensor(tensor: np.ndarray) -> None:
+        """Print a 3x3 tensor with aligned columns, values converted J -> MHz."""
+        col_width = 12
+        J_TO_MHZ = 1.5091902e27  # (1/h) * 1e-6
+        for row in np.asarray(tensor, dtype=float) * J_TO_MHZ:
+            print("   " + "".join(f"{v:<{col_width}.6f} " for v in row))
 
     def _debug_derivs(self, dD, q, symmetry, idx, V_0_0, V_0_pm, V_p_m):
         max_val = np.max(np.abs(dD))

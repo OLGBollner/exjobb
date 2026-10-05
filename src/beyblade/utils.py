@@ -253,36 +253,9 @@ class MathUtils:
 
     @staticmethod
     def calc_symmetry(sym_a: str, sym_b: str) -> list[str]:
-        """Calculate resulting symmetry irreps for the C3v point group."""
-        
-        def parse_irrep(sym: str) -> str:
-            sym_upper = sym.upper()
-            if sym_upper in ("EX", "EY"):
-                return "E"
-            return sym_upper
+        """Direct product of two irrep labels (any group in CHARACTER_TABLES).
+        Delegates to symmetry.direct_product; kept for backward compatibility."""
+        from beyblade.symmetry import direct_product
 
-        a_parsed = parse_irrep(sym_a)
-        b_parsed = parse_irrep(sym_b)
-
-        product_table = {
-            ("A1", "A1"): ["A1"],
-            ("A1", "A2"): ["A2"],
-            ("A1", "E"): ["E"],
-            ("A2", "A1"): ["A2"],
-            ("A2", "A2"): ["A1"],
-            ("A2", "E"): ["E"],
-            ("E", "A1"): ["E"],
-            ("E", "A2"): ["E"],
-            ("E", "E"): ["A1", "A2", "E"],
-        }
-        
-        pair = (a_parsed, b_parsed)
-        if pair in product_table:
-            return product_table[pair]
-            
-        reverse_pair = (b_parsed, a_parsed)
-        if reverse_pair in product_table:
-            return product_table[reverse_pair]
-            
-        raise ValueError(f"Direct product for irreps {sym_a} and {sym_b} is not defined.")
+        return direct_product("3m", sym_a, sym_b)
 
