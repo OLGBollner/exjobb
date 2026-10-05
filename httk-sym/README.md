@@ -6,7 +6,7 @@ Source of truth: the [httk Spacegroup Data Explorer](https://symdata.anyterial.s
 License: **CC-BY 4.0** — attribution required; see the attribution note in the
 repository README.
 
-Fetch with:
+Fetch and extract (the archives arrive as .json.gz):
 
     python3 scripts/data/download_httk_sym.py
 
