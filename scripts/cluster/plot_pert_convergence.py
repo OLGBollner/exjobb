@@ -13,6 +13,10 @@ With --quad, also fit y = a + b x + c x^2 per principal component and
 report 2c (the second-order ZFS derivative d2D/dQ2) next to the linear
 slope, so the quadratic-regression estimate can be cross-checked against
 a forward-difference value computed from the two smallest-|Q| points.
+When Q=0 is present (either as a pert in the npz or via the 'd0' key
+written by pack_perturbation_runs.py --ground-state) it is included as
+an anchored data point and a central second difference
+(f(+Q) + f(-Q) - 2 f(0)) / Q^2 is reported per |Q| as well.
 """
 
 from __future__ import annotations
@@ -140,6 +144,18 @@ def main() -> int:
     perts = data["perts"]
     tensors = data["tensors"]
 
+    # Anchor the Q=0 point: take it from the perts array if present, else
+    # from the 'd0' key written by pack_perturbation_runs.py --ground-state.
+    if 0.0 not in set(perts.tolist()):
+        if "d0" in data:
+            perts = np.concatenate(([0.0], perts))
+            tensors = np.concatenate((np.broadcast_to(data["d0"], (tensors.shape[0], 1, 3, 3)), tensors), axis=1)
+        else:
+            print(
+                "warning: no Q=0 point (no 0 in perts, no 'd0' key in npz); fits use the unanchored points only",
+                file=sys.stderr,
+            )
+
     wanted = args.mode if args.mode else [int(m) for m in modes]
     missing = [m for m in wanted if m not in set(modes.tolist())]
     if missing:
@@ -184,15 +200,28 @@ def main() -> int:
                 qa, qb, qc, _, qres = quad_fit(p_use, vals[:, k])
                 d2 = 2 * qc
                 fwd = one_sided_d2(p_use, vals[:, k])
-                fwd_txt = f"{fwd:.4g}" if fwd is not None else "n/a (non-uniform spacing)"
+                fwd_txt = f"{fwd:.4g}" if fwd is not None else "n/a"
+                span = float(np.ptp(vals[:, k])) or 1e-30
                 rel = (
                     f" ({abs(d2 - fwd) / max(abs(fwd), 1e-30) * 100:.2f}% from fwd)"
-                    if fwd is not None and abs(fwd) > 1e-30
+                    if fwd is not None and abs(fwd) > 0.05 * span
                     else ""
                 )
-                msg += f"\n    quad: D(Q) = {qa:.4g} + {qb:.4g} Q + {qc:.4g} Q^2"
+                msg += f"\n    quad: D(Q) = {qa:.4g} + {qb:.4g} Q + {qc:.4g} Q^2 (dof {len(p_use) - 3})"
                 msg += f"\n    d2D/dQ2: regression {d2:.4g}, one-sided fwd {fwd_txt} MHz/pert^2{rel}"
                 row += [f"{d2:.6g}", fwd_txt]
+                # central second differences (f(+Q) + f(-Q) - 2 f(0)) / Q^2
+                if 0.0 in set(p_use.tolist()):
+                    f0 = vals[p_use == 0.0, k][0]
+                    cents = []
+                    for q in sorted({abs(x) for x in p_use if x > 0}):
+                        neg, pos = np.isclose(p_use, -q), np.isclose(p_use, q)
+                        if neg.any() and pos.any():
+                            cent = (vals[pos, k][0] + vals[neg, k][0] - 2 * f0) / q**2
+                            cents.append(f"{q:g}:{cent:.4g}")
+                            row[-1] = f"{cent:.6g}"
+                    if cents:
+                        msg += f"\n    central d2 (|Q|:value): {', '.join(cents)} MHz/pert^2"
             print(msg)
             csv_rows.append(tuple(row))
         for j, title in enumerate(["signed perturbation", "|perturbation|"]):
@@ -212,7 +241,7 @@ def main() -> int:
     if args.csv:
         header = ["mode", "pc", "slope", "max_abs_res"]
         if args.quad:
-            header += ["d2_reg", "d2_fwd"]
+            header += ["d2_reg", "d2_3pt"]  # 3-pt = central diff if Q=0 present, else one-sided
         with args.csv.open("w") as fh:
             fh.write(",".join(header) + "\n")
             for row in csv_rows:

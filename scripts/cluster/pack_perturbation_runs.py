@@ -6,7 +6,7 @@ ZFS tensor and final energy from each finished run, and saves everything to a
 single compressed .npz for offline analysis (scp it off the cluster).
 
 Usage (from the folder holding runs/):
-    python pack_perturbation_runs.py [-r RUN_ROOT] [-o OUT.npz]
+    python pack_perturbation_runs.py [-r RUN_ROOT] [-o OUT.npz] [--ground-state OUTCAR]
 """
 
 from __future__ import annotations
@@ -44,6 +44,13 @@ def main() -> int:
     ap.add_argument(
         "-o", "--output", type=Path, default=Path("pert_runs.npz"), help="output .npz path (default: pert_runs.npz)"
     )
+    ap.add_argument(
+        "--ground-state",
+        type=Path,
+        default=None,
+        metavar="OUTCAR",
+        help="ground-state OUTCAR; its ZFS tensor is stored as 'd0' (the Q=0 point) in the npz",
+    )
     args = ap.parse_args()
 
     if not (args.run_root / "runs").is_dir():
@@ -75,12 +82,24 @@ def main() -> int:
         else:
             n_missing += 1
 
+    extra = {}
+    if args.ground_state is not None:
+        d0 = parse_outcar_zfs(args.ground_state)
+        if d0 is None:
+            sys.exit(f"Error: no ZFS tensor in ground-state OUTCAR {args.ground_state}")
+        extra["d0"] = d0.matrix  # (3, 3) MHz, the Q=0 point
+        e0 = parse_outcar_energy(args.ground_state)
+        if e0 is not None:
+            extra["d0_energy"] = np.float64(e0)
+        print(f"ground-state tensor from {args.ground_state}\n{extra['d0']}")
+
     np.savez_compressed(
         args.output,
         modes=np.array(modes, dtype=int),
         perts=np.array(perts, dtype=float),
         tensors=tensors,  # (n_modes, n_perts, 3, 3), MHz
         energies=energies,  # (n_modes, n_perts), eV
+        **extra,
     )
     n_done = tensors.size // 9 - n_empty
     print(
