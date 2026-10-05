@@ -14,7 +14,7 @@ FILES = [
     "transformations_hm_entry.json.gz",
     "transformations_std.json.gz",
 ]
-OUT = Path(__file__).resolve().parent.parent / "httk-sym"
+OUT = Path(__file__).resolve().parents[2] / "httk-sym"
 
 
 def main() -> None:

@@ -8,6 +8,6 @@ repository README.
 
 Fetch with:
 
-    python3 scripts/cluster/download_httk_sym.py
+    python3 scripts/data/download_httk_sym.py
 
 The JSON files are gitignored; this folder only carries this README.
