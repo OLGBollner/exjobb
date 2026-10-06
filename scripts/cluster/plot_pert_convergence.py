@@ -205,7 +205,7 @@ def main() -> int:
             if len(p_use) == 0:
                 print(f"mode {mode}: --drop-anchor leaves no points, skipping", file=sys.stderr)
                 continue
-        vals = np.stack([ZFSTensor(matrix=t).rotate(R.T).matrix.diagonal() for t in t_use])
+        vals = np.stack([np.diag(R.T @ t @ R) for t in t_use])
         if args.deviation:
             # plot D(Q) - D(Q=0) so the response is visible on its own scale
             vals = vals - vals[izero]
