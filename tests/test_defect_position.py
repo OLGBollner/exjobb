@@ -62,3 +62,34 @@ class TestFindDefect:
         cart = np.mean([struct[i].coords for i in loc.neighbor_indices], axis=0)
         expected = struct.lattice.get_fractional_coords(cart) % 1.0
         assert np.allclose(loc.frac_coords, expected, atol=1e-6)
+
+
+class TestFindDefectExtended:
+    def test_divacancy_position(self):
+        struct = _diamond_si_supercell()
+        # Two nearest-neighbour Si sites (indices 5 and its NN).
+        removed = [
+            struct[5],
+            min((s for i, s in enumerate(struct) if i != 5), key=lambda s: struct.get_distance(5, struct.index(s))),
+        ]
+        keep = [s for s in struct if all(not s.is_periodic_image(r) for r in removed)]
+        defect_struct = Structure(struct.lattice, [s.specie for s in keep], [s.frac_coords for s in keep])
+        defects = find_defect(defect_struct)
+        assert len(defects) == 1
+        loc = defects[0]
+        assert loc.defect_class == "divacancy"
+        assert loc.site_index is None
+        # Centroid should sit on the bond centre between the two sites.
+        midpoint = np.mean([r.frac_coords for r in removed], axis=0)
+        disp = (loc.frac_coords - midpoint + 0.5) % 1.0 - 0.5
+        assert np.allclose(disp, 0.0, atol=1e-6)
+
+    def test_substitutional_identification(self):
+        struct = _diamond_si_supercell()
+        struct[5] = "Ge"
+        defects = find_defect(struct)
+        assert len(defects) == 1
+        loc = defects[0]
+        assert loc.defect_class == "substitutional"
+        assert loc.site_index == 5
+        assert loc.species == "Ge"

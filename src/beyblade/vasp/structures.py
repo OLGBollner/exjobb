@@ -29,10 +29,11 @@ class DefectLocation:
     neighbor_indices lists its (ambiguous) members.
     """
 
-    defect_class: str  # "vacancy" | "interstitial"
+    defect_class: str  # "vacancy" | "divacancy" | "interstitial" | "substitutional"
     frac_coords: np.ndarray
     site_index: int | None
     neighbor_indices: tuple[int, ...]
+    species: str | None = None  # for substitutionals: the substituent species
 
 
 def _local_metrics(structure: Structure) -> tuple[np.ndarray, float, np.ndarray]:
@@ -121,30 +122,66 @@ def find_defect(
     # Vacancies: clusters of under-coordinated sites relative to the
     # per-species mode coordination number.
     under_coord: dict[str, list[int]] = {}
+    mode_cn_by_species: dict[str, int] = {}
     for species in {s.specie.symbol for s in structure}:
         members = [i for i, s in enumerate(structure) if s.specie.symbol == species]
         if len(members) < 2:
             continue
         mode_cn = int(np.bincount(cn[members].astype(int)).argmax())
+        mode_cn_by_species[species] = mode_cn
         under_coord[species] = [i for i in members if cn[i] < mode_cn]
 
     neighbour_pool = sorted(set(sum(under_coord.values(), [])) - interstitial_sites)
     if neighbour_pool:
-        # Neighbours of one vacancy are not bonded to each other (they
-        # sit ~1.63 bond lengths apart in a tetrahedral lattice), so a
-        # first-shell cutoff would split them. Cluster with a wider
-        # reach that still keeps separate defects apart.
-        vac_cutoff = 1.6 * cutoff
+        # Neighbours of one defect are not all bonded to each other:
+        # first-shell neighbours sit ~1.63 bond lengths apart, and a
+        # divacancy's shell spans up to ~2 bond lengths. A wide reach
+        # (2.1 x) still keeps defects 3+ bond lengths apart separate.
+        vac_cutoff = 2.1 * cutoff
         for cluster in _cluster_indices(neighbour_pool, structure, vac_cutoff):
+            # Each missing atom removes mode_cn bonds, but bonds
+            # between two removed atoms touch no surviving site, so
+            # deficit undercounts. A single vacancy leaves deficit
+            # mode_cn; an adjacent divacancy leaves 2*mode_cn - 2.
+            deficit = sum(mode_cn_by_species[structure[i].specie.symbol] - cn[i] for i in cluster)
+            defect_class = "divacancy" if deficit > max(mode_cn_by_species.values()) else "vacancy"
             frac_centroid = _periodic_mean(np.array([structure[i].frac_coords for i in cluster]))
             defects.append(
                 DefectLocation(
-                    defect_class="vacancy",
+                    defect_class=defect_class,
                     frac_coords=frac_centroid % 1.0,
                     site_index=None,
                     neighbor_indices=tuple(cluster),
                 )
             )
+
+    # Substitutionals: group sites by their neighbour-species
+    # signature; the majority species within a signature defines the
+    # host species for that sublattice, so a minority-species site is
+    # the substituent.
+    signatures: dict[tuple, list[int]] = {}
+    for i in range(len(structure)):
+        if i in interstitial_sites:
+            continue
+        counts: dict[str, int] = {}
+        for n in structure.get_neighbors(structure[i], cutoff):
+            counts[n.specie.symbol] = counts.get(n.specie.symbol, 0) + 1
+        sig = tuple(sorted(counts.items()))
+        signatures.setdefault(sig, []).append(i)
+    for sig, members in signatures.items():
+        species_counts = np.bincount([structure[i].specie.Z for i in members])
+        majority_z = int(np.argmax(species_counts))
+        for i in members:
+            if structure[i].specie.Z != majority_z:
+                defects.append(
+                    DefectLocation(
+                        defect_class="substitutional",
+                        frac_coords=np.array(structure[i].frac_coords),
+                        site_index=i,
+                        neighbor_indices=(),
+                        species=structure[i].specie.symbol,
+                    )
+                )
 
     defects.sort(key=lambda d: tuple(d.frac_coords))
     return defects
