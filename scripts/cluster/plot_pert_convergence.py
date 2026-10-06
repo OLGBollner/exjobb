@@ -122,6 +122,11 @@ def main() -> int:
         "--csv", type=Path, default=None, help="write slopes (and quad coefficients with --quad) to this csv"
     )
     ap.add_argument("--no-show", action="store_true", help="don't call plt.show() (useful on headless cluster)")
+    ap.add_argument(
+        "--drop-anchor",
+        action="store_true",
+        help="exclude the Q=0 anchor from fits and residuals (curves still extrapolate to Q=0)",
+    )
     args = ap.parse_args()
 
     try:
@@ -188,7 +193,14 @@ def main() -> int:
             )
         R = principal_frame(t_all[izero])
         p_use = p_all
-        vals = np.stack([ZFSTensor(matrix=t).rotate(R.T).matrix.diagonal() for t in t_all])
+        t_use = t_all
+        if args.drop_anchor:
+            p_use = p_all[np.abs(p_all) > 0]
+            t_use = t_all[np.abs(p_all) > 0]
+            if len(p_use) == 0:
+                print(f"mode {mode}: --drop-anchor leaves no points, skipping", file=sys.stderr)
+                continue
+        vals = np.stack([ZFSTensor(matrix=t).rotate(R.T).matrix.diagonal() for t in t_use])
         # plot order: ascending signed value, so lines connect monotonically
         # instead of zigzagging between +Q and -Q
         sgn = np.argsort(p_use)
