@@ -63,6 +63,19 @@ def quad_fit(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float, np.ndar
     return a, b, c, y_fit, y - y_fit
 
 
+def q_needed(c: float, noise: float, snr: float = 3.0) -> float | None:
+    """Amplitude Q at which the quadratic term c*Q^2 exceeds noise by snr.
+
+    noise is the max |linear-fit residual|, i.e. the numerical scatter in D.
+    Returns None when |c| is negligible (quadratic term stays buried at any
+    reachable amplitude) — comparing c*Q^2 to noise directly.
+    """
+    if c == 0.0 or not np.isfinite(c):
+        return None
+    q = float(np.sqrt(snr * abs(noise) / abs(c)))
+    return q if np.isfinite(q) else None
+
+
 def one_sided_d2(p: np.ndarray, v: np.ndarray) -> float | None:
     """Second derivative from the three smallest-|Q| points (Lagrange).
 
@@ -212,6 +225,11 @@ def main() -> int:
                 )
                 msg += f"\n    quad: D(Q) = {qa:.4g} + {qb:.4g} Q + {qc:.4g} Q^2 (dof {len(p_use) - 3})"
                 msg += f"\n    d2D/dQ2: regression {d2:.4g}, one-sided fwd {fwd_txt} MHz/pert^2{rel}"
+                qreq = q_needed(qc, np.max(np.abs(res)))
+                if qreq is not None:
+                    msg += f"\n    Q needed for quad term at SNR 3: |Q| ~ {qreq:.3g} (current max |Q|: {np.max(np.abs(p_use)):.3g})"
+                else:
+                    msg += "\n    Q needed for quad term at SNR 3: n/a (c negligible vs noise)"
                 row += [f"{d2:.6g}", fwd_txt]
                 # central second differences (f(+Q) + f(-Q) - 2 f(0)) / Q^2
                 if 0.0 in set(p_use.tolist()):
