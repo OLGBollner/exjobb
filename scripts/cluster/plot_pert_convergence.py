@@ -119,6 +119,11 @@ def main() -> int:
         "--quad", action="store_true", help="also fit y = a + b x + c x^2 and report the second-order derivative 2c"
     )
     ap.add_argument(
+        "--deviation",
+        action="store_true",
+        help="plot D(Q) - D(Q=0) instead of raw D, so the response fills the y-range",
+    )
+    ap.add_argument(
         "--csv", type=Path, default=None, help="write slopes (and quad coefficients with --quad) to this csv"
     )
     ap.add_argument("--no-show", action="store_true", help="don't call plt.show() (useful on headless cluster)")
@@ -201,6 +206,9 @@ def main() -> int:
                 print(f"mode {mode}: --drop-anchor leaves no points, skipping", file=sys.stderr)
                 continue
         vals = np.stack([ZFSTensor(matrix=t).rotate(R.T).matrix.diagonal() for t in t_use])
+        if args.deviation:
+            # plot D(Q) - D(Q=0) so the response is visible on its own scale
+            vals = vals - vals[izero]
         # plot order: ascending signed value, so lines connect monotonically
         # instead of zigzagging between +Q and -Q
         sgn = np.argsort(p_use)
