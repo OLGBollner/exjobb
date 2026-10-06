@@ -181,18 +181,20 @@ def main() -> int:
         sgn = np.argsort(p_use)
 
         ncols = 2
-        fig, axes = plt.subplots(1, ncols, figsize=(5.5 * ncols, 4.5))
+        fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
         for k in range(3):
             a, b, y_lin, res = linear_fit(p_use, vals[:, k])
             qa, qb, qc, y_q, qres = quad_fit(p_use, vals[:, k])
-            # data with regression curve faded underneath; residual shown as a
-            # shaded band between the fit and the data (upper/lower envelope)
-            axes[0].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1} (b={b:.4g})")
-            axes[0].plot(p_use[sgn], y_lin[sgn], "-", alpha=0.35, color=axes[0].lines[-1].get_color())
-            axes[0].fill_between(p_use[sgn], y_lin[sgn], vals[sgn, k], alpha=0.2, color=axes[0].lines[-1].get_color())
-            axes[1].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1} (b={b:.4g}, 2c={2 * qc:.4g})")
-            axes[1].plot(p_use[sgn], y_q[sgn], "-", alpha=0.35, color=axes[1].lines[-1].get_color())
-            axes[1].fill_between(p_use[sgn], y_q[sgn], vals[sgn, k], alpha=0.2, color=axes[1].lines[-1].get_color())
+            axes[0, 0].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1}")
+            axes[0, 0].plot(p_use[sgn], y_lin[sgn], "-", alpha=0.4, color=axes[0, 0].lines[-1].get_color())
+            axes[1, 0].plot(p_use[sgn], res[sgn], "o-")
+            axes[1, 0].axhline(np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
+            axes[1, 0].axhline(-np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
+            axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1} (b={b:.4g}, 2c={2 * qc:.4g})")
+            axes[0, 1].plot(p_use[sgn], y_q[sgn], "-", alpha=0.4, color=axes[0, 1].lines[-1].get_color())
+            axes[1, 1].plot(p_use[sgn], qres[sgn], "o-")
+            axes[1, 1].axhline(np.max(np.abs(qres)), ls="--", lw=0.8, color="grey")
+            axes[1, 1].axhline(-np.max(np.abs(qres)), ls="--", lw=0.8, color="grey")
             row: list = [mode, k + 1, f"{b:.6g}", f"{np.max(np.abs(res)):.4g}"]
             msg = (
                 f"mode {mode} PC {k + 1}: slope {b:.4g} MHz/unit-pert, max |res| {np.max(np.abs(res)):.4g} MHz (signed)"
@@ -226,10 +228,11 @@ def main() -> int:
             print(msg)
             csv_rows.append(tuple(row))
         for j, title in enumerate(["linear regression", "quadratic least squares"]):
-            axes[j].set_title(f"mode {mode}: ZFS PCs ({title})")
-            axes[j].set_xlabel("perturbation scale")
-            axes[j].set_ylabel("principal component (MHz)")
-        axes[1].legend(fontsize=7)
+            axes[0, j].set_title(f"mode {mode}: ZFS PCs ({title})")
+            axes[0, j].set_ylabel("principal component (MHz)")
+            axes[1, j].set_xlabel("perturbation scale")
+            axes[1, j].set_ylabel("residual (MHz)")
+        axes[0, 1].legend(fontsize=7)
         fig.tight_layout()
         stem, ext = args.output.stem, args.output.suffix or ".png"
         out = args.output.with_name(f"{stem}_mode{mode}{ext}")
