@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """plot_pert_convergence.py -- D vs displacement with residuals from pack npz.
 
-Loads the .npz written by pack_perturbation_runs.py, diagonalises each ZFS
-tensor, matches eigenvector branches across perturbations (by overlap with
-the smallest-|pert| reference), and plots each principal component against
-the perturbation scale together with the residuals from a linear fit.
+Loads the .npz written by pack_perturbation_runs.py, rotates each ZFS
+tensor into the ground-state principal frame (fixed rotation built once
+from the Q=0 tensor, as in beyblade's ZFSManager), and plots the diagonal
+components against the perturbation scale together with the residuals
+from a linear fit.
 
 Usage (anywhere, needs numpy + matplotlib):
     python plot_pert_convergence.py pert_runs.npz [-m MODE] [-o out.png]
@@ -27,52 +28,25 @@ from pathlib import Path
 
 import numpy as np
 
+# allow running from anywhere: find the beyblade package on the repo's src/
+_repo = Path(__file__).resolve().parents[2]
+if (_repo / "src").is_dir():
+    sys.path.insert(0, str(_repo / "src"))
 
-def diagonalize_tensors(tensors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per (mode, pert) tensor: eigenvalues (ascending) and eigenvectors.
+from beyblade.models import ZFSTensor
 
-    Returns vals (..., 3) and vecs (..., 3, 3) with vecs[..., :, k] the
-    k-th eigenvector column, sorted by eigenvalue.
+
+def principal_frame(D0: np.ndarray) -> np.ndarray:
+    """Ground-state principal-axis rotation R, via beyblade.ZFSTensor.
+
+    ZFSTensor(D0).principal_components() returns (D_xx, D_yy, D_zz, R)
+    in EPR convention (|D_zz| >= |D_yy| >= |D_xx|, traceless), with R's
+    columns the ground-state eigenvectors. Built ONCE; every perturbed
+    tensor is then rotated into this fixed frame (R.T @ D @ R), exactly
+    as ZFSManager._ingest_raw_data does.
     """
-    vals, vecs = np.linalg.eigh(tensors)
-    order = np.argsort(vals, axis=-1)
-    vals = np.take_along_axis(vals, order, axis=-1)
-    vecs = np.take_along_axis(vecs, order[..., None, :], axis=-1)
-    # fix sign ambiguity: make the largest-|.| component positive
-    lead = np.argmax(np.abs(vecs), axis=-2, keepdims=True)
-    sign = np.sign(np.take_along_axis(vecs, lead, axis=-2))
-    vecs = vecs * sign
-    return vals, vecs
-
-
-def match_branches(vals: np.ndarray, vecs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Reorder branches along the pert axis so each tracks one eigenvector.
-
-    vals/vecs: (n_pert, 3) and (n_pert, 3, 3) for ONE mode. Branch k of each
-    perturbation is assigned to the reference branch it overlaps most with
-    (greedy, per perturbation). Returns reordered copies.
-    """
-    n_pert = vals.shape[0]
-    ref = 0  # smallest-|pert| index (npz perts are sorted)
-    order = np.zeros((n_pert, 3), dtype=int)
-    for j in range(n_pert):
-        ov = np.abs(vecs[ref].T @ vecs[j])  # (3, 3): ref branch k vs j branch l
-        # greedy assignment of ref branches to pert branches
-        assign = [-1] * 3
-        pairs = sorted(
-            ((ov[k, col], k, col) for k in range(3) for col in range(3)),
-            key=lambda t: (-t[0], t[1], t[2]),
-        )
-        used_k, used_col = set(), set()
-        for score, k, col in pairs:
-            if k in used_k or col in used_col:
-                continue
-            assign[k] = col
-            used_k.add(k)
-            used_col.add(col)
-        order[j] = assign
-    idx = np.arange(n_pert)[:, None], order
-    return vals[idx], vecs[idx]
+    _, _, _, R = ZFSTensor(matrix=D0).principal_components()
+    return R
 
 
 def linear_fit(x: np.ndarray, y: np.ndarray) -> tuple[float, float, np.ndarray, np.ndarray]:
@@ -99,15 +73,22 @@ def one_sided_d2(p: np.ndarray, v: np.ndarray) -> float | None:
     """
     if len(p) < 3:
         return None
-    order = np.argsort(np.abs(p))
-    # three consecutive points on the same side of zero (monotone in |Q|);
-    # fall back to the global |Q|-sorted triple only if one side is short
-    side = p[p > 0] if (p > 0).sum() >= 3 else p[p < 0]
-    if len(side) >= 3:
-        srt = np.argsort(np.abs(side))
-        p3, v3 = side[srt[:3]], v[order[np.isin(p, side[srt[:3]])]]
+    srt = np.argsort(np.abs(p))
+    p_s, v_s = p[srt], v[srt]
+    if np.isclose(p_s[0], 0.0) and ((p_s > 0).sum() >= 2 or (p_s < 0).sum() >= 2):
+        # with a Q=0 anchor: triple (0, Q1, Q2) on whichever side has points,
+        # evaluated at Q=0 itself
+        pos_idx = np.where(p_s > 0)[0][:2]
+        neg_idx = np.where(p_s < 0)[0][:2]
+        idx = np.concatenate(([0], pos_idx if len(pos_idx) == 2 else neg_idx))
     else:
-        p3, v3 = p[order[:3]], v[order[:3]]
+        # no anchor: three consecutive same-side points, evaluated at the
+        # smallest-|Q| one
+        side = p_s > 0 if (p_s > 0).sum() >= 3 else p_s < 0
+        idx = np.where(side)[0][:3]
+    if len(idx) < 3:
+        return None
+    p3, v3 = p_s[idx], v_s[idx]
     h1, h2 = p3[1] - p3[0], p3[2] - p3[1]
     if h1 <= 0 or h2 <= 0:
         return None
@@ -169,29 +150,51 @@ def main() -> int:
         if mode not in set(modes.tolist()):
             continue
         i = int(np.where(modes == mode)[0][0])
-        # sort perts by |pert| so the reference branch is the smallest one
-        srt = np.argsort(np.abs(perts))
-        p_sorted = perts[srt]
-        vals, vecs = diagonalize_tensors(tensors[i][srt])
-        # skip NaN slots (unfinished runs)
-        ok = ~np.isnan(vals).any(axis=1)
-        if ok.sum() < 2:
+        # drop unfinished runs (NaN tensors) BEFORE diagonalizing: eigh on a
+        # NaN slot raises LinAlgError for the whole mode
+        ok0 = ~np.isnan(tensors[i]).any(axis=(1, 2))
+        dropped = perts[~ok0]
+        if len(dropped):
+            print(
+                f"mode {mode}: dropping {len(dropped)} run(s) with no ZFS tensor "
+                f"(unfinished or failed): {np.array2string(dropped)}",
+                file=sys.stderr,
+            )
+        if ok0.sum() < 2:
             print(f"mode {mode}: fewer than 2 finished runs, skipping")
             continue
-        vals, vecs = vals[ok], vecs[ok]
-        p_use = p_sorted[ok]
-        vals, _ = match_branches(vals, vecs)
+        p_all, t_all = perts[ok0], tensors[i][ok0]
+        # fixed principal frame from the Q=0 (relaxed) tensor; plot the
+        # diagonal components of every tensor rotated into that frame
+        izero = int(np.argmin(np.abs(p_all)))
+        if not np.isclose(p_all[izero], 0.0):
+            print(
+                f"mode {mode}: warning: no Q=0 tensor; principal frame taken "
+                "from the smallest-|Q| perturbation instead",
+                file=sys.stderr,
+            )
+        R = principal_frame(t_all[izero])
+        p_use = p_all
+        vals = np.stack([ZFSTensor(matrix=t).rotate(R.T).matrix.diagonal() for t in t_all])
+        # plot order: ascending signed value, so lines connect monotonically
+        # instead of zigzagging between +Q and -Q
+        sgn = np.argsort(p_use)
 
         ncols = 2
         fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
         for k in range(3):
-            a, b, y_fit, res = linear_fit(p_use, vals[:, k])
-            axes[0, 0].plot(p_use, vals[:, k], "o-", label=f"PC {k + 1}")
-            axes[1, 0].plot(p_use, res, "o-")
-            # twin panel: D vs |p| (magnitude, catches even-order contamination)
-            a2, b2, y_fit2, res2 = linear_fit(np.abs(p_use), vals[:, k])
-            axes[0, 1].plot(np.abs(p_use), vals[:, k], "o-")
-            axes[1, 1].plot(np.abs(p_use), res2, "o-")
+            a, b, y_lin, res = linear_fit(p_use, vals[:, k])
+            qa, qb, qc, y_q, qres = quad_fit(p_use, vals[:, k])
+            axes[0, 0].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1}")
+            axes[0, 0].plot(p_use[sgn], y_lin[sgn], "-", alpha=0.4, color=axes[0, 0].lines[-1].get_color())
+            axes[1, 0].plot(p_use[sgn], res[sgn], "o-")
+            axes[1, 0].axhline(np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
+            axes[1, 0].axhline(-np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
+            axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1} (b={b:.4g}, 2c={2 * qc:.4g})")
+            axes[0, 1].plot(p_use[sgn], y_q[sgn], "-", alpha=0.4, color=axes[0, 1].lines[-1].get_color())
+            axes[1, 1].plot(p_use[sgn], qres[sgn], "o-")
+            axes[1, 1].axhline(np.max(np.abs(qres)), ls="--", lw=0.8, color="grey")
+            axes[1, 1].axhline(-np.max(np.abs(qres)), ls="--", lw=0.8, color="grey")
             row: list = [mode, k + 1, f"{b:.6g}", f"{np.max(np.abs(res)):.4g}"]
             msg = (
                 f"mode {mode} PC {k + 1}: slope {b:.4g} MHz/unit-pert, max |res| {np.max(np.abs(res)):.4g} MHz (signed)"
@@ -224,12 +227,12 @@ def main() -> int:
                         msg += f"\n    central d2 (|Q|:value): {', '.join(cents)} MHz/pert^2"
             print(msg)
             csv_rows.append(tuple(row))
-        for j, title in enumerate(["signed perturbation", "|perturbation|"]):
+        for j, title in enumerate(["linear regression", "quadratic least squares"]):
             axes[0, j].set_title(f"mode {mode}: ZFS PCs ({title})")
             axes[0, j].set_ylabel("principal component (MHz)")
             axes[1, j].set_xlabel("perturbation scale")
             axes[1, j].set_ylabel("residual (MHz)")
-        axes[0, 0].legend(fontsize=8)
+        axes[0, 1].legend(fontsize=7)
         fig.tight_layout()
         stem, ext = args.output.stem, args.output.suffix or ".png"
         out = args.output.with_name(f"{stem}_mode{mode}{ext}")
