@@ -176,21 +176,27 @@ def main() -> int:
         R = principal_frame(t_all[izero])
         p_use = p_all
         vals = np.stack([ZFSTensor(matrix=t).rotate(R.T).matrix.diagonal() for t in t_all])
-        # plot order: ascending signed value / ascending |value|, so lines
-        # connect monotonically instead of zigzagging between +Q and -Q
+        # plot order: ascending signed value, so lines connect monotonically
+        # instead of zigzagging between +Q and -Q
         sgn = np.argsort(p_use)
-        mag = np.argsort(np.abs(p_use))
 
         ncols = 2
         fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
         for k in range(3):
-            a, b, y_fit, res = linear_fit(p_use, vals[:, k])
-            axes[0, 0].plot(p_use[sgn], vals[sgn, k], "o-", label=f"PC {k + 1}")
+            a, b, y_lin, res = linear_fit(p_use, vals[:, k])
+            qa, qb, qc, y_q, qres = quad_fit(p_use, vals[:, k])
+            axes[0, 0].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1}")
+            axes[0, 0].plot(p_use[sgn], y_lin[sgn], "-", alpha=0.4, color=axes[0, 0].lines[-1].get_color())
             axes[1, 0].plot(p_use[sgn], res[sgn], "o-")
-            # twin panel: D vs |p| (magnitude, catches even-order contamination)
-            a2, b2, y_fit2, res2 = linear_fit(np.abs(p_use), vals[:, k])
-            axes[0, 1].plot(np.abs(p_use)[mag], vals[mag, k], "o-")
-            axes[1, 1].plot(np.abs(p_use)[mag], res2[mag], "o-")
+            axes[1, 0].fill_between(p_use[sgn], res[sgn], 0, alpha=0.25)
+            axes[1, 0].axhline(np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
+            axes[1, 0].axhline(-np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
+            axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1} (b={b:.4g}, 2c={2 * qc:.4g})")
+            axes[0, 1].plot(p_use[sgn], y_q[sgn], "-", alpha=0.4, color=axes[0, 1].lines[-1].get_color())
+            axes[1, 1].plot(p_use[sgn], qres[sgn], "o-")
+            axes[1, 1].fill_between(p_use[sgn], qres[sgn], 0, alpha=0.25)
+            axes[1, 1].axhline(np.max(np.abs(qres)), ls="--", lw=0.8, color="grey")
+            axes[1, 1].axhline(-np.max(np.abs(qres)), ls="--", lw=0.8, color="grey")
             row: list = [mode, k + 1, f"{b:.6g}", f"{np.max(np.abs(res)):.4g}"]
             msg = (
                 f"mode {mode} PC {k + 1}: slope {b:.4g} MHz/unit-pert, max |res| {np.max(np.abs(res)):.4g} MHz (signed)"
@@ -223,12 +229,12 @@ def main() -> int:
                         msg += f"\n    central d2 (|Q|:value): {', '.join(cents)} MHz/pert^2"
             print(msg)
             csv_rows.append(tuple(row))
-        for j, title in enumerate(["signed perturbation", "|perturbation|"]):
+        for j, title in enumerate(["linear regression", "quadratic least squares"]):
             axes[0, j].set_title(f"mode {mode}: ZFS PCs ({title})")
             axes[0, j].set_ylabel("principal component (MHz)")
             axes[1, j].set_xlabel("perturbation scale")
             axes[1, j].set_ylabel("residual (MHz)")
-        axes[0, 0].legend(fontsize=8)
+        axes[0, 1].legend(fontsize=7)
         fig.tight_layout()
         stem, ext = args.output.stem, args.output.suffix or ".png"
         out = args.output.with_name(f"{stem}_mode{mode}{ext}")
