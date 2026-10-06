@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,138 @@ from beyblade.parsers import parse_phonon_data
 def load_poscar(poscar_file: str | Path) -> Structure:
     """Load a VASP POSCAR file into a pymatgen Structure."""
     return Poscar.from_file(poscar_file).structure
+
+
+@dataclass(frozen=True)
+class DefectLocation:
+    """A candidate point defect found by find_defect.
+
+    For a vacancy, frac_coords is the Cartesian centroid of the
+    under-coordinated neighbours, mapped back into fractional
+    coordinates, and site_index is None. For an interstitial,
+    frac_coords is the centroid of the close-pair cluster and
+    neighbor_indices lists its (ambiguous) members.
+    """
+
+    defect_class: str  # "vacancy" | "interstitial"
+    frac_coords: np.ndarray
+    site_index: int | None
+    neighbor_indices: tuple[int, ...]
+
+
+def _local_metrics(structure: Structure) -> tuple[np.ndarray, float, np.ndarray]:
+    """Per-site coordination numbers, the cutoff used, and nearest-
+    neighbour distances.
+
+    The cutoff is 1.15 x the median nearest-neighbour distance, which
+    separates first-shell neighbours from second-shell ones in the
+    lattices this pipeline targets (diamond-like and wurtzite-like).
+    """
+    nn_dists = np.array(
+        [min(s.distance(other) for j, other in enumerate(structure) if j != i) for i, s in enumerate(structure)]
+    )
+    cutoff = 1.15 * float(np.median(nn_dists))
+    cn = np.array([len(structure.get_neighbors(s, cutoff)) for s in structure])
+    return cn, cutoff, nn_dists
+
+
+def _cluster_indices(indices: list[int], structure: Structure, cutoff: float) -> list[list[int]]:
+    """Group indices into clusters whose sites are within cutoff of each
+    other (single-linkage, periodic-aware)."""
+    remaining = set(indices)
+    clusters: list[list[int]] = []
+    while remaining:
+        seed = remaining.pop()
+        cluster = [seed]
+        changed = True
+        while changed:
+            changed = False
+            for i in list(remaining):
+                if any(structure.get_distance(i, j) <= cutoff for j in cluster):
+                    cluster.append(i)
+                    remaining.discard(i)
+                    changed = True
+        clusters.append(sorted(cluster))
+    return clusters
+
+
+def _periodic_mean(fracs: np.ndarray) -> np.ndarray:
+    """Mean of fractional coordinates that is safe across cell boundaries.
+
+    Each point is unwrapped relative to the first one before averaging.
+    """
+    disp = (fracs - fracs[0] + 0.5) % 1.0 - 0.5
+    return fracs[0] + disp.mean(axis=0)
+
+
+def find_defect(
+    structure: Structure,
+) -> list[DefectLocation]:
+    """Locate point defects in a supercell without a pristine reference.
+
+    Self-contained local-geometry heuristic:
+
+    - An atom whose nearest neighbour is much closer than the lattice
+      bond length is flagged as an interstitial (it squeezes against
+      the lattice; the close-pair cluster marks where).
+    - Sites whose coordination number is below the mode coordination
+      number of their species are neighbours of a missing atom; their
+      clusters each trace one vacancy, whose position is estimated as
+      the Cartesian centroid of the cluster.
+
+    Returns one DefectLocation per detected defect, sorted by
+    fractional coordinates. An empty list means no defect was found.
+    """
+    cn, cutoff, nn_dists = _local_metrics(structure)
+
+    # Interstitials: an extra atom squeezes against the lattice, so its
+    # nearest neighbour is anomalously short. Sites whose NN distance
+    # is below 0.75 x the median form close-pair clusters; the cluster
+    # is reported as one interstitial (which member is the extra atom
+    # is not resolvable without a pristine reference).
+    defects: list[DefectLocation] = []
+    close_sites = [i for i in range(len(structure)) if nn_dists[i] < 0.75 * float(np.median(nn_dists))]
+    for cluster in _cluster_indices(close_sites, structure, cutoff):
+        cart_centroid = np.mean([structure[i].coords for i in cluster], axis=0)
+        defects.append(
+            DefectLocation(
+                defect_class="interstitial",
+                frac_coords=structure.lattice.get_fractional_coords(cart_centroid) % 1.0,
+                site_index=None,
+                neighbor_indices=tuple(cluster),
+            )
+        )
+    interstitial_sites = {i for d in defects if d.defect_class == "interstitial" for i in d.neighbor_indices}
+    # Vacancies: clusters of under-coordinated sites relative to the
+    # per-species mode coordination number.
+    under_coord: dict[str, list[int]] = {}
+    for species in {s.specie.symbol for s in structure}:
+        members = [i for i, s in enumerate(structure) if s.specie.symbol == species]
+        if len(members) < 2:
+            continue
+        mode_cn = int(np.bincount(cn[members].astype(int)).argmax())
+        under_coord[species] = [i for i in members if cn[i] < mode_cn]
+
+    neighbour_pool = sorted(set(sum(under_coord.values(), [])) - interstitial_sites)
+    if neighbour_pool:
+        # Neighbours of one vacancy are not bonded to each other (they
+        # sit ~1.63 bond lengths apart in a tetrahedral lattice), so a
+        # first-shell cutoff would split them. Cluster with a wider
+        # reach that still keeps separate defects apart.
+        vac_cutoff = 1.6 * cutoff
+        for cluster in _cluster_indices(neighbour_pool, structure, vac_cutoff):
+            frac_centroid = _periodic_mean(np.array([structure[i].frac_coords for i in cluster]))
+            defects.append(
+                DefectLocation(
+                    defect_class="vacancy",
+                    frac_coords=frac_centroid % 1.0,
+                    site_index=None,
+                    neighbor_indices=tuple(cluster),
+                )
+            )
+
+    defects.sort(key=lambda d: tuple(d.frac_coords))
+    return defects
 
 
 def load_phonon_data(phonon_file: str | Path) -> PhononSpectrum:
