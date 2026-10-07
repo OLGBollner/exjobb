@@ -55,11 +55,14 @@ def parse_outcar_zfs(outcar_path: str | Path) -> ZFSTensor | None:
 
         # VASP outputs: D_xx, D_yy, D_zz, D_xy, D_xz, D_yz
         D_xx, D_yy, D_zz, D_xy, D_xz, D_yz = values[:6]
-        matrix = np.array([
-            [D_xx, D_xy, D_xz],
-            [D_xy, D_yy, D_yz],
-            [D_xz, D_yz, D_zz],
-        ], dtype=float)
+        matrix = np.array(
+            [
+                [D_xx, D_xy, D_xz],
+                [D_xy, D_yy, D_yz],
+                [D_xz, D_yz, D_zz],
+            ],
+            dtype=float,
+        )
 
         return ZFSTensor(matrix=matrix, unit="MHz")
     except (ValueError, IndexError):
@@ -111,9 +114,7 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
     # Eigenvectors: real part at Gamma
     mode_eigenvectors = np.zeros((n_phonon, n_lattice, 3), dtype=float)
     for i in range(n_phonon):
-        mode_eigenvectors[i] = np.array(
-            [[comp[0] for comp in atom] for atom in phonon_data["band"][i]["eigenvector"]]
-        )
+        mode_eigenvectors[i] = np.array([[comp[0] for comp in atom] for atom in phonon_data["band"][i]["eigenvector"]])
 
     # Structure data
     if poscar_path and Path(poscar_path).is_file():
@@ -124,6 +125,14 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
         lattice = struct.lattice.matrix
     else:
         points = raw_data.get("points", [])
+        if not points:
+            # Fall back to a POSCAR next to the phonopy file, like the old
+            # PhononManager.load_all_data did.
+            sibling = path.parent / "POSCAR"
+            if sibling.is_file():
+                print(f"Trying to read data from: {sibling}")
+                return parse_phonopy_yaml(yaml_path, poscar_path=sibling)
+
         if points:
             frac_coords = np.array([p["coordinates"] for p in points], dtype=float)
             symbols = [p.get("symbol", "X") for p in points]
@@ -161,10 +170,7 @@ def parse_phonon_data(
         return parse_phonopy_yaml(p, poscar_path=poscar_path)
     if p.suffix == ".npz":
         return parse_phonon_npz(p)
-    raise ValueError(
-        f"Unsupported phonon file format: '{p.suffix}' (path: {p}). "
-        "Expected .yaml, .yml or .npz"
-    )
+    raise ValueError(f"Unsupported phonon file format: '{p.suffix}' (path: {p}). Expected .yaml, .yml or .npz")
 
 
 def parse_phonon_npz(npz_path: str | Path) -> PhononSpectrum:
@@ -192,6 +198,7 @@ def parse_phonon_npz(npz_path: str | Path) -> PhononSpectrum:
     else:
         try:
             from pymatgen.core import Element
+
             masses = np.array([Element(s).atomic_mass for s in symbols], dtype=float)
         except Exception:
             masses = np.ones(len(symbols), dtype=float)
@@ -205,7 +212,11 @@ def parse_phonon_npz(npz_path: str | Path) -> PhononSpectrum:
         iprs = np.asarray(iprs)
         if iprs.ndim == 0 or iprs.size == 0:
             iprs = None
-    e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"].ndim > 0 else None
+    e_pair_complete = (
+        list(bool(x) for x in data["e_pair_complete"])
+        if "e_pair_complete" in data and data["e_pair_complete"].ndim > 0
+        else None
+    )
     # Legacy files store the original DFT-run mode indices under "idx"; the spectrum
     # owns mode identity, so this must not be dropped on load.
     original_indices = None
@@ -330,7 +341,7 @@ def parse_zfs_simulation_dataset(
         calc_method, default_zfs = ("defect_band_approx", "ZFS_occup")
     else:
         raise ValueError(f"{calc_method} is mot a valid zfs calculation method.")
-    
+
     final_zfs_folder = zfs_folder or default_zfs
 
     if "pert" not in sim_path.name:
@@ -357,7 +368,9 @@ def parse_zfs_simulation_dataset(
     if order == 1:
         first_order = parse_perturbation_directory(search_path, order=1, amplitude=pert_scale, max_workers=max_workers)
     elif order == 2:
-        second_order = parse_perturbation_directory(search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers)
+        second_order = parse_perturbation_directory(
+            search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers
+        )
 
     return RawZFSData(
         defect=defect,
