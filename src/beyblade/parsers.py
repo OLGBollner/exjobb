@@ -210,14 +210,19 @@ def write_full_phonopy_yaml(
             f"({poscar_path}) vs {n_atoms} atoms in eigenvectors of {path}"
         )
 
+    # Mirror phonopy's own yaml writer (PhonopyAtoms.get_yaml_lines) so the
+    # appended block is byte-for-byte in its native style.
     lines = ["lattice:"]
-    for row in struct.lattice.matrix:
-        lines.append("- [" + ", ".join(f"{v:.12f}" for v in row) + "]")
+    for row, label in zip(struct.lattice.matrix, ("a", "b", "c")):
+        lines.append(
+            "- [ %21.15f, %21.15f, %21.15f ] # %s"
+            % (row[0], row[1], row[2], label)
+        )
     lines.append("points:")
-    for site in struct:
-        c = ", ".join(f"{v:.12f}" for v in site.frac_coords)
-        lines.append(f"- coordinates: [{c}]")
-        lines.append(f"  symbol: {site.specie.symbol}")
+    for i, site in enumerate(struct):
+        lines.append(f"- symbol: {site.specie.symbol} # {i + 1}")
+        c = " %18.15f, %18.15f, %18.15f " % tuple(site.frac_coords)
+        lines.append(f"  coordinates: [{c}]")
         lines.append(f"  mass: {site.specie.atomic_mass:.6f}")
 
     out = Path(out_path) if out_path else path.with_name(f"{path.stem}_full.yaml")
