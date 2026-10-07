@@ -77,3 +77,10 @@ def test_write_full_phonopy_yaml(tmp_path):
         is None
         or True
     )
+
+
+def test_missing_structure_warns(tmp_path):
+    yaml_path = tmp_path / "phonons.yaml"
+    _write_yaml(yaml_path, np.eye(3))
+    with pytest.warns(UserWarning, match="No structure data"):
+        parse_phonopy_yaml(yaml_path)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import warnings
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -148,6 +150,14 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
             frac_coords = np.zeros((n_lattice, 3), dtype=float)
             symbols = ["X"] * n_lattice
             masses = np.ones(n_lattice, dtype=float)
+            warnings.warn(
+                f"No structure data in {path} and no POSCAR found in "
+                f"{path.parent}: falling back to degenerate defaults "
+                f"(identity lattice, all atoms at origin, symbol X, mass 1.0). "
+                f"Symmetry analysis will fail; place a matching POSCAR next "
+                f"to the file or run write_full_phonopy_yaml().",
+                stacklevel=2,
+            )
 
         lattice = np.array(raw_data.get("lattice", np.eye(3)), dtype=float)
 
@@ -172,9 +182,11 @@ def write_full_phonopy_yaml(
     written and ``None`` is returned. Otherwise the structure is taken from
     ``poscar_path`` (default: a ``POSCAR`` next to the yaml) — the POSCAR atom
     count must match the eigenvector dimension or ``ValueError`` is raised —
-    injected as top-level ``lattice`` and ``points`` sections, and the result
-    saved to ``out_path`` (default: ``<yaml stem>_full.yaml`` next to the
-    input). Returns the output path.
+    injected verbatim as top-level ``lattice`` and ``points`` sections —
+    the original file text is copied unchanged and the structure block is
+    appended at the end, so the phonon data keeps its original formatting —
+    and the result saved to ``out_path`` (default: ``<yaml stem>_full.yaml``
+    next to the input). Returns the output path.
     """
     path = Path(yaml_path)
     with path.open("r", encoding="utf-8") as f:
@@ -198,19 +210,22 @@ def write_full_phonopy_yaml(
             f"({poscar_path}) vs {n_atoms} atoms in eigenvectors of {path}"
         )
 
-    raw_data["lattice"] = [[float(v) for v in row] for row in struct.lattice.matrix]
-    raw_data["points"] = [
-        {
-            "coordinates": [float(v) for v in site.frac_coords],
-            "symbol": site.specie.symbol,
-            "mass": float(site.specie.atomic_mass),
-        }
-        for site in struct
-    ]
+    lines = ["lattice:"]
+    for row in struct.lattice.matrix:
+        lines.append("- [" + ", ".join(f"{v:.12f}" for v in row) + "]")
+    lines.append("points:")
+    for site in struct:
+        c = ", ".join(f"{v:.12f}" for v in site.frac_coords)
+        lines.append(f"- coordinates: [{c}]")
+        lines.append(f"  symbol: {site.specie.symbol}")
+        lines.append(f"  mass: {site.specie.atomic_mass:.6f}")
 
     out = Path(out_path) if out_path else path.with_name(f"{path.stem}_full.yaml")
     with out.open("w", encoding="utf-8") as f:
-        yaml.dump(raw_data, f, Dumper=yaml.SafeDumper, sort_keys=False)
+        shutil.copyfileobj(path.open("r", encoding="utf-8"), f)
+        f.write("\n")
+        f.write("\n".join(lines))
+        f.write("\n")
     print(f"wrote {out} (structure data from {poscar_path})")
     return out
 
