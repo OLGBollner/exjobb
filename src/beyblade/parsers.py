@@ -208,24 +208,32 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
 def _dedupe_text_qpoints(text_lines: list[str]) -> int:
     """Remove duplicate q-point blocks from phonopy yaml text in place.
 
-    Mirrors the q-point deduplication done at parse time, but on the raw
-    text so the copied file keeps its original formatting. Returns the
-    number of removed blocks.
+    A q-point block runs from its ``q-position:`` line to the line before
+    the next ``q-position:`` line. The q tuple is read from the line text
+    (inline ``[...]`` with optional trailing comment) or, for block
+    sequences, from the following ``- value`` lines — so any phonopy
+    formatting is handled. First occurrence wins. Returns the number of
+    removed blocks.
     """
-    qpos_re = re.compile(r"^\s*-?\s*q-position:\s*(?:\[(.*)\])?\s*$")
+    qpos_re = re.compile(r"^\s*-?\s*q-position:\s*(.*)$")
     list_re = re.compile(r"^\s*-\s*(-?[\d.eE+-]+)\s*$")
-    block_starts: list[tuple[int, tuple]] = []
+
+    def parse_payload(payload: str) -> tuple | None:
+        payload = payload.split("#", 1)[0].strip().strip("[]() ")
+        if not payload:
+            return None
+        try:
+            return tuple(float(x) for x in re.split(r"[,\s]+", payload) if x)
+        except ValueError:
+            return None
+
+    entries: list[tuple[int, tuple]] = []  # (line index of q-position, q)
     for i, line in enumerate(text_lines):
         m = qpos_re.match(line)
         if not m:
             continue
-        if m.group(1):
-            try:
-                q = tuple(float(x) for x in m.group(1).split())
-            except ValueError:
-                continue
-            block_starts.append((i, q))
-        else:
+        q = parse_payload(m.group(1))
+        if q is None:
             # block sequence: q-position: followed by "- value" lines
             vals: list[float] = []
             j = i + 1
@@ -237,13 +245,15 @@ def _dedupe_text_qpoints(text_lines: list[str]) -> int:
                 else:
                     break
             if len(vals) == 3:
-                block_starts.append((i, tuple(vals)))
-    if len(block_starts) <= 1:
+                q = tuple(vals)
+        if q is not None and len(q) == 3:
+            entries.append((i, q))
+    if len(entries) <= 1:
         return 0
     seen: set[tuple] = set()
     drop: list[tuple[int, int]] = []
-    for j, (start, q) in enumerate(block_starts):
-        end = block_starts[j + 1][0] if j + 1 < len(block_starts) else len(text_lines)
+    for j, (start, q) in enumerate(entries):
+        end = entries[j + 1][0] if j + 1 < len(entries) else len(text_lines)
         if q in seen:
             drop.append((start, end))
         else:
