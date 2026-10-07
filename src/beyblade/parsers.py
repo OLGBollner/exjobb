@@ -130,6 +130,13 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
             # PhononManager.load_all_data did.
             sibling = path.parent / "POSCAR"
             if sibling.is_file():
+                struct = Structure.from_file(str(sibling))
+                if len(struct) != n_lattice:
+                    raise ValueError(
+                        f"Geometry mismatch: {len(struct)} atoms in POSCAR "
+                        f"({sibling}) vs {n_lattice} atoms in eigenvectors "
+                        f"of {path}"
+                    )
                 print(f"Trying to read data from: {sibling}")
                 return parse_phonopy_yaml(yaml_path, poscar_path=sibling)
 

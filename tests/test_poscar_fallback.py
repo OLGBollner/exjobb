@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import yaml
 from pymatgen.core import Structure
 
@@ -38,3 +39,17 @@ def test_no_poscar_still_degrades_to_defaults(tmp_path, capsys):
     _write_yaml(yaml_path, np.eye(3))
     spectrum = parse_phonopy_yaml(yaml_path)
     assert spectrum.atom_symbols == ["X"] * 8
+
+
+def test_mismatched_poscar_raises(tmp_path):
+    struct = Structure(
+        lattice=np.eye(3) * 5.0,
+        species=["Si"] * 4,
+        coords=np.random.RandomState(1).random((4, 3)),
+        coords_are_cartesian=False,
+    )
+    struct.to(fmt="poscar", filename=str(tmp_path / "POSCAR"))
+    yaml_path = tmp_path / "phonons.yaml"
+    _write_yaml(yaml_path, np.eye(3))
+    with pytest.raises(ValueError, match="Geometry mismatch"):
+        parse_phonopy_yaml(yaml_path)
