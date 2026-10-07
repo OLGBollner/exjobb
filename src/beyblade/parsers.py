@@ -149,12 +149,9 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
         mode_eigenvectors[i] = np.array([[comp[0] for comp in atom] for atom in phonon_data["band"][i]["eigenvector"]])
 
     # Structure data
+    struct = None
     if poscar_path and Path(poscar_path).is_file():
         struct = Structure.from_file(str(poscar_path))
-        frac_coords = struct.frac_coords
-        symbols = [site.specie.symbol for site in struct]
-        masses = np.array([site.specie.atomic_mass for site in struct], dtype=float)
-        lattice = struct.lattice.matrix
     else:
         points = raw_data.get("points", [])
         if not points:
@@ -162,16 +159,23 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
             # PhononManager.load_all_data did.
             sibling = path.parent / "POSCAR"
             if sibling.is_file():
-                struct = Structure.from_file(str(sibling))
-                if len(struct) != n_lattice:
+                sibling_struct = Structure.from_file(str(sibling))
+                if len(sibling_struct) != n_lattice:
                     raise ValueError(
-                        f"Geometry mismatch: {len(struct)} atoms in POSCAR "
+                        f"Geometry mismatch: {len(sibling_struct)} atoms in POSCAR "
                         f"({sibling}) vs {n_lattice} atoms in eigenvectors "
                         f"of {path}"
                     )
                 print(f"Trying to read data from: {sibling}")
-                return parse_phonopy_yaml(yaml_path, poscar_path=sibling)
+                struct = sibling_struct
 
+    if struct is not None:
+        frac_coords = struct.frac_coords
+        symbols = [site.specie.symbol for site in struct]
+        masses = np.array([site.specie.atomic_mass for site in struct], dtype=float)
+        lattice = struct.lattice.matrix
+    else:
+        points = raw_data.get("points", [])
         if points:
             frac_coords = np.array([p["coordinates"] for p in points], dtype=float)
             symbols = [p.get("symbol", "X") for p in points]
