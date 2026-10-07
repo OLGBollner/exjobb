@@ -32,7 +32,7 @@ if ".npz" in sys.argv[1]:
             )
         print(" ".join(["mode", "freq[cm-1]", "sym"]))
         for pos, (i, label) in enumerate(zip(idx, labels)):
-            freq = phonon_data["freqs"][i] if has_idx else phonon_data["freqs"][i - 1]
+            freq = phonon_data["freqs"][pos] if has_idx else phonon_data["freqs"][i - 1]
             mode_no = i + 1 if has_idx else i
             print(f"{mode_no} {freq:.2f} {label}")
     else:
