@@ -104,3 +104,24 @@ def test_duplicate_qpoint_deduplicated(tmp_path, recwarn):
     assert spectrum.frequencies_mev.shape == (6,)
     dup = [w for w in recwarn if "Duplicate q-point" in str(w.message)]
     assert len(dup) == 1
+
+
+def test_write_full_removes_duplicate_qpoints(tmp_path):
+    struct = Structure(
+        lattice=np.eye(3) * 5.0,
+        species=["Si"] * 8,
+        coords=np.random.RandomState(2).random((8, 3)),
+        coords_are_cartesian=False,
+    )
+    struct.to(fmt="poscar", filename=str(tmp_path / "POSCAR"))
+    yaml_path = tmp_path / "phonons.yaml"
+    _write_yaml(yaml_path, np.eye(3))
+    # duplicate the q-position block
+    text = yaml_path.read_text()
+    yaml_path.write_text(text + text)
+
+    out = write_full_phonopy_yaml(yaml_path)
+    assert out is not None
+    full = out.read_text()
+    assert full.count("q-position") == 1
+    assert "points:" in full

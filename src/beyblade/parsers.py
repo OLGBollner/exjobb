@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 import warnings
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -94,6 +93,34 @@ def parse_outcar_energy(outcar_path: str | Path) -> float | None:
         return None
 
 
+def _dedupe_phonon_qpoints(raw_data: dict, path: Path) -> None:
+    """Deduplicate repeated q-points in raw phonopy yaml data in place.
+
+    Some phonopy runs append the same band twice (e.g. a restart
+    concatenates output). Keep only the first occurrence of each
+    q-position and warn about duplicates.
+    """
+    q_entries = raw_data.get("phonon", [])
+    if len(q_entries) <= 1:
+        return
+    seen: dict[tuple, int] = {}
+    keep: list[int] = []
+    for i, entry in enumerate(q_entries):
+        q = tuple(entry.get("q-position", [None, None, None]))
+        if q in seen:
+            warnings.warn(
+                f"Duplicate q-point {q} found in {path} "
+                f"(indices {seen[q]} and {i}); keeping the first "
+                f"occurrence only.",
+                stacklevel=3,
+            )
+        else:
+            seen[q] = i
+            keep.append(i)
+    if len(keep) != len(q_entries):
+        raw_data["phonon"] = [q_entries[i] for i in keep]
+
+
 def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = None) -> PhononSpectrum:
     """
     Parses phonon vibrational frequencies, eigenvectors, and structure from a phonopy.yaml file.
@@ -108,27 +135,7 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
     # Deduplicate q-points: some phonopy runs append the same band twice
     # (e.g. a restart concatenates output). Keep only the first occurrence
     # of each q-position, and warn about duplicates.
-    q_entries = raw_data.get("phonon", [])
-    if len(q_entries) > 1:
-        q_positions = [
-            tuple(e.get("q-position", [None, None, None])) for e in q_entries
-        ]
-        seen: dict[tuple, int] = {}
-        keep: list[int] = []
-        for i, q in enumerate(q_positions):
-            if q in seen:
-                warnings.warn(
-                    f"Duplicate q-point {q} found in {path} "
-                    f"(indices {seen[q]} and {i}); keeping the first "
-                    f"occurrence only.",
-                    stacklevel=2,
-                )
-            else:
-                seen[q] = i
-                keep.append(i)
-        if len(keep) != len(q_entries):
-            q_entries = [q_entries[i] for i in keep]
-            raw_data["phonon"] = q_entries
+    _dedupe_phonon_qpoints(raw_data, path)
     phonon_data = raw_data["phonon"][0]
     n_phonon = len(phonon_data["band"])
     n_lattice = len(phonon_data["band"][0]["eigenvector"])
@@ -248,13 +255,60 @@ def write_full_phonopy_yaml(
         lines.append(f"  coordinates: [{c}]")
         lines.append(f"  mass: {site.specie.atomic_mass:.6f}")
 
+    # Deduplicate q-point blocks in the copied text so <name>_full.yaml
+    # does not carry the duplicated band blocks.
+    with path.open("r", encoding="utf-8") as f:
+        text_lines = f.readlines()
+    qpos_re = re.compile(r"^\s*-?\s*q-position:\s*(?:\[(.*)\])?\s*$")
+    list_re = re.compile(r"^\s*-\s*(-?[\d.eE+-]+)\s*$")
+    block_starts: list[tuple[int, tuple]] = []
+    for i, line in enumerate(text_lines):
+        m = qpos_re.match(line)
+        if not m:
+            continue
+        if m.group(1):
+            try:
+                q = tuple(float(x) for x in m.group(1).split())
+            except ValueError:
+                continue
+            block_starts.append((i, q))
+        else:
+            # block sequence: q-position: followed by "- value" lines
+            vals: list[float] = []
+            j = i + 1
+            while j < len(text_lines):
+                lm = list_re.match(text_lines[j])
+                if lm:
+                    vals.append(float(lm.group(1)))
+                    j += 1
+                else:
+                    break
+            if len(vals) == 3:
+                block_starts.append((i, tuple(vals)))
+    n_dup = 0
+    if len(block_starts) > 1:
+        seen: set[tuple] = set()
+        drop: list[tuple[int, int]] = []
+        for j, (start, q) in enumerate(block_starts):
+            end = block_starts[j + 1][0] if j + 1 < len(block_starts) else len(text_lines)
+            if q in seen:
+                drop.append((start, end))
+            else:
+                seen.add(q)
+        for start, end in reversed(drop):
+            del text_lines[start:end]
+        n_dup = len(drop)
+
     out = Path(out_path) if out_path else path.with_name(f"{path.stem}_full.yaml")
     with out.open("w", encoding="utf-8") as f:
-        shutil.copyfileobj(path.open("r", encoding="utf-8"), f)
+        f.writelines(text_lines)
         f.write("\n")
         f.write("\n".join(lines))
         f.write("\n")
-    print(f"wrote {out} (structure data from {poscar_path})")
+    print(
+        f"wrote {out} (structure data from {poscar_path})"
+        + (f"; removed {n_dup} duplicate q-point block(s)" if n_dup else "")
+    )
     return out
 
 
