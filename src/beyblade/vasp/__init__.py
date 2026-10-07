@@ -5,8 +5,7 @@ scripts/cluster/ wrap them with argparse CLIs.
 """
 from beyblade.vasp.occupations import prepare_relax_to_zfs
 from beyblade.vasp.structures import (apply_combined_perturbation,
-                                      apply_perturbation,
-                                      compare_displacement,
+                                      apply_perturbation, compare_displacement,
                                       compare_displacement_cli,
                                       load_phonon_data, load_poscar,
                                       write_perturbed_poscar)
