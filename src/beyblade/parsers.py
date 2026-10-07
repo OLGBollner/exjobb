@@ -55,11 +55,14 @@ def parse_outcar_zfs(outcar_path: str | Path) -> ZFSTensor | None:
 
         # VASP outputs: D_xx, D_yy, D_zz, D_xy, D_xz, D_yz
         D_xx, D_yy, D_zz, D_xy, D_xz, D_yz = values[:6]
-        matrix = np.array([
-            [D_xx, D_xy, D_xz],
-            [D_xy, D_yy, D_yz],
-            [D_xz, D_yz, D_zz],
-        ], dtype=float)
+        matrix = np.array(
+            [
+                [D_xx, D_xy, D_xz],
+                [D_xy, D_yy, D_yz],
+                [D_xz, D_yz, D_zz],
+            ],
+            dtype=float,
+        )
 
         return ZFSTensor(matrix=matrix, unit="MHz")
     except (ValueError, IndexError):
@@ -111,9 +114,7 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
     # Eigenvectors: real part at Gamma
     mode_eigenvectors = np.zeros((n_phonon, n_lattice, 3), dtype=float)
     for i in range(n_phonon):
-        mode_eigenvectors[i] = np.array(
-            [[comp[0] for comp in atom] for atom in phonon_data["band"][i]["eigenvector"]]
-        )
+        mode_eigenvectors[i] = np.array([[comp[0] for comp in atom] for atom in phonon_data["band"][i]["eigenvector"]])
 
     # Structure data
     if poscar_path and Path(poscar_path).is_file():
@@ -123,17 +124,22 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
         masses = np.array([site.specie.atomic_mass for site in struct], dtype=float)
         lattice = struct.lattice.matrix
     else:
-        points = raw_data.get("points", [])
-        if points:
-            frac_coords = np.array([p["coordinates"] for p in points], dtype=float)
-            symbols = [p.get("symbol", "X") for p in points]
-            masses = np.array([p.get("mass", 1.0) for p in points], dtype=float)
-        else:
-            frac_coords = np.zeros((n_lattice, 3), dtype=float)
-            symbols = ["X"] * n_lattice
-            masses = np.ones(n_lattice, dtype=float)
-
-        lattice = np.array(raw_data.get("lattice", np.eye(3)), dtype=float)
+        structure = _find_yaml_structure(raw_data, n_lattice)
+        if structure is None:
+            raise ValueError(
+                f"No crystal structure found in {path}: expected top-level "
+                "'lattice'/'points' (older phonopy) or a 'supercell', 'unit_cell' "
+                "or 'primitive_cell' section (phonopy 2.x). Pass a POSCAR file "
+                "instead (poscar_path / read_phonons.py <yaml> <POSCAR>)."
+            )
+        lattice, points = structure
+        frac_coords = np.array([p["coordinates"] for p in points], dtype=float)
+        symbols = [p.get("symbol", "X") for p in points]
+        masses = np.array([p.get("mass", 1.0) for p in points], dtype=float)
+        if np.allclose(frac_coords, frac_coords[0]):
+            raise ValueError(
+                f"Degenerate structure in {path}: all atoms at the same coordinates. Pass a POSCAR file instead."
+            )
 
     return PhononSpectrum(
         frequencies_mev=mode_freqs_mev,
@@ -143,6 +149,41 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
         atomic_masses=masses,
         lattice=lattice,
     )
+
+
+_STRUCTURE_SECTION_PRIORITY = ("supercell", "unit_cell", "primitive_cell")
+
+
+def _find_yaml_structure(raw_data: dict, n_lattice: int) -> tuple[np.ndarray, list[dict]] | None:
+    """Locate (lattice, points) in a phonopy yaml.
+
+    Older phonopy writes the structure at the top level; phonopy 2.x nests
+    it under ``supercell`` / ``unit_cell`` / ``primitive_cell``. Sections are
+    tried in that priority order, but any candidate whose point count does
+    not match the eigenvector size (3 * n_lattice / 3 = number of atoms at
+    Gamma) is skipped. Returns None when nothing usable is found.
+    """
+
+    def usable(points: list[dict]) -> bool:
+        return (
+            bool(points)
+            and all(isinstance(p, dict) and "coordinates" in p for p in points)
+            and (n_lattice % 3 != 0 or len(points) in (n_lattice // 3, n_lattice))
+        )
+
+    for key in _STRUCTURE_SECTION_PRIORITY:
+        section = raw_data.get(key)
+        if isinstance(section, dict) and "lattice" in section:
+            points = section.get("points", [])
+            if usable(points):
+                lattice = np.array(section["lattice"], dtype=float)
+                return lattice.reshape(3, 3), points
+
+    points = raw_data.get("points", [])
+    if usable(points):
+        lattice = np.array(raw_data["lattice"], dtype=float).reshape(3, 3)
+        return lattice, points
+    return None
 
 
 def parse_phonon_data(
@@ -161,10 +202,7 @@ def parse_phonon_data(
         return parse_phonopy_yaml(p, poscar_path=poscar_path)
     if p.suffix == ".npz":
         return parse_phonon_npz(p)
-    raise ValueError(
-        f"Unsupported phonon file format: '{p.suffix}' (path: {p}). "
-        "Expected .yaml, .yml or .npz"
-    )
+    raise ValueError(f"Unsupported phonon file format: '{p.suffix}' (path: {p}). Expected .yaml, .yml or .npz")
 
 
 def parse_phonon_npz(npz_path: str | Path) -> PhononSpectrum:
@@ -192,6 +230,7 @@ def parse_phonon_npz(npz_path: str | Path) -> PhononSpectrum:
     else:
         try:
             from pymatgen.core import Element
+
             masses = np.array([Element(s).atomic_mass for s in symbols], dtype=float)
         except Exception:
             masses = np.ones(len(symbols), dtype=float)
@@ -205,7 +244,11 @@ def parse_phonon_npz(npz_path: str | Path) -> PhononSpectrum:
         iprs = np.asarray(iprs)
         if iprs.ndim == 0 or iprs.size == 0:
             iprs = None
-    e_pair_complete = list(bool(x) for x in data["e_pair_complete"]) if "e_pair_complete" in data and data["e_pair_complete"].ndim > 0 else None
+    e_pair_complete = (
+        list(bool(x) for x in data["e_pair_complete"])
+        if "e_pair_complete" in data and data["e_pair_complete"].ndim > 0
+        else None
+    )
     # Legacy files store the original DFT-run mode indices under "idx"; the spectrum
     # owns mode identity, so this must not be dropped on load.
     original_indices = None
@@ -330,7 +373,7 @@ def parse_zfs_simulation_dataset(
         calc_method, default_zfs = ("defect_band_approx", "ZFS_occup")
     else:
         raise ValueError(f"{calc_method} is mot a valid zfs calculation method.")
-    
+
     final_zfs_folder = zfs_folder or default_zfs
 
     if "pert" not in sim_path.name:
@@ -357,7 +400,9 @@ def parse_zfs_simulation_dataset(
     if order == 1:
         first_order = parse_perturbation_directory(search_path, order=1, amplitude=pert_scale, max_workers=max_workers)
     elif order == 2:
-        second_order = parse_perturbation_directory(search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers)
+        second_order = parse_perturbation_directory(
+            search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers
+        )
 
     return RawZFSData(
         defect=defect,
