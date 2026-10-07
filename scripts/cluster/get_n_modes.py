@@ -32,8 +32,11 @@ if ".npz" in sys.argv[1]:
             )
         print(" ".join(["mode", "freq[cm-1]", "sym"]))
         for pos, (i, label) in enumerate(zip(idx, labels)):
-            freq = phonon_data["freqs"][i] if has_idx else phonon_data["freqs"][i - 1]
-            mode_no = i + 1 if has_idx else i
+            # "freqs" in the npz holds one row per kept mode, aligned with
+            # "labels"; "idx"/original_indices may point past its end after
+            # deduplication, so index by position, not by original index.
+            freq = phonon_data["freqs"][pos]
+            mode_no = i + 1 if has_idx else pos + 1
             print(f"{mode_no} {freq:.2f} {label}")
     else:
         print(" ".join([str(i + 1) if has_idx else str(i) for i in idx]))
