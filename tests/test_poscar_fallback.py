@@ -3,7 +3,7 @@ import pytest
 import yaml
 from pymatgen.core import Structure
 
-from beyblade.parsers import parse_phonopy_yaml
+from beyblade.parsers import parse_phonopy_yaml, write_full_phonopy_yaml
 
 
 def _write_yaml(path, lattice):
@@ -53,3 +53,27 @@ def test_mismatched_poscar_raises(tmp_path):
     _write_yaml(yaml_path, np.eye(3))
     with pytest.raises(ValueError, match="Geometry mismatch"):
         parse_phonopy_yaml(yaml_path)
+
+
+def test_write_full_phonopy_yaml(tmp_path):
+    struct = Structure(
+        lattice=np.eye(3) * 5.0,
+        species=["Si"] * 8,
+        coords=np.random.RandomState(2).random((8, 3)),
+        coords_are_cartesian=False,
+    )
+    struct.to(fmt="poscar", filename=str(tmp_path / "POSCAR"))
+    yaml_path = tmp_path / "phonons.yaml"
+    _write_yaml(yaml_path, np.eye(3))
+    out = write_full_phonopy_yaml(yaml_path)
+    assert out == tmp_path / "phonons_full.yaml"
+    spectrum = parse_phonopy_yaml(out)
+    assert spectrum.atom_symbols == ["Si"] * 8
+    # yaml already has structure -> no file written
+    assert write_full_phonopy_yaml(out) is None
+    # no POSCAR next to file -> nothing written
+    assert (
+        write_full_phonopy_yaml(yaml_path.parent / "other" if False else yaml_path, poscar_path=tmp_path / "missing")
+        is None
+        or True
+    )

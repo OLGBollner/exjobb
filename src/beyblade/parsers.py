@@ -161,6 +161,60 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
     )
 
 
+def write_full_phonopy_yaml(
+    yaml_path: str | Path,
+    poscar_path: str | Path | None = None,
+    out_path: str | Path | None = None,
+) -> Path | None:
+    """Write a phonopy yaml with structure data filled in from a POSCAR.
+
+    If ``yaml_path`` already contains structure data (``points``), nothing is
+    written and ``None`` is returned. Otherwise the structure is taken from
+    ``poscar_path`` (default: a ``POSCAR`` next to the yaml) — the POSCAR atom
+    count must match the eigenvector dimension or ``ValueError`` is raised —
+    injected as top-level ``lattice`` and ``points`` sections, and the result
+    saved to ``out_path`` (default: ``<yaml stem>_full.yaml`` next to the
+    input). Returns the output path.
+    """
+    path = Path(yaml_path)
+    with path.open("r", encoding="utf-8") as f:
+        raw_data = yaml.load(f, Loader=Loader)
+
+    if raw_data.get("points"):
+        return None
+
+    if poscar_path is None:
+        sibling = path.parent / "POSCAR"
+        poscar_path = sibling if sibling.is_file() else None
+    if poscar_path is None or not Path(poscar_path).is_file():
+        return None
+
+    struct = Structure.from_file(str(poscar_path))
+    phonon_block = raw_data["phonon"][0]
+    n_atoms = len(phonon_block["band"][0]["eigenvector"])
+    if len(struct) != n_atoms:
+        raise ValueError(
+            f"Geometry mismatch: {len(struct)} atoms in POSCAR "
+            f"({poscar_path}) vs {n_atoms} atoms in eigenvectors of {path}"
+        )
+
+    raw_data["lattice"] = [[float(v) for v in row] for row in struct.lattice.matrix]
+    raw_data["points"] = [
+        {
+            "coordinates": [float(v) for v in site.frac_coords],
+            "symbol": site.specie.symbol,
+            "mass": float(site.specie.atomic_mass),
+        }
+        for site in struct
+    ]
+
+    out = Path(out_path) if out_path else path.with_name(f"{path.stem}_full.yaml")
+    with out.open("w", encoding="utf-8") as f:
+        yaml.dump(raw_data, f, Dumper=yaml.SafeDumper, sort_keys=False)
+    print(f"wrote {out} (structure data from {poscar_path})")
+    return out
+
+
 def parse_phonon_data(
     path: str | Path,
     poscar_path: str | Path | None = None,
