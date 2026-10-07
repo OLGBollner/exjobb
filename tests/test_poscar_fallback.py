@@ -84,3 +84,23 @@ def test_missing_structure_warns(tmp_path):
     _write_yaml(yaml_path, np.eye(3))
     with pytest.warns(UserWarning, match="No structure data"):
         parse_phonopy_yaml(yaml_path)
+
+
+def test_duplicate_qpoint_deduplicated(tmp_path, recwarn):
+    """phonons.yaml with the same Gamma block twice: keep only the first."""
+    n = 2
+    bands = [
+        {"frequency": 1.0 + i * 0.1, "eigenvector": [[[1.0, 0.0, 0.0]] for _ in range(n)]}
+        for i in range(3 * n)
+    ]
+    doc = {"phonon": [
+        {"q-position": [0.0, 0.0, 0.0], "band": bands},
+        {"q-position": [0.0, 0.0, 0.0], "band": bands},
+    ]}
+    yaml_path = tmp_path / "phonons.yaml"
+    yaml_path.write_text(yaml.safe_dump(doc))
+
+    spectrum = parse_phonopy_yaml(yaml_path)
+    assert spectrum.frequencies_mev.shape == (6,)
+    dup = [w for w in recwarn if "Duplicate q-point" in str(w.message)]
+    assert len(dup) == 1

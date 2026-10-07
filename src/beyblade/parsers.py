@@ -105,7 +105,30 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
     with path.open("r", encoding="utf-8") as f:
         raw_data = yaml.load(f, Loader=Loader)
 
-    # Phonon modes
+    # Deduplicate q-points: some phonopy runs append the same band twice
+    # (e.g. a restart concatenates output). Keep only the first occurrence
+    # of each q-position, and warn about duplicates.
+    q_entries = raw_data.get("phonon", [])
+    if len(q_entries) > 1:
+        q_positions = [
+            tuple(e.get("q-position", [None, None, None])) for e in q_entries
+        ]
+        seen: dict[tuple, int] = {}
+        keep: list[int] = []
+        for i, q in enumerate(q_positions):
+            if q in seen:
+                warnings.warn(
+                    f"Duplicate q-point {q} found in {path} "
+                    f"(indices {seen[q]} and {i}); keeping the first "
+                    f"occurrence only.",
+                    stacklevel=2,
+                )
+            else:
+                seen[q] = i
+                keep.append(i)
+        if len(keep) != len(q_entries):
+            q_entries = [q_entries[i] for i in keep]
+            raw_data["phonon"] = q_entries
     phonon_data = raw_data["phonon"][0]
     n_phonon = len(phonon_data["band"])
     n_lattice = len(phonon_data["band"][0]["eigenvector"])
