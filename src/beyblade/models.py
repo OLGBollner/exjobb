@@ -491,8 +491,16 @@ class PhononSpectrum:
                 cl_indices = [i for i, s in enumerate(symbols) if s == "Cl"]
                 defect_frac = frac_atoms[cl_indices].mean(axis=0)
             else:
-                print("Warning: Could not identify defect centre, no shift applied.")
-                return frac_atoms, np.zeros(3)
+                # Generic fallback: self-contained point-defect localizer
+                # (local import avoids the structures -> models cycle).
+                from beyblade.vasp.structures import detect_defect_position
+
+                detected = detect_defect_position(self)
+                if detected is not None:
+                    defect_frac = detected
+                else:
+                    print("Warning: Could not identify defect centre, no shift applied.")
+                    return frac_atoms, np.zeros(3)
         else:
             defect_pos = np.asarray(defect_pos, dtype=float)
             defect_frac = defect_pos @ inv_lat

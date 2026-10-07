@@ -33,7 +33,8 @@ def main() -> int:
             f"POSCAR_combined_{args.mode_i}_{args.mode_j}_amp_{args.amplitude}"
         write_perturbed_poscar(perturbed, output_file,
                                f"Combined modes {args.mode_i}+{args.mode_j}, "
-                               f"Q={args.amplitude} Ang*sqrt(amu)")
+                               f"Q={args.amplitude} Ang*sqrt(amu)",
+                               template_poscar=args.poscar_file)
         print("\nSuccess!")
     except Exception as e:
         print(f"Error: {e!s}", file=sys.stderr)

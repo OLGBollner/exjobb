@@ -14,3 +14,7 @@ Thesis/
 
 # Personal notes
 Notes/
+
+# build artifacts and vendored clones
+build/
+httk-sym/
