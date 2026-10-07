@@ -7,9 +7,10 @@ used, matching the self-contained heuristic.
 """
 
 import numpy as np
+import pytest
 from pymatgen.core import Structure
 
-from beyblade.vasp.structures import find_defect
+from beyblade.vasp.structures import detect_defect_position, find_defect
 
 
 def _diamond_si_supercell(n: int = 3) -> Structure:
@@ -156,3 +157,70 @@ class TestDefectPositionIntegration:
         disp = (defect_frac - expected + 0.5) % 1.0 - 0.5
         assert np.linalg.norm(disp @ spectrum.lattice) < 0.25
         np.testing.assert_allclose(_defect_center(spectrum), defect_frac, atol=1e-6)
+
+
+class TestDetectDefectPosition:
+    """detect_defect_position: success, None, wrap, and multi-defect error."""
+
+    def _spectrum(self, structure: Structure):
+        from beyblade.models import PhononSpectrum
+
+        return PhononSpectrum(
+            frequencies_mev=np.array([10.0]),
+            eigenvectors=np.zeros((1, len(structure), 3)),
+            atom_frac_coords=np.array([s.frac_coords for s in structure]),
+            atom_symbols=[s.specie.symbol for s in structure],
+            atomic_masses=np.full(len(structure), 28.0855),
+            lattice=structure.lattice.matrix,
+            symmetries=["A1"],
+        )
+
+    def _remove(self, pristine: Structure, indices):
+        return Structure(
+            pristine.lattice,
+            [s.specie for s in pristine if s not in indices],
+            [s.frac_coords for s in pristine if s not in indices],
+        )
+
+    def test_vacancy_position(self):
+        pristine = _diamond_si_supercell()
+        spectrum = self._spectrum(self._remove(pristine, [pristine[5]]))
+        pos = detect_defect_position(spectrum)
+        assert pos is not None
+        np.testing.assert_allclose(pos, pristine[5].frac_coords, atol=1e-6)
+
+    def test_divacancy_position_is_periodic_centroid(self):
+        pristine = _diamond_si_supercell()
+        remove = [pristine[15], pristine[44]]  # nearest neighbours
+        spectrum = self._spectrum(self._remove(pristine, remove))
+        pos = detect_defect_position(spectrum)
+        assert pos is not None
+        # Expected midpoint under the minimum-image convention: the two
+        # sites can straddle the cell boundary, so the naive mean is not
+        # the periodic midpoint.
+        ref = remove[0].frac_coords
+        offs = (remove[1].frac_coords - ref + 0.5) % 1.0 - 0.5
+        expected = (ref + offs / 2) % 1.0
+        np.testing.assert_allclose(pos, expected, atol=1e-6)
+
+    def test_pristine_returns_none(self):
+        assert detect_defect_position(self._spectrum(_diamond_si_supercell())) is None
+
+    def test_coords_wrap_into_unit_cell(self):
+        pristine = _diamond_si_supercell()
+        # Remove a corner atom; its site lies at the boundary but the
+        # centroid may need % 1.0 to land in [0, 1).
+        pos = detect_defect_position(self._spectrum(self._remove(pristine, [pristine[0]])))
+        assert pos is not None
+        assert np.all(pos >= 0.0) and np.all(pos < 1.0)
+
+    def test_multiple_defects_raise(self):
+        # In a 3x3x3 cell any two vacancies have under-coordinated shells
+        # close enough through the periodic boundary to merge into one
+        # cluster, so a larger cell is needed for two separate defects.
+        pristine = _diamond_si_supercell(4)
+        # A pair whose centres are > 3 bond lengths apart, with shells
+        # that stay further than the clustering cutoff (2.1 * bond).
+        spectrum = self._spectrum(self._remove(pristine, [pristine[2], pristine[40]]))
+        with pytest.raises(ValueError, match="found 2"):
+            detect_defect_position(spectrum)
