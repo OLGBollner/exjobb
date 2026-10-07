@@ -8,7 +8,8 @@ from beyblade.vasp.structures import (apply_combined_perturbation,
                                       apply_perturbation,
                                       compare_displacement,
                                       compare_displacement_cli,
-                                      load_phonon_data, load_poscar)
+                                      load_phonon_data, load_poscar,
+                                      write_perturbed_poscar)
 from beyblade.vasp.trees import (build_perturbation_tree, build_zfs_tree,
                                  default_phonon, n_modes_from_phonon,
                                  n_tasks_for, read_outcar_time,
@@ -20,5 +21,5 @@ __all__ = [
     "build_perturbation_tree", "build_zfs_tree", "default_phonon",
     "load_phonon_data", "load_poscar", "n_modes_from_phonon", "n_tasks_for",
     "prepare_relax_to_zfs", "read_outcar_time", "resolve_sym_phonon",
-    "sbatch_time",
+    "sbatch_time", "write_perturbed_poscar",
 ]

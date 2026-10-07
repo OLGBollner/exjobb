@@ -331,9 +331,11 @@ def _defect_frame(spectrum) -> tuple[np.ndarray, np.ndarray]:
 def _defect_center(spectrum) -> np.ndarray:
     """Fractional coords of the defect center, wrapped into [0, 1).
 
-    N site for NV, Cl-pair midpoint for ClV, else the cell origin. Matches
-    PhononSpectrum.translate_defect_to_origin. Callers are responsible for
-    periodic wrapping of the result.
+    Exact N site for single-N (NV) and Cl-pair midpoint for ClV; otherwise
+    the generic self-contained localizer (vacancy, divacancy, substitution,
+    interstitial). Falls back to the cell origin if nothing is detected.
+    Matches PhononSpectrum.translate_defect_to_origin. Callers are
+    responsible for periodic wrapping of the result.
     """
     frac = np.mod(np.asarray(spectrum.atom_frac_coords, dtype=float), 1.0)
     symbols_list = list(spectrum.atom_symbols)
@@ -341,6 +343,11 @@ def _defect_center(spectrum) -> np.ndarray:
         return frac[symbols_list.index("N")]
     if "Cl" in symbols_list:
         return frac[np.asarray(symbols_list) == "Cl"].mean(axis=0)
+    from beyblade.vasp.structures import detect_defect_position
+
+    detected = detect_defect_position(spectrum)
+    if detected is not None:
+        return detected
     return np.zeros(3)
 
 

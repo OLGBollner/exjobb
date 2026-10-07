@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import itertools
+
 import numpy as np
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp.inputs import Poscar
@@ -81,6 +83,34 @@ def _periodic_mean(fracs: np.ndarray) -> np.ndarray:
     return fracs[0] + disp.mean(axis=0)
 
 
+def _cluster_centroid(fracs: np.ndarray, lattice: np.ndarray) -> np.ndarray:
+    """Fractional centroid of a bonded cluster, safe across cell edges.
+
+    The cluster is unwrapped breadth-first: start from the first
+    member, then repeatedly place the remaining member whose closest
+    periodic image to the unwrapped set is nearest (in Cartesian
+    distance). Bonded members sit within one bond length of the
+    cluster, so that image is unambiguous, and the resulting Cartesian
+    mean does not mix up periodic images. Works for vacancy shells
+    that straddle a supercell boundary.
+    """
+    placed = [fracs[0].copy()]
+    remaining = list(range(1, len(fracs)))
+    while remaining:
+        best = None
+        for j in remaining:
+            for i in placed:
+                for t in itertools.product((-1, 0, 1), repeat=3):
+                    cand = fracs[j] + np.array(t)
+                    dist = np.linalg.norm((cand - i) @ lattice)
+                    if best is None or dist < best[0]:
+                        best = (dist, j, cand)
+        placed.append(best[2])
+        remaining.remove(best[1])
+    cart = np.mean([q @ lattice for q in placed], axis=0)
+    return np.linalg.solve(lattice.T, cart)
+
+
 def find_defect(
     structure: Structure,
 ) -> list[DefectLocation]:
@@ -145,7 +175,10 @@ def find_defect(
             # mode_cn; an adjacent divacancy leaves 2*mode_cn - 2.
             deficit = sum(mode_cn_by_species[structure[i].specie.symbol] - cn[i] for i in cluster)
             defect_class = "divacancy" if deficit > max(mode_cn_by_species.values()) else "vacancy"
-            frac_centroid = _periodic_mean(np.array([structure[i].frac_coords for i in cluster]))
+            frac_centroid = _cluster_centroid(
+                np.array([structure[i].frac_coords for i in cluster]),
+                structure.lattice.matrix,
+            )
             defects.append(
                 DefectLocation(
                     defect_class=defect_class,
@@ -365,3 +398,29 @@ def write_perturbed_poscar(structure: Structure, output_file: str, comment: str)
     poscar = Poscar(structure)
     poscar.comment = comment
     poscar.write_file(output_file)
+
+
+def spectrum_structure(spectrum: PhononSpectrum) -> Structure:
+    """Build a pymatgen Structure from a PhononSpectrum's atom list."""
+    frac = np.mod(np.asarray(spectrum.atom_frac_coords, dtype=float), 1.0)
+    return Structure(
+        spectrum.lattice,
+        list(spectrum.atom_symbols),
+        frac,
+        coords_are_cartesian=False,
+    )
+
+
+def detect_defect_position(spectrum: PhononSpectrum) -> np.ndarray | None:
+    """Fractional defect-centre coords from find_defect, or None.
+
+    The PhononSpectrum supercell must contain exactly one point defect;
+    multiple detections are a hard error rather than an arbitrary pick.
+    """
+    defects = find_defect(spectrum_structure(spectrum))
+    if not defects:
+        return None
+    if len(defects) > 1:
+        classes = sorted(d.defect_class for d in defects)
+        raise ValueError(f"Expected one point defect in supercell, found {len(defects)}: {classes}")
+    return defects[0].frac_coords % 1.0
