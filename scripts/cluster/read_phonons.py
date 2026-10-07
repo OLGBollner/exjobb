@@ -14,8 +14,8 @@ from pathlib import Path
 
 from beyblade.parsers import (
     parse_phonon_data,
+    prepare_phonopy_yaml,
     save_phonon_npz,
-    write_full_phonopy_yaml,
 )
 
 
@@ -53,8 +53,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.phonon_file.suffix in (".yaml", ".yml"):
-            write_full_phonopy_yaml(args.phonon_file)
-        spectrum = parse_phonon_data(args.phonon_file)
+            spectrum, _ = prepare_phonopy_yaml(args.phonon_file)
+        else:
+            spectrum = parse_phonon_data(args.phonon_file)
     except Exception as exc:  # surface a clean error, not a traceback
         print(f"error: failed to parse {args.phonon_file}: {exc}", file=sys.stderr)
         return 1

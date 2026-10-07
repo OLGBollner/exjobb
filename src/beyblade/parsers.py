@@ -201,64 +201,13 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
     )
 
 
-def write_full_phonopy_yaml(
-    yaml_path: str | Path,
-    poscar_path: str | Path | None = None,
-    out_path: str | Path | None = None,
-) -> Path | None:
-    """Write a phonopy yaml with structure data filled in from a POSCAR.
+def _dedupe_text_qpoints(text_lines: list[str]) -> int:
+    """Remove duplicate q-point blocks from phonopy yaml text in place.
 
-    If ``yaml_path`` already contains structure data (``points``), nothing is
-    written and ``None`` is returned. Otherwise the structure is taken from
-    ``poscar_path`` (default: a ``POSCAR`` next to the yaml) — the POSCAR atom
-    count must match the eigenvector dimension or ``ValueError`` is raised —
-    injected verbatim as top-level ``lattice`` and ``points`` sections —
-    the original file text is copied unchanged and the structure block is
-    appended at the end, so the phonon data keeps its original formatting —
-    and the result saved to ``out_path`` (default: ``<yaml stem>_full.yaml``
-    next to the input). Returns the output path.
+    Mirrors the q-point deduplication done at parse time, but on the raw
+    text so the copied file keeps its original formatting. Returns the
+    number of removed blocks.
     """
-    path = Path(yaml_path)
-    with path.open("r", encoding="utf-8") as f:
-        raw_data = yaml.load(f, Loader=Loader)
-
-    if raw_data.get("points"):
-        return None
-
-    if poscar_path is None:
-        sibling = path.parent / "POSCAR"
-        poscar_path = sibling if sibling.is_file() else None
-    if poscar_path is None or not Path(poscar_path).is_file():
-        return None
-
-    struct = Structure.from_file(str(poscar_path))
-    phonon_block = raw_data["phonon"][0]
-    n_atoms = len(phonon_block["band"][0]["eigenvector"])
-    if len(struct) != n_atoms:
-        raise ValueError(
-            f"Geometry mismatch: {len(struct)} atoms in POSCAR "
-            f"({poscar_path}) vs {n_atoms} atoms in eigenvectors of {path}"
-        )
-
-    # Mirror phonopy's own yaml writer (PhonopyAtoms.get_yaml_lines) so the
-    # appended block is byte-for-byte in its native style.
-    lines = ["lattice:"]
-    for row, label in zip(struct.lattice.matrix, ("a", "b", "c")):
-        lines.append(
-            "- [ %21.15f, %21.15f, %21.15f ] # %s"
-            % (row[0], row[1], row[2], label)
-        )
-    lines.append("points:")
-    for i, site in enumerate(struct):
-        lines.append(f"- symbol: {site.specie.symbol} # {i + 1}")
-        c = " %18.15f, %18.15f, %18.15f " % tuple(site.frac_coords)
-        lines.append(f"  coordinates: [{c}]")
-        lines.append(f"  mass: {site.specie.atomic_mass:.6f}")
-
-    # Deduplicate q-point blocks in the copied text so <name>_full.yaml
-    # does not carry the duplicated band blocks.
-    with path.open("r", encoding="utf-8") as f:
-        text_lines = f.readlines()
     qpos_re = re.compile(r"^\s*-?\s*q-position:\s*(?:\[(.*)\])?\s*$")
     list_re = re.compile(r"^\s*-\s*(-?[\d.eE+-]+)\s*$")
     block_starts: list[tuple[int, tuple]] = []
@@ -285,31 +234,90 @@ def write_full_phonopy_yaml(
                     break
             if len(vals) == 3:
                 block_starts.append((i, tuple(vals)))
-    n_dup = 0
-    if len(block_starts) > 1:
-        seen: set[tuple] = set()
-        drop: list[tuple[int, int]] = []
-        for j, (start, q) in enumerate(block_starts):
-            end = block_starts[j + 1][0] if j + 1 < len(block_starts) else len(text_lines)
-            if q in seen:
-                drop.append((start, end))
-            else:
-                seen.add(q)
-        for start, end in reversed(drop):
-            del text_lines[start:end]
-        n_dup = len(drop)
+    if len(block_starts) <= 1:
+        return 0
+    seen: set[tuple] = set()
+    drop: list[tuple[int, int]] = []
+    for j, (start, q) in enumerate(block_starts):
+        end = block_starts[j + 1][0] if j + 1 < len(block_starts) else len(text_lines)
+        if q in seen:
+            drop.append((start, end))
+        else:
+            seen.add(q)
+    for start, end in reversed(drop):
+        del text_lines[start:end]
+    return len(drop)
 
+
+def _structure_yaml_lines(
+    lattice: np.ndarray,
+    symbols: list[str],
+    frac_coords: np.ndarray,
+    masses: np.ndarray,
+) -> list[str]:
+    """Format a structure block in phonopy's native yaml style."""
+    lines = ["lattice:"]
+    for row, label in zip(lattice, ("a", "b", "c")):
+        lines.append(
+            "- [ %21.15f, %21.15f, %21.15f ] # %s"
+            % (row[0], row[1], row[2], label)
+        )
+    lines.append("points:")
+    for i, (symbol, frac, mass) in enumerate(zip(symbols, frac_coords, masses)):
+        lines.append(f"- symbol: {symbol} # {i + 1}")
+        c = " %18.15f, %18.15f, %18.15f " % tuple(frac)
+        lines.append(f"  coordinates: [{c}]")
+        lines.append(f"  mass: {mass:.6f}")
+    return lines
+
+
+def prepare_phonopy_yaml(
+    yaml_path: str | Path,
+    poscar_path: str | Path | None = None,
+    out_path: str | Path | None = None,
+) -> tuple[PhononSpectrum, Path | None]:
+    """Parse a phonopy yaml once and, if needed, write a structure-complete copy.
+
+    Parses ``yaml_path`` exactly once (q-point deduplication warning fires
+    here only). If the yaml already contains structure data (``points``),
+    returns ``(spectrum, None)``. Otherwise the structure is taken from
+    ``poscar_path`` (default: a ``POSCAR`` next to the yaml) — the atom
+    count must match the eigenvector dimension or ``ValueError`` is raised
+    — the original file text is copied unchanged with duplicate q-point
+    blocks removed, the structure block is appended at the end in phonopy's
+    native style, and the result is saved to ``out_path`` (default:
+    ``<yaml stem>_full.yaml`` next to the input). Returns
+    ``(spectrum, out_path)``; if no usable POSCAR is found, the second
+    element is ``None`` and nothing is written.
+    """
+    path = Path(yaml_path)
+    spectrum = parse_phonopy_yaml(path, poscar_path=poscar_path)
+
+    has_points = any(re.match(r"^points:", line) for line in path.read_text(encoding="utf-8").splitlines())
+    if has_points:
+        return spectrum, None
+    if poscar_path is None:
+        sibling = path.parent / "POSCAR"
+        poscar_path = sibling if sibling.is_file() else None
+    if poscar_path is None or not Path(poscar_path).is_file():
+        return spectrum, None
+
+    text_lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    n_dup = _dedupe_text_qpoints(text_lines)
+    struct_lines = _structure_yaml_lines(
+        spectrum.lattice, spectrum.atom_symbols, spectrum.atom_frac_coords, spectrum.atomic_masses,
+    )
     out = Path(out_path) if out_path else path.with_name(f"{path.stem}_full.yaml")
     with out.open("w", encoding="utf-8") as f:
         f.writelines(text_lines)
         f.write("\n")
-        f.write("\n".join(lines))
+        f.write("\n".join(struct_lines))
         f.write("\n")
     print(
         f"wrote {out} (structure data from {poscar_path})"
         + (f"; removed {n_dup} duplicate q-point block(s)" if n_dup else "")
     )
-    return out
+    return spectrum, out
 
 
 def parse_phonon_data(
