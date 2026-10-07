@@ -394,10 +394,37 @@ def compare_displacement_cli(reference: str | Path, perturbed: list[str | Path])
             print(f"    {stats['max'] / base:8.3f}  {path}")
 
 
-def write_perturbed_poscar(structure: Structure, output_file: str, comment: str) -> None:
-    poscar = Poscar(structure)
-    poscar.comment = comment
-    poscar.write_file(output_file)
+def write_perturbed_poscar(structure: Structure, output_file: str, comment: str,
+                           template_poscar: str | Path | None = None) -> None:
+    """Write a perturbed POSCAR.
+
+    Without template_poscar, a plain pymatgen Poscar is written.  With a
+    template, the template's header (including its species grouping --
+    pymatgen's Poscar merges repeated species groups like 'Si Si C C Cl'
+    into 'Si C Cl') is kept verbatim and only the coordinate block is
+    replaced.  Atom order in `structure` must match the template file,
+    which holds for structures loaded from it with load_poscar.
+    """
+    if template_poscar is None:
+        poscar = Poscar(structure)
+        poscar.comment = comment
+        poscar.write_file(output_file)
+        return
+
+    lines = Path(template_poscar).read_text().splitlines()
+    out = [comment] + lines[1:7]  # comment, scale, lattice, species, counts
+    i = 7
+    if lines[i].strip().lower().startswith("s"):  # selective dynamics
+        out.append(lines[i])
+        i += 1
+    coord_mode = lines[i].strip().lower()
+    out.append(lines[i])
+    direct = coord_mode.startswith("d")
+    lat = np.array(structure.lattice.matrix)
+    for site in structure:
+        frac = site.frac_coords if direct else np.asarray(site.coords) @ np.linalg.inv(lat)
+        out.append("  %.16f  %.16f  %.16f" % tuple(frac))
+    Path(output_file).write_text("\n".join(out) + "\n")
 
 
 def spectrum_structure(spectrum: PhononSpectrum) -> Structure:

@@ -8,9 +8,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-from pymatgen.io.vasp.inputs import Poscar
 
-from beyblade.vasp import apply_perturbation, load_phonon_data, load_poscar
+from beyblade.vasp import (apply_perturbation, load_phonon_data, load_poscar,
+                           write_perturbed_poscar)
 
 
 def parse_index(s: str) -> list[int]:
@@ -40,8 +40,9 @@ def main() -> int:
                                        data.atomic_masses, idx, args.amplitude,
                                        original_indices=data.original_indices)
         out = args.output if args.output else f"POSCAR_pert_{args.amplitude}_mode_{idx}"
-        Poscar(perturbed).comment = f"Mode {idx}, Q={args.amplitude} Ang*sqrt(amu)"
-        Poscar(perturbed).write_file(out)
+        write_perturbed_poscar(perturbed, out,
+                               f"Mode {idx}, Q={args.amplitude} Ang*sqrt(amu)",
+                               template_poscar=args.poscar_file)
         print(f"Saved: {out}")
     print("\nSuccess!")
     return 0
