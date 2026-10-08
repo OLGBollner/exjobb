@@ -7,6 +7,7 @@ import argparse
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from beyblade.cli.package import build_package_parser
     from beyblade.cli.plotting import build_plot_parser
     from beyblade.cli.run import build_run_parser
 
@@ -17,6 +18,8 @@ def build_parser() -> argparse.ArgumentParser:
     build_plot_parser(plot_parser.add_subparsers(dest="command", required=True))
 
     build_run_parser(subparsers.add_parser("run", help="Run the end-to-end analysis pipeline"))
+
+    build_package_parser(subparsers.add_parser("package", help="Package raw ZFS simulation data into a single .npz"))
 
     return parser
 
