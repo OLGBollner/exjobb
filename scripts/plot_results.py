@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from beyblade.plotter import (
-    compare_runs_t1,
+    plot_t1,
     plot_run_coupling,
     plot_run_rates,
     plot_run_t1,
@@ -108,7 +108,7 @@ def main():
         comp_out = Path(args.out_dir) if args.out_dir else run_paths[0].parent
         comp_out.mkdir(parents=True, exist_ok=True)
         print(f"\n--- Generating Comparison Plots Across {len(run_paths)} Runs ---")
-        compare_runs_t1(run_paths, comp_out, args.format, args.dpi, args.show)
+        plot_t1(run_paths, output_path=comp_out / f"t1_comparison.{args.format}")
 
     for run_dir in run_paths:
         if not run_dir.is_dir():

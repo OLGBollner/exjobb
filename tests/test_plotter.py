@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from beyblade.plotter import (
-    overlay_t1,
+    plot_t1,
     plot_1d_spectral_functions,
     plot_ipr_spectrum,
     plot_2d_spectral_density_map,
@@ -78,7 +78,7 @@ class TestPlotter:
         np.savez(path, **data)
         return path
 
-    def test_overlay_t1_two_files_labels_and_legend(self, tmp_path):
+    def test_plot_t1_two_files_labels_and_legend(self, tmp_path):
         """Two files produce two colours and metadata-built labels."""
         p1 = self._make_t1_npz(
             tmp_path, "nv.npz", defect="NV", cell_size="512", calc_method="all_bands", init_state="0"
@@ -87,7 +87,7 @@ class TestPlotter:
             tmp_path, "clv.npz", defect="ClV", cell_size="128", calc_method="defect_band", init_state="+1"
         )
 
-        fig, ax = overlay_t1([p1, p2])
+        fig, ax = plot_t1([p1, p2])
         labels = [line.get_label() for line in ax.get_lines()]
         assert "NV 512, all_bands, 0" in " ".join(labels)
         assert "ClV 128, defect_band, +1" in " ".join(labels)
@@ -95,64 +95,64 @@ class TestPlotter:
         assert ax.get_lines()[0].get_color() != ax.get_lines()[1].get_color()
         plt.close(fig)
 
-    def test_overlay_t1_eigenval_curves_plotted(self, tmp_path):
+    def test_plot_t1_eigenval_curves_plotted(self, tmp_path):
         """When t1_eigenval is present both curves appear for that file."""
         p = self._make_t1_npz(tmp_path, "both.npz", t1_eigenval=np.array([1e-4, 3e-4, 9e-4]))
 
-        fig, ax = overlay_t1([p])
+        fig, ax = plot_t1([p])
         assert len(ax.get_lines()) == 2
         assert any("Eigenvalue" in line.get_label() for line in ax.get_lines())
         assert any("ODE fit" in line.get_label() for line in ax.get_lines())
         plt.close(fig)
 
-    def test_overlay_t1_legacy_keys_fallback(self, tmp_path):
+    def test_plot_t1_legacy_keys_fallback(self, tmp_path):
         """Legacy npz keys (T1_times / T1_range) are used when t1_fit is absent."""
         p1 = self._make_t1_npz(tmp_path, "legacy_times.npz", t1_fit=None, legacy_fit=np.array([5e-4, 6e-4, 7e-4]))
         p2 = tmp_path / "legacy_range.npz"
         np.savez(p2, temperatures=np.array([100.0, 200.0]), T1_range=np.array([1e-3, 2e-3]))
 
-        fig, ax = overlay_t1([p1, p2])
+        fig, ax = plot_t1([p1, p2])
         assert len(ax.get_lines()) >= 2
         assert all(np.isfinite(line.get_xdata()).any() for line in ax.get_lines())
         plt.close(fig)
 
-    def test_overlay_t1_skips_nan_and_nonpositive(self, tmp_path):
+    def test_plot_t1_skips_nan_and_nonpositive(self, tmp_path):
         """NaN and non-positive T1 values are not plotted."""
         p = self._make_t1_npz(tmp_path, "dirty.npz", t1_fit=np.array([1e-3, np.nan, -5.0]))
 
-        fig, ax = overlay_t1([p])
+        fig, ax = plot_t1([p])
         plotted = ax.get_lines()[0]
         assert len(plotted.get_xdata()) == 1
         plt.close(fig)
 
-    def test_overlay_t1_no_valid_data_returns_empty(self, tmp_path, capsys):
+    def test_plot_t1_no_valid_data_returns_empty(self, tmp_path, capsys):
         """Files with no usable curves produce no lines and a message."""
         p = tmp_path / "empty.npz"
         np.savez(p, temperatures=np.array([1.0]), t1_fit=np.array([np.nan]))
 
-        fig, ax = overlay_t1([p])
+        fig, ax = plot_t1([p])
         assert len(ax.get_lines()) == 0
         assert "No valid T1 data" in capsys.readouterr().out
         plt.close(fig)
 
-    def test_overlay_t1_output_filename_metadata(self, tmp_path):
+    def test_plot_t1_output_filename_metadata(self, tmp_path):
         """Output filename gets shared metadata appended once per unique part."""
         p1 = self._make_t1_npz(tmp_path, "a.npz", defect="NV", cell_size="512")
         p2 = self._make_t1_npz(tmp_path, "b.npz", defect="NV", cell_size="512", calc_method="defect_band")
         out = tmp_path / "fig" / "overlay.png"
 
-        overlay_t1([p1, p2], output_path=out)
+        plot_t1([p1, p2], output_path=out)
         saved = list((tmp_path / "fig").glob("*.png"))
         assert len(saved) == 1
         # unique metadata parts in order of first appearance
         assert saved[0].stem.startswith("overlay_NV_512")
         assert "defect_band" in saved[0].stem
 
-    def test_overlay_t1_log_scale(self, tmp_path):
+    def test_plot_t1_log_scale(self, tmp_path):
         """The y axis is logarithmic."""
         p = self._make_t1_npz(tmp_path, "log.npz")
 
-        fig, ax = overlay_t1([p])
+        fig, ax = plot_t1([p])
         assert ax.get_yscale() == "log"
         assert ax.get_xlabel() == "Temperature (K)"
         plt.close(fig)

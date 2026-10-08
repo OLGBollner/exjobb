@@ -229,90 +229,6 @@ def plot_transition_rates_stacked(
     return figures
 
 
-def plot_t1_relaxation(
-    t1_data: str | Path | dict[str, Any],
-    output_path: str | Path | None = None,
-    show: bool = False,
-    plain_name: bool = False,
-) -> tuple[plt.Figure, plt.Axes]:
-    """
-    Plots T_1 relaxation times versus temperature.
-    """
-    if isinstance(t1_data, (str, Path)):
-        data = np.load(str(t1_data), allow_pickle=True)
-    else:
-        data = t1_data
-
-    temperatures = np.asarray(data["temperatures"], dtype=float)
-    defect = str(data.get("defect", ""))
-    cell_size = str(data.get("cell_size", ""))
-
-    t1_fit = np.asarray(data["t1_fit"], dtype=float) if "t1_fit" in data else None
-    t1_eigenval = np.asarray(data["t1_eigenval"], dtype=float) if "t1_eigenval" in data else None
-
-    # Fallback for legacy key
-    if t1_fit is None and "T1_times" in data:
-        t1_fit = np.asarray(data["T1_times"], dtype=float)
-    if t1_fit is None and "T1_range" in data:
-        t1_fit = np.asarray(data["T1_range"], dtype=float)
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    calc_method = str(data.get("calc_method", ""))
-    init_state = str(data.get("init_state", "ms_0"))
-    label_suffix = f" ({defect} {cell_size}" if defect else " ("
-    if calc_method:
-        label_suffix += f", {calc_method}"
-    if init_state:
-        label_suffix += f", {init_state}"
-    label_suffix += ")"
-    if t1_fit is not None:
-        valid = np.isfinite(t1_fit) & (t1_fit > 0)
-        ax.plot(
-            temperatures[valid],
-            t1_fit[valid],
-            "o-",
-            color="#1f77b4",
-            linewidth=2,
-            markersize=5,
-            label=f"$T_1$ ODE fit{label_suffix}",
-        )
-
-    if t1_eigenval is not None:
-        valid_eig = np.isfinite(t1_eigenval) & (t1_eigenval > 0)
-        ax.plot(
-            temperatures[valid_eig],
-            t1_eigenval[valid_eig],
-            "--",
-            color="#d62728",
-            linewidth=1.8,
-            label=f"$T_1$ Eigenvalue{label_suffix}",
-        )
-
-    ax.set_xlabel("Temperature (K)", fontsize=14)
-    ax.set_ylabel(r"$T_1$ (s)", fontsize=14)
-    ax.set_yscale("log")
-    ax.grid(True, which="both", linestyle=":", alpha=0.6)
-    ax.tick_params(axis="both", which="both", direction="in")
-    ax.legend(frameon=True, fontsize=12)
-    fig.tight_layout()
-
-    if output_path is not None:
-        p = Path(output_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        # Metadata belongs in the filename, not a figure title
-        meta = "_".join(x.replace(" ", "-") for x in (defect, cell_size, calc_method) if x)
-        if meta and meta not in p.stem and not plain_name:
-            p = p.with_name(f"{p.stem}_{meta}{p.suffix}")
-        fig.savefig(p, dpi=300)
-        print(f"Saved T1 figure to: {p}")
-
-    if show:
-        plt.show()
-
-    return fig, ax
-
-
 def plot_ipr_spectrum(
     frequencies_mev: np.ndarray,
     ipr: np.ndarray,
@@ -446,23 +362,34 @@ def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
         return
 
     out_file = out_dir / f"t1_vs_temperature.{fmt}"
-    plot_t1_relaxation(t1_file, output_path=out_file, plain_name=True)
+    plot_t1([t1_file], output_path=out_file, plain_name=True)
     print(f"  [✓] Saved T1 plot -> {out_file}")
 
 
-def overlay_t1(
-    npz_paths: Sequence[str | Path], output_path: str | Path | None = None, show: bool = False
+def plot_t1(
+    inputs: Sequence[str | Path],
+    output_path: str | Path | None = None,
+    show: bool = False,
+    plain_name: bool = False,
 ) -> tuple[plt.Figure, plt.Axes]:
     """
-    Overlay T_1 curves from multiple T1 npz files in a single figure.
-    Labels and output filename are built from the npz metadata.
+    Plot T_1 curves from one or more npz files or run directories in a single figure.
+
+    Each input is either a T1 npz file (e.g. ``t1_relaxation.npz``) or a run
+    directory containing one. Labels and the output filename are built from
+    the npz metadata unless ``plain_name`` is set.
     """
     fig, ax = plt.subplots(figsize=(8, 6))
     colors = plt.cm.tab10.colors
     plotted_any = False
     meta_parts: list[str] = []
 
-    for idx, path in enumerate(npz_paths):
+    for idx, path in enumerate(inputs):
+        path = Path(path)
+        if path.is_dir():
+            path = path / "t1_relaxation.npz"
+            if not path.exists():
+                raise FileNotFoundError(f"No t1_relaxation.npz in run directory: {path.parent}")
         data = np.load(str(path), allow_pickle=True)
         temperatures = np.asarray(data["temperatures"], dtype=float)
         defect = str(data.get("defect", ""))
@@ -530,58 +457,15 @@ def overlay_t1(
         p = Path(output_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         meta = "_".join(dict.fromkeys(meta_parts))
-        if meta:
+        if meta and meta not in p.stem and not plain_name:
             p = p.with_name(f"{p.stem}_{meta}{p.suffix}")
         fig.savefig(p, dpi=300, bbox_inches="tight")
-        print(f"Saved T1 overlay figure to: {p}")
+        print(f"Saved T1 figure to: {p}")
 
     if show:
         plt.show()
 
     return fig, ax
-
-
-def compare_runs_t1(run_dirs: list[Path], out_dir: Path, fmt: str, dpi: int, show: bool):
-    """Overlays T_1 curves from multiple runs for easy comparison."""
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    colors = plt.cm.tab10.colors
-    plotted_any = False
-
-    for idx, r_dir in enumerate(run_dirs):
-        t1_file = r_dir / "t1_relaxation.npz"
-        if not t1_file.exists():
-            continue
-
-        data = np.load(t1_file, allow_pickle=True)
-        temps = data["temperatures"]
-        t1_fit = data["t1_fit"] if "t1_fit" in data else None
-        defect = data.get("defect", r_dir.name)
-        cell = data.get("cell_size", "")
-        method = data.get("calc_method", "")
-        label = f"{defect} {cell} ({method})" if cell else r_dir.name
-
-        color = colors[idx % len(colors)]
-        if t1_fit is not None:
-            valid = np.isfinite(t1_fit) & (t1_fit > 0)
-            if np.any(valid):
-                ax.plot(temps[valid], t1_fit[valid], "o-", color=color, linewidth=2, markersize=5, label=label)
-                plotted_any = True
-
-    if not plotted_any:
-        print("No valid T1 data found across provided run directories.")
-        return
-
-    ax.set_xlabel("Temperature (K)", fontsize=14)
-    ax.set_ylabel(r"$T_1$ (s)", fontsize=14)
-    ax.set_yscale("log")
-    ax.grid(True, which="both", linestyle=":", alpha=0.6)
-    ax.legend(frameon=True, fontsize=11)
-    fig.tight_layout()
-
-    out_file = out_dir / f"t1_comparison.{fmt}"
-    fig.savefig(out_file, dpi=dpi, bbox_inches="tight")
-    print(f"  [✓] Saved multi-run T1 comparison -> {out_file}")
 
 
 class ZFSPlotter:

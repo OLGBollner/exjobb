@@ -17,7 +17,7 @@ from beyblade.parsers import (
 )
 from beyblade.plotter import (
     plot_1d_spectral_functions,
-    plot_t1_relaxation,
+    plot_t1,
     plot_transition_rates_stacked,
 )
 from beyblade.relaxation_dynamics import RelaxationDynamics
@@ -514,7 +514,7 @@ def run_full_pipeline(
         # T1 plot
         try:
             ft1_path = fig_dir / "t1_vs_temperature.png"
-            plot_t1_relaxation(t1_path, output_path=ft1_path, plain_name=True)
+            plot_t1([t1_path], output_path=ft1_path, plain_name=True)
             figures_saved.append(ft1_path)
         except Exception as e:
             print(f"Warning: could not generate T1 plot: {e}")
