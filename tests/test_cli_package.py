@@ -1,53 +1,67 @@
-"""Tests for ``beyblade package``."""
-
-from __future__ import annotations
-
 import argparse
 from unittest.mock import patch
 
 import pytest
 
-from beyblade.cli import package as cli_package
+from beyblade.cli.package import _run
+from beyblade.models import RawZFSData
 
 
-def _make_args(sim_folders: list[str], method: str = "all", output_root="data") -> argparse.Namespace:
-    return argparse.Namespace(sim_folder=sim_folders, method=method, output_root=__import__("pathlib").Path(output_root))
+def _raw(order=1, pert=0.025):
+    return RawZFSData(
+        defect="NV",
+        cell_size=512,
+        pert_scale=pert,
+        calc_method="all_bands",
+        order=order,
+    )
 
 
-class _FakeRaw:
-    def __init__(self, defect, cell_size):
-        self.defect = defect
-        self.cell_size = cell_size
-        self.combined_with: list = []
-
-    def combine(self, other):
-        self.combined_with.append(other)
-        return self
-
-    def _default_name(self):
-        return f"{self.defect}_{self.cell_size}_raw_zfs_data_all_1d.npz"
-
-    def save(self, out_path):
-        out_path.write_text("fake")
-        return str(out_path)
+def _make_args(tmp_path, orders="first,second", pert=None):
+    return argparse.Namespace(
+        defect_folder=tmp_path / "NV_512",
+        orders=orders,
+        pert=pert,
+        method="all",
+        output_root=tmp_path / "data",
+    )
 
 
-def test_package_writes_to_dated_defect_folder(tmp_path):
-    raw = _FakeRaw("NV", 512)
-    with patch.object(cli_package, "parse_zfs_simulation_dataset", return_value=raw):
-        cli_package._run(_make_args(["/sim"], output_root=str(tmp_path)))
-    assert (tmp_path / f"NV_512_{cli_package.date.today():%Y%m%d}" / "NV_512_raw_zfs_data_all_1d.npz").exists()
+def _tree(tmp_path, orders=("first", "second"), perts=(0.025,)):
+    for o in orders:
+        for p in perts:
+            (tmp_path / "NV_512" / f"{o}_order" / f"pert_{p:g}").mkdir(parents=True)
 
 
-def test_package_hard_error_on_mixed_defects():
-    with patch.object(cli_package, "parse_zfs_simulation_dataset", side_effect=[_FakeRaw("NV", 512), _FakeRaw("ClV", 128)]):
-        with pytest.raises(SystemExit, match="multiple defects"):
-            cli_package._run(_make_args(["/a", "/b"]))
+def test_saves_per_order_and_pert(tmp_path):
+    _tree(tmp_path)
+    with patch(
+        "beyblade.cli.package.parse_zfs_simulation_dataset",
+        side_effect=lambda **kw: _raw(order=kw["order"], pert=float(kw["sim_folder"].name.split("_")[1])),
+    ):
+        _run(_make_args(tmp_path))
+    base = tmp_path / "data" / "NV_512_20261008" / "pert_0.025"
+    assert (base / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
+    assert (base / "NV_512_raw_zfs_data_all_bands_2d.npz").exists()
 
 
-def test_package_combines_multiple_folders():
-    raws = [_FakeRaw("NV", 512), _FakeRaw("NV", 512)]
-    with patch.object(cli_package, "parse_zfs_simulation_dataset", side_effect=raws):
-        with patch.object(_FakeRaw, "save", return_value="p"):
-            cli_package._run(_make_args(["/a", "/b"], output_root="/tmp/x"))
-    assert raws[0].combined_with == [raws[1]]
+def test_orders_filter(tmp_path):
+    _tree(tmp_path, orders=("first",))
+    with patch("beyblade.cli.package.parse_zfs_simulation_dataset", return_value=_raw()):
+        _run(_make_args(tmp_path, orders="first"))
+    assert len(list((tmp_path / "data").rglob("*.npz"))) == 1
+
+
+def test_pert_filter(tmp_path):
+    _tree(tmp_path, perts=(0.01, 0.025))
+    with patch("beyblade.cli.package.parse_zfs_simulation_dataset", return_value=_raw()):
+        _run(_make_args(tmp_path, pert=[0.025]))
+    assert len(list((tmp_path / "data").rglob("*.npz"))) == 1
+
+
+def test_missing_order_folder_warns(tmp_path):
+    _tree(tmp_path, orders=("first",))
+    with patch("beyblade.cli.package.parse_zfs_simulation_dataset", return_value=_raw()):
+        with pytest.warns(UserWarning):
+            _run(_make_args(tmp_path))
+    assert len(list((tmp_path / "data").rglob("*.npz"))) == 1
