@@ -1,21 +1,33 @@
 import argparse
 import warnings
+
+import numpy as np
 from unittest.mock import patch
 
 import pytest
 
 from beyblade.cli.package import _run
-from beyblade.models import RawZFSData
+from beyblade.models import PerturbationEntry, RawZFSData, ZFSTensor
 
 
-def _raw(order=1, pert=0.025):
-    return RawZFSData(
+def _raw(order=1, pert=0.025, **_kw):
+    kwargs = dict(
         defect="NV",
         cell_size=512,
         pert_scale=pert,
         calc_method="all_bands",
         order=order,
     )
+    if order == 2:
+        # Non-empty second order so combined_order() resolves to 2,
+        # matching real second-order data.
+        kwargs["second_order"] = {
+            (0, 0): PerturbationEntry(
+                order=2, mode_indices=(0, 0), amplitude=(0.025, 0.025),
+                zfs_tensor=ZFSTensor(matrix=np.zeros((3, 3))),
+            )
+        }
+    return RawZFSData(**kwargs)
 
 
 def _make_args(tmp_path, orders="first,second", pert=None):

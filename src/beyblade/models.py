@@ -1057,7 +1057,7 @@ class RawZFSData:
                     entry["ipr"] = (ipr_i, ipr_j)
 
     def _default_name(self):
-        return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.order}d.npz"
+        return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.combined_order}d.npz"
 
     SCHEMA = [
         FieldSpec("defect", "str"),

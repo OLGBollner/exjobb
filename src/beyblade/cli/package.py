@@ -67,17 +67,16 @@ def _run(args: argparse.Namespace) -> None:
             perts[pert_scale] = pert_dir
         return perts
 
-    order_nums = [_ORDER_NUM[o] for o in orders]
-    datasets = {order: _collect(order) for order in order_nums}
+    datasets = {o: _collect(o) for o in orders}
     pert_scales = sorted(set().union(*datasets.values()))
 
     for pert_scale in pert_scales:
         raw = None
-        for order in order_nums:
-            if pert_scale not in datasets[order]:
+        for o in orders:
+            if pert_scale not in datasets[o]:
                 continue
             data = parse_zfs_simulation_dataset(
-                sim_folder=datasets[order][pert_scale], order=order, calc_method=args.method
+                sim_folder=datasets[o][pert_scale], order=_ORDER_NUM[o], calc_method=args.method
             )
             raw = data if raw is None else raw.combine(data)
         pert_folder = folder / f"pert_{pert_scale:g}"
