@@ -3,6 +3,7 @@
 
 Thin CLI wrapper; the logic lives in beyblade.vasp (prepare_relax_to_zfs).
 """
+
 from __future__ import annotations
 
 import sys

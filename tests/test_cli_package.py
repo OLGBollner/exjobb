@@ -1,5 +1,4 @@
 import argparse
-import warnings
 
 import numpy as np
 from unittest.mock import patch
@@ -23,7 +22,9 @@ def _raw(order=1, pert=0.025, **_kw):
         # matching real second-order data.
         kwargs["second_order"] = {
             (0, 0): PerturbationEntry(
-                order=2, mode_indices=(0, 0), amplitude=(0.025, 0.025),
+                order=2,
+                mode_indices=(0, 0),
+                amplitude=(0.025, 0.025),
                 zfs_tensor=ZFSTensor(matrix=np.zeros((3, 3))),
             )
         }

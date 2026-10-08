@@ -19,7 +19,10 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     opt.add_argument("-ph", "--phonon-file", metavar="FILE", help="phonopy.yaml or phonon_data.npz")
     opt.add_argument("--two-phonon", metavar="FILE", help="Two-phonon Raman .npz file (optional)")
     opt.add_argument(
-        "--approx", action="store_true", help="Use defect_band_approx method (ZFS_occup) instead of all_bands (ZFS_hyp)"
+        "--method",
+        choices=["all", "approx"],
+        help="Calculation method: 'all' for all_bands (ZFS_hyp), 'approx' for defect_band_approx (ZFS_occup). "
+        "Inferred from the input file name when omitted.",
     )
     opt.add_argument("--order", type=int, choices=[1, 2], help="Perturbation order (1 or 2)")
     opt.add_argument("--pert-scale", type=float, help="Override perturbation scale (e.g. 0.025)")
@@ -42,6 +45,35 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     opt.add_argument("-d", "--debug", action="store_true", help="Print debug details during derivative calculations")
 
     parser.set_defaults(func=_run)
+
+
+_METHOD_MAP = {"all": ("all_bands", "ZFS_hyp"), "approx": ("defect_band_approx", "ZFS_occup")}
+
+
+def _infer_method(args: argparse.Namespace) -> str:
+    """Return 'all' or 'approx', inferring from input file/folder names when --method is omitted."""
+    if args.method:
+        return args.method
+    names = " ".join(
+        str(p)
+        for p in (
+            *(args.sim_folder or []),
+            *(args.raw_zfs_file or []),
+            args.raw_zfs_file_1d,
+            args.raw_zfs_file_2d,
+            args.coupling_file,
+        )
+        if p
+    ).lower()
+    has_all = "all_bands" in names or "zfs_hyp" in names
+    has_approx = "defect_band_approx" in names or "approx" in names or "zfs_occup" in names
+    if has_all == has_approx:
+        raise SystemExit(
+            "could not infer --method from input names; pass --method all or --method approx"
+            if not has_all
+            else "input names match both methods; pass --method all or --method approx explicitly"
+        )
+    return "all" if has_all else "approx"
 
 
 def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -74,8 +106,8 @@ def _run(args: argparse.Namespace) -> None:
         coupling_file=args.coupling_file,
         phonon_file=args.phonon_file,
         two_phonon_file=args.two_phonon,
-        calc_method="defect_band_approx" if args.approx else "all_bands",
-        zfs_folder="ZFS_occup" if args.approx else "ZFS_hyp",
+        calc_method=_METHOD_MAP[_infer_method(args)][0],
+        zfs_folder=_METHOD_MAP[_infer_method(args)][1],
         order=args.order,
         pert_scale=args.pert_scale,
         defect=args.defect,

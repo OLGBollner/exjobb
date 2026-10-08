@@ -9,6 +9,7 @@ Usage:
     python scripts/verify_symmetry_classification.py   # scans repo for candidates
     python scripts/verify_symmetry_classification.py --legacy <npz> [...]  # legacy analyzer
 """
+
 import argparse
 import glob
 import os
@@ -55,14 +56,14 @@ def report(path: str, labels: list[str | None], ref: list[str] | None) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("files", nargs="*",
-                    help="npz files to check; empty scans repo")
-    ap.add_argument("--legacy", action="store_true",
-                    help="use the legacy PhononSpectrum.analyze_c3v_symmetry "
-                         "instead of the general classify_modes")
+    ap.add_argument("files", nargs="*", help="npz files to check; empty scans repo")
+    ap.add_argument(
+        "--legacy",
+        action="store_true",
+        help="use the legacy PhononSpectrum.analyze_c3v_symmetry instead of the general classify_modes",
+    )
     args = ap.parse_args()
-    files = args.files or sorted(glob.glob("*/phonon_data.npz") +
-                                 glob.glob("*/phonon_data_sym_*.npz"))
+    files = args.files or sorted(glob.glob("*/phonon_data.npz") + glob.glob("*/phonon_data_sym_*.npz"))
     rc = 0
     for path in files:
         try:
@@ -76,6 +77,7 @@ def main() -> int:
             # existing symmetries, which would compare the file against itself.
             spec.symmetries = None
             import warnings
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
                 labels = list(spec.analyze_c3v_symmetry())

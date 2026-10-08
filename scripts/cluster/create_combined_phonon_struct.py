@@ -3,13 +3,13 @@
 
 Thin CLI wrapper; the logic lives in beyblade.vasp (apply_combined_perturbation).
 """
+
 from __future__ import annotations
 
 import argparse
 import sys
 
-from beyblade.vasp import (apply_combined_perturbation, load_phonon_data,
-                           load_poscar, write_perturbed_poscar)
+from beyblade.vasp import apply_combined_perturbation, load_phonon_data, load_poscar, write_perturbed_poscar
 
 
 def main() -> int:
@@ -26,15 +26,21 @@ def main() -> int:
         structure = load_poscar(args.poscar_file)
         phonon_data = load_phonon_data(args.phonon_file)
         perturbed = apply_combined_perturbation(
-            structure, phonon_data.eigenvectors, args.mode_i, args.mode_j,
-            phonon_data.atomic_masses, args.amplitude,
-            original_indices=phonon_data.original_indices)
-        output_file = args.output or \
-            f"POSCAR_combined_{args.mode_i}_{args.mode_j}_amp_{args.amplitude}"
-        write_perturbed_poscar(perturbed, output_file,
-                               f"Combined modes {args.mode_i}+{args.mode_j}, "
-                               f"Q={args.amplitude} Ang*sqrt(amu)",
-                               template_poscar=args.poscar_file)
+            structure,
+            phonon_data.eigenvectors,
+            args.mode_i,
+            args.mode_j,
+            phonon_data.atomic_masses,
+            args.amplitude,
+            original_indices=phonon_data.original_indices,
+        )
+        output_file = args.output or f"POSCAR_combined_{args.mode_i}_{args.mode_j}_amp_{args.amplitude}"
+        write_perturbed_poscar(
+            perturbed,
+            output_file,
+            f"Combined modes {args.mode_i}+{args.mode_j}, Q={args.amplitude} Ang*sqrt(amu)",
+            template_poscar=args.poscar_file,
+        )
         print("\nSuccess!")
     except Exception as e:
         print(f"Error: {e!s}", file=sys.stderr)

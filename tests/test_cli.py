@@ -99,9 +99,7 @@ class TestRunValidation:
         self._expect_error(match="one of --sim-folder")
 
     def test_mixed_modes_error(self) -> None:
-        self._expect_error(
-            "--sim-folder", "sim", "--coupling-file", "c.npz", match="mutually exclusive"
-        )
+        self._expect_error("--sim-folder", "sim", "--coupling-file", "c.npz", match="mutually exclusive")
 
     def test_1d_without_2d_errors(self) -> None:
         self._expect_error("--raw-zfs-file-1d", "a.npz", match="given together")
@@ -117,4 +115,4 @@ class TestRunValidation:
         assert args.output_root == "runs"
         assert args.t_start == 0.0
         assert args.t_step == 10.0
-        assert args.approx is False
+        assert args.method is None

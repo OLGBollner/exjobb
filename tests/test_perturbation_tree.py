@@ -307,17 +307,21 @@ def test_forbid_relaxation_leaves_static_incars_alone():
 
 # ---------- verify_setup (pre-sbatch INCAR + script checks) ----------
 
-def _verify_folder(tmp_path, script="DEFECT=NV_512\nBINARY={bin}\n"
-                  "PHONON_PATH={phon}\nCREATE_STRUCT=/bin/true\n"
-                  "GET_N_MODES=/bin/true\nPERT=0.025\n",
-                  incar="LDMATRIX = .TRUE.\nALGO = Normal\nIBRION = -1\n"):
+
+def _verify_folder(
+    tmp_path,
+    script="DEFECT=NV_512\nBINARY={bin}\n"
+    "PHONON_PATH={phon}\nCREATE_STRUCT=/bin/true\n"
+    "GET_N_MODES=/bin/true\nPERT=0.025\n",
+    incar="LDMATRIX = .TRUE.\nALGO = Normal\nIBRION = -1\n",
+):
     from beyblade.vasp.verify import verify_setup
+
     phon = tmp_path / "phon.npz"
     phon.write_bytes(b"x")
     (tmp_path / "input").mkdir()
     (tmp_path / "input" / "INCAR").write_text(incar)
-    (tmp_path / "run_x.sh").write_text(script.format(
-        bin="/bin/true", phon=str(tmp_path / "phon.npz")))
+    (tmp_path / "run_x.sh").write_text(script.format(bin="/bin/true", phon=str(tmp_path / "phon.npz")))
     return verify_setup(tmp_path, "run_x.sh")
 
 
@@ -328,32 +332,31 @@ def test_verify_setup_passes_clean_folder(tmp_path):
 
 
 def test_verify_setup_flags_algo_none(tmp_path):
-    problems = _verify_folder(tmp_path,
-                              incar="LDMATRIX = .TRUE.\nALGO = None\n")
+    problems = _verify_folder(tmp_path, incar="LDMATRIX = .TRUE.\nALGO = None\n")
     assert any(p.startswith("FAIL") and "ALGO=None" in p for p in problems)
 
 
 def test_verify_setup_flags_leftover_placeholder(tmp_path):
     problems = _verify_folder(
-        tmp_path, script="DEFECT=<defect>\nBINARY=/bin/true\n"
-        "PHONON_PATH=/tmp/phon.npz\nPERT=0.025\n")
+        tmp_path, script="DEFECT=<defect>\nBINARY=/bin/true\nPHONON_PATH=/tmp/phon.npz\nPERT=0.025\n"
+    )
     assert any("placeholder" in p for p in problems)
 
 
 def test_verify_setup_flags_missing_phonon_path(tmp_path):
     (tmp_path / "input").mkdir()
     (tmp_path / "input" / "INCAR").write_text("LDMATRIX = .TRUE.\n")
-    (tmp_path / "run_x.sh").write_text(
-        "BINARY=/bin/true\nPHONON_PATH=/no/such/phon.npz\n")
+    (tmp_path / "run_x.sh").write_text("BINARY=/bin/true\nPHONON_PATH=/no/such/phon.npz\n")
     from beyblade.vasp.verify import verify_setup
+
     problems = verify_setup(tmp_path, "run_x.sh")
     assert any(p.startswith("FAIL") and "PHONON_PATH" in p for p in problems)
 
 
 def test_verify_setup_warns_on_gamma_binary(tmp_path):
     problems = _verify_folder(
-        tmp_path, script="BINARY=/opt/vasp/vasp.5.4.4_gam\n"
-        "PHONON_PATH=" + str(tmp_path / "phon.npz") + "\nPERT=0.025\n")
+        tmp_path, script="BINARY=/opt/vasp/vasp.5.4.4_gam\nPHONON_PATH=" + str(tmp_path / "phon.npz") + "\nPERT=0.025\n"
+    )
     assert any(p.startswith("WARNING") and "gamma-only" in p for p in problems)
 
 
@@ -369,10 +372,10 @@ def test_verify_setup_lowercase_vars_and_preflight_lines(tmp_path):
         "get_n_modes=/bin/true\n"
         "PHONON_PATH={phon}\n"
         "PERT=0.025\n"
-        "fail() {{ echo \"FATAL: $*\"; exit 1; }}\n"
+        'fail() {{ echo "FATAL: $*"; exit 1; }}\n'
         "case $DEFECT in *'<defect>'*) fail \"DEFECT placeholder\" ;; esac\n"
         "case $binary in *'<path_to>'*) fail \"BINARY placeholder\" ;; esac\n"
-        "[ -x \"$binary\" ] || fail \"VASP binary missing: $binary\"\n"
+        '[ -x "$binary" ] || fail "VASP binary missing: $binary"\n'
     )
     problems = _verify_folder(tmp_path, script=script)
     assert problems == []
@@ -380,6 +383,6 @@ def test_verify_setup_lowercase_vars_and_preflight_lines(tmp_path):
 
 def test_verify_setup_flags_real_unfilled_placeholder(tmp_path):
     problems = _verify_folder(
-        tmp_path, script="DEFECT=<defect>\nbinary=/bin/true\n"
-        "PHONON_PATH=/tmp/phon.npz\nPERT=0.025\n")
+        tmp_path, script="DEFECT=<defect>\nbinary=/bin/true\nPHONON_PATH=/tmp/phon.npz\nPERT=0.025\n"
+    )
     assert any(":1 placeholder not filled: <defect>" in p for p in problems)

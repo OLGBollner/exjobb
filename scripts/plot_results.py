@@ -39,9 +39,7 @@ from beyblade.plotter import (
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Plot results from spin-phonon pipeline run folders."
-    )
+    parser = argparse.ArgumentParser(description="Plot results from spin-phonon pipeline run folders.")
     parser.add_argument(
         "run_dirs",
         type=str,
@@ -76,9 +74,7 @@ def main():
     )
 
     # Output options
-    parser.add_argument(
-        "-o", "--out_dir", type=str, help="Custom output directory for figures."
-    )
+    parser.add_argument("-o", "--out_dir", type=str, help="Custom output directory for figures.")
     parser.add_argument(
         "--format",
         type=str,
@@ -86,12 +82,8 @@ def main():
         choices=["png", "pdf", "svg"],
         help="Image format.",
     )
-    parser.add_argument(
-        "--dpi", type=int, default=300, help="Resolution for raster images."
-    )
-    parser.add_argument(
-        "--show", action="store_true", help="Display figures interactively."
-    )
+    parser.add_argument("--dpi", type=int, default=300, help="Resolution for raster images.")
+    parser.add_argument("--show", action="store_true", help="Display figures interactively.")
 
     args = parser.parse_args()
 

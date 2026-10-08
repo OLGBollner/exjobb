@@ -14,8 +14,8 @@ class TestFullIntegration:
         n_modes = 9
         n_atoms = 4
         orig_spectrum = PhononSpectrum(
-        # Degenerate Ex/Ey pairs (0.01 meV apart) so e-pair completeness passes
-        frequencies_mev=np.array([10.0, 20.0, 20.01, 30.0, 40.0, 40.01, 50.0, 60.0, 60.01]),
+            # Degenerate Ex/Ey pairs (0.01 meV apart) so e-pair completeness passes
+            frequencies_mev=np.array([10.0, 20.0, 20.01, 30.0, 40.0, 40.01, 50.0, 60.0, 60.01]),
             eigenvectors=np.random.randn(n_modes, n_atoms, 3),
             atom_frac_coords=np.zeros((n_atoms, 3)),
             atom_symbols=["C"] * n_atoms,
@@ -51,9 +51,24 @@ class TestFullIntegration:
 
             # 5. Populate perturbations
             manager.zfs_tensors = {
-                0: {"tensor": (gs_mat + np.diag([0, 0, 40])) * CONSTANTS["MHz2J"], "pert": pert_SI, "symmetry": "A1", "ipr": 0.4},
-                1: {"tensor": (gs_mat + np.array([[0, 0, 15], [0, 0, 0], [15, 0, 0]])) * CONSTANTS["MHz2J"], "pert": pert_SI, "symmetry": "Ex", "ipr": 0.4},
-                2: {"tensor": (gs_mat + np.array([[0, 15, 0], [15, 0, 0], [0, 0, 0]])) * CONSTANTS["MHz2J"], "pert": pert_SI, "symmetry": "Ey", "ipr": 0.4},
+                0: {
+                    "tensor": (gs_mat + np.diag([0, 0, 40])) * CONSTANTS["MHz2J"],
+                    "pert": pert_SI,
+                    "symmetry": "A1",
+                    "ipr": 0.4,
+                },
+                1: {
+                    "tensor": (gs_mat + np.array([[0, 0, 15], [0, 0, 0], [15, 0, 0]])) * CONSTANTS["MHz2J"],
+                    "pert": pert_SI,
+                    "symmetry": "Ex",
+                    "ipr": 0.4,
+                },
+                2: {
+                    "tensor": (gs_mat + np.array([[0, 15, 0], [15, 0, 0], [0, 0, 0]])) * CONSTANTS["MHz2J"],
+                    "pert": pert_SI,
+                    "symmetry": "Ey",
+                    "ipr": 0.4,
+                },
             }
             manager.treated_modes = {0, 1, 2}
 

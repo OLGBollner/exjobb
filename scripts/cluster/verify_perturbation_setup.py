@@ -6,6 +6,7 @@ Run it from the all_bands folder; it verifies the INCAR and the prefilled
 SLURM script so that problems surface before the job queues, not hours
 into the scheduler.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -16,10 +17,8 @@ from beyblade.vasp.verify import verify_setup
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="Verify the INCAR and SLURM script of this run folder")
-    ap.add_argument("--script", default=None,
-                    help="run script name (default: the single run_*.sh here)")
+    ap = argparse.ArgumentParser(description="Verify the INCAR and SLURM script of this run folder")
+    ap.add_argument("--script", default=None, help="run script name (default: the single run_*.sh here)")
     args = ap.parse_args()
 
     folder = Path(__file__).resolve().parent
@@ -27,8 +26,7 @@ def main() -> int:
     if script is None:
         candidates = sorted(folder.glob("run_*.sh"))
         if len(candidates) != 1:
-            sys.exit("Error: cannot decide which run script to check; "
-                     "pass --script")
+            sys.exit("Error: cannot decide which run script to check; pass --script")
         script = candidates[0].name
 
     problems = verify_setup(folder, script)
