@@ -11,3 +11,10 @@ Thesis/
 
 # All txt files (use git add -f to include one)
 *.txt
+
+# Personal notes
+Notes/
+
+# build artifacts and vendored clones
+build/
+httk-sym/
