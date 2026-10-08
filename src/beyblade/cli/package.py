@@ -53,19 +53,34 @@ def _run(args: argparse.Namespace) -> None:
     folder = args.output_root / f"{defect}_{cell_size}_{date.today():%Y%m%d}"
     folder.mkdir(parents=True, exist_ok=True)
 
-    for order in orders:
+    def _collect(order: str) -> dict[float, Path]:
+        """Map pert_scale -> pert folder for one order."""
         order_root = defect_folder / _ORDER_DIRS[order]
         if not order_root.is_dir():
             warnings.warn(f"Order folder not found, skipping: {order_root}")
-            continue
+            return {}
+        perts = {}
         for pert_dir in sorted(order_root.glob("pert_*")):
             pert_scale = float(pert_dir.name.split("_")[1])
             if args.pert is not None and pert_scale not in args.pert:
                 continue
-            raw_data = parse_zfs_simulation_dataset(
-                sim_folder=pert_dir, order=_ORDER_NUM[order], calc_method=args.method
+            perts[pert_scale] = pert_dir
+        return perts
+
+    order_nums = [_ORDER_NUM[o] for o in orders]
+    datasets = {order: _collect(order) for order in order_nums}
+    pert_scales = sorted(set().union(*datasets.values()))
+
+    for pert_scale in pert_scales:
+        raw = None
+        for order in order_nums:
+            if pert_scale not in datasets[order]:
+                continue
+            data = parse_zfs_simulation_dataset(
+                sim_folder=datasets[order][pert_scale], order=order, calc_method=args.method
             )
-            pert_folder = folder / f"pert_{pert_scale:g}"
-            pert_folder.mkdir(parents=True, exist_ok=True)
-            save_path = raw_data.save(pert_folder / raw_data._default_name())
-            print(f"Saved raw data in: {save_path}")
+            raw = data if raw is None else raw.combine(data)
+        pert_folder = folder / f"pert_{pert_scale:g}"
+        pert_folder.mkdir(parents=True, exist_ok=True)
+        save_path = raw.save(pert_folder / raw._default_name())
+        print(f"Saved raw data in: {save_path}")
