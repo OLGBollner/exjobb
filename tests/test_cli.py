@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 from beyblade.cli import build_parser
+import argparse
+import io
 
 
 def _make_t1_npz(path, defect="NV", cell=2, method="pbe", state="ms0"):
@@ -69,3 +71,50 @@ def test_plot_t1_missing_file_errors(tmp_path):
     args = parser.parse_args(["plot", "t1", str(tmp_path / "missing.npz"), "-o", str(tmp_path / "o.png")])
     with pytest.raises(FileNotFoundError):
         args.func(args)
+
+
+class TestRunValidation:
+    """Mutually exclusive input modes for beyblade run."""
+
+    @staticmethod
+    def _parse(*argv: str) -> argparse.Namespace:
+        from beyblade.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["run", *argv])
+        return args
+
+    def _expect_error(self, *argv: str, match: str) -> None:
+        from contextlib import redirect_stderr
+        from beyblade.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["run", *argv])
+        err = io.StringIO()
+        with pytest.raises(SystemExit), redirect_stderr(err):
+            args.func(args)
+        assert match in err.getvalue()
+
+    def test_no_input_mode_errors(self) -> None:
+        self._expect_error(match="one of --sim-folder")
+
+    def test_mixed_modes_error(self) -> None:
+        self._expect_error(
+            "--sim-folder", "sim", "--coupling-file", "c.npz", match="mutually exclusive"
+        )
+
+    def test_1d_without_2d_errors(self) -> None:
+        self._expect_error("--raw-zfs-file-1d", "a.npz", match="given together")
+
+    def test_single_sim_folder_parsed(self) -> None:
+        args = self._parse("--sim-folder", "sim", "--t-end", "100")
+        assert args.sim_folder == ["sim"]
+        assert args.t_end == 100.0
+        assert args.init_state == "ms_0"
+
+    def test_defaults(self) -> None:
+        args = self._parse("--coupling-file", "c.npz")
+        assert args.output_root == "runs"
+        assert args.t_start == 0.0
+        assert args.t_step == 10.0
+        assert args.approx is False
