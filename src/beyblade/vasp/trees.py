@@ -30,8 +30,27 @@ BASIS_SOURCE = {
 # text helpers
 # --------------------------------------------------------------------------- #
 def replace_tag(incar: str, tag: str, value: str) -> str:
-    """Replace the value of every occurrence of a tag."""
-    return re.sub(rf"^(\s*{tag}\s*=\s*)(.+?)[ \t]*(?=$|!|#)", rf"\g<1>{value}", incar, flags=re.M | re.I)
+    """Replace the value of every occurrence of a tag.
+
+    Keeps any trailing comment on its own terms: the original spacing before
+    an inline comment is preserved, and a comment that sat flush against the
+    old value gets a single space so it does not merge with the new value.
+    """
+
+    def _repl(m: re.Match) -> str:
+        spacing, comment = m.group(3), m.group(4)
+        out = f"{m.group(1)}{value}"
+        if comment:
+            out += spacing if spacing else " "
+            out += comment
+        return out
+
+    return re.sub(
+        rf"^(\s*{tag}\s*=\s*)(.*?)([ \t]*)([!#].*)?$",
+        _repl,
+        incar,
+        flags=re.M | re.I,
+    )
 
 
 RESTART_TAGS = ("ISTART", "ICHARG", "LWAVE", "LCHARG")
