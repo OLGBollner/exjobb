@@ -394,8 +394,9 @@ def compare_displacement_cli(reference: str | Path, perturbed: list[str | Path])
             print(f"    {stats['max'] / base:8.3f}  {path}")
 
 
-def write_perturbed_poscar(structure: Structure, output_file: str, comment: str,
-                           template_poscar: str | Path | None = None) -> None:
+def write_perturbed_poscar(
+    structure: Structure, output_file: str, comment: str, template_poscar: str | Path | None = None
+) -> None:
     """Write a perturbed POSCAR.
 
     Without template_poscar, a plain pymatgen Poscar is written.  With a

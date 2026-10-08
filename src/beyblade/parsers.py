@@ -272,10 +272,7 @@ def _structure_yaml_lines(
     """Format a structure block in phonopy's native yaml style."""
     lines = ["lattice:"]
     for row, label in zip(lattice, ("a", "b", "c")):
-        lines.append(
-            "- [ %21.15f, %21.15f, %21.15f ] # %s"
-            % (row[0], row[1], row[2], label)
-        )
+        lines.append("- [ %21.15f, %21.15f, %21.15f ] # %s" % (row[0], row[1], row[2], label))
     lines.append("points:")
     for i, (symbol, frac, mass) in enumerate(zip(symbols, frac_coords, masses)):
         lines.append(f"- symbol: {symbol} # {i + 1}")
@@ -319,7 +316,10 @@ def prepare_phonopy_yaml(
     text_lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     n_dup = _dedupe_text_qpoints(text_lines)
     struct_lines = _structure_yaml_lines(
-        spectrum.lattice, spectrum.atom_symbols, spectrum.atom_frac_coords, spectrum.atomic_masses,
+        spectrum.lattice,
+        spectrum.atom_symbols,
+        spectrum.atom_frac_coords,
+        spectrum.atomic_masses,
     )
     out = Path(out_path) if out_path else path.with_name(f"{path.stem}_full.yaml")
     with out.open("w", encoding="utf-8") as f:

@@ -99,12 +99,12 @@ def main():
     do_all = args.all or (not args.coupling and not args.rates and not args.t1)
     plot_coupling = do_all or args.coupling
     plot_rates = do_all or args.rates
-    plot_t1 = do_all or args.t1
+    do_t1 = do_all or args.t1
 
     run_paths = [Path(p) for p in args.run_dirs]
 
     # If multiple run directories provided and T1 is requested, also create a comparison plot
-    if len(run_paths) > 1 and plot_t1:
+    if len(run_paths) > 1 and do_t1:
         comp_out = Path(args.out_dir) if args.out_dir else run_paths[0].parent
         comp_out.mkdir(parents=True, exist_ok=True)
         print(f"\n--- Generating Comparison Plots Across {len(run_paths)} Runs ---")
@@ -123,7 +123,7 @@ def main():
             plot_run_coupling(run_dir, fig_out, args.format, args.dpi, args.show)
         if plot_rates:
             plot_run_rates(run_dir, fig_out, args.format, args.dpi, args.show)
-        if plot_t1:
+        if do_t1:
             plot_run_t1(run_dir, fig_out, args.format, args.dpi, args.show)
 
     if args.show:

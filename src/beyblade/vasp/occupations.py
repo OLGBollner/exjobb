@@ -1,4 +1,5 @@
 """Derive fixed defect occupations for ZFS runs from a finished relaxation."""
+
 from __future__ import annotations
 
 import re
@@ -12,8 +13,18 @@ Gamma
 0 0 0
 """
 
-REMOVE_TAGS = ("NSW", "IBRION", "LDMATRIX", "DOCCUP", "DOCCDO", "NUPDOWN",
-               "DOCC", "LDAPMINUS", "NBANDS", "KPAR")  # never kept verbatim; rebuilt below
+REMOVE_TAGS = (
+    "NSW",
+    "IBRION",
+    "LDMATRIX",
+    "DOCCUP",
+    "DOCCDO",
+    "NUPDOWN",
+    "DOCC",
+    "LDAPMINUS",
+    "NBANDS",
+    "KPAR",
+)  # never kept verbatim; rebuilt below
 
 
 def parse_tag(incar: str, tag: str) -> str | None:
@@ -69,9 +80,14 @@ def kpoints_is_gamma_only(text: str) -> bool:
     return gamma and all(int(d) == 1 for d in div[:3]) and all(float(s) == 0 for s in shift[:3])
 
 
-def patch_incar(text: str, n_up: int, n_dn: int, nbands: int,
-                unpaired_up: set[int] | None = None,
-                unpaired_dn: set[int] | None = None) -> str:
+def patch_incar(
+    text: str,
+    n_up: int,
+    n_dn: int,
+    nbands: int,
+    unpaired_up: set[int] | None = None,
+    unpaired_dn: set[int] | None = None,
+) -> str:
     """Turn a relaxation INCAR into a single-point ZFS INCAR."""
     body_lines = []
     for line in text.splitlines():
@@ -98,8 +114,10 @@ DOCCDO = {n_dn}*1.0 {nbands - n_dn}*0.0
     if unpaired_up is not None and unpaired_dn is not None:
         # machine-readable record of the defect bands, derived here where the
         # occupations are first known; downstream tooling reads these comments
-        additions += (f"# UNPAIRED_UP = {' '.join(str(i) for i in sorted(unpaired_up)) or 'none'}\n"
-                      f"# UNPAIRED_DN = {' '.join(str(i) for i in sorted(unpaired_dn)) or 'none'}\n")
+        additions += (
+            f"# UNPAIRED_UP = {' '.join(str(i) for i in sorted(unpaired_up)) or 'none'}\n"
+            f"# UNPAIRED_DN = {' '.join(str(i) for i in sorted(unpaired_dn)) or 'none'}\n"
+        )
     return "\n".join(body_lines).rstrip() + "\n" + additions
 
 
@@ -140,42 +158,49 @@ def prepare_relax_to_zfs(relax: Path, zfs: Path) -> list[str]:
         print("  KPOINTS already Gamma-only; copied as-is")
     else:
         (zfs / "KPOINTS").write_text(GAMMA_KPOINTS)
-        warn("KPOINTS was not Gamma-only; ZFS run needs the full k-point grid "
-             "of the relaxation -- wrote a Gamma-only KPOINTS into the ZFS dir "
-             "instead of copying")
+        warn(
+            "KPOINTS was not Gamma-only; ZFS run needs the full k-point grid "
+            "of the relaxation -- wrote a Gamma-only KPOINTS into the ZFS dir "
+            "instead of copying"
+        )
     print("  copied CONTCAR->POSCAR, CHGCAR, POTCAR (+ KPOINTS as Gamma-only)")
 
     if (zfs / "WAVECAR").exists():
-        warn("WAVECAR present in ZFS dir; it is incompatible with the "
-             "vasp_gam -> vasp_std switch and will NOT be used -- remove it")
+        warn(
+            "WAVECAR present in ZFS dir; it is incompatible with the "
+            "vasp_gam -> vasp_std switch and will NOT be used -- remove it"
+        )
 
     incar_text = (relax / "INCAR").read_text()
     for tag in ("NUPDOWN", "NELECT", "ISPIN", "NBANDS", "ISYM", "NSW", "IBRION"):
         occ = all_tag_occurrences(incar_text, tag)
         if len(occ) > 1:
-            fail(f"INCAR defines {tag} {len(occ)} times: {occ} "
-                 f"(last one wins in VASP -- fix before running)")
+            fail(f"INCAR defines {tag} {len(occ)} times: {occ} (last one wins in VASP -- fix before running)")
 
     n_up, n_dn, nbands, unp_up, unp_dn = occupied_bands_from_eigenval(relax / "EIGENVAL")
-    print(f"  EIGENVAL: {n_up} occupied (up), {n_dn} (down), NBANDS = {nbands}; "
-          f"unpaired up {sorted(unp_up)}, down {sorted(unp_dn)}")
+    print(
+        f"  EIGENVAL: {n_up} occupied (up), {n_dn} (down), NBANDS = {nbands}; "
+        f"unpaired up {sorted(unp_up)}, down {sorted(unp_dn)}"
+    )
 
     nelect = parse_tag(incar_text, "NELECT")
     isp = parse_tag(incar_text, "ISPIN") or "2"
     if int(isp) == 2 and n_up + n_dn != int(nelect):
         fail(f"occupied bands {n_up}+{n_dn} = {n_up + n_dn} != NELECT = {nelect}")
     if n_up <= n_dn:
-        fail(f"majority channel not larger than minority ({n_up} <= {n_dn}); "
-             f"spin columns may be swapped in this EIGENVAL")
+        fail(
+            f"majority channel not larger than minority ({n_up} <= {n_dn}); "
+            f"spin columns may be swapped in this EIGENVAL"
+        )
     nupdown = parse_tag(incar_text, "NUPDOWN")
     if nupdown and int(float(nupdown)) != n_up - n_dn:
-        fail(f"NUPDOWN = {nupdown} inconsistent with occupied difference "
-             f"{n_up} - {n_dn} = {n_up - n_dn}")
+        fail(f"NUPDOWN = {nupdown} inconsistent with occupied difference {n_up} - {n_dn} = {n_up - n_dn}")
 
-    (zfs / "INCAR").write_text(
-        patch_incar(incar_text, n_up, n_dn, nbands, unp_up, unp_dn))
-    print(f"  wrote INCAR with NUPDOWN={n_up - n_dn}, "
-          f"DOCCUP={n_up}*1.0 {nbands - n_up}*0.0, DOCCDO={n_dn}*1.0 {nbands - n_dn}*0.0")
+    (zfs / "INCAR").write_text(patch_incar(incar_text, n_up, n_dn, nbands, unp_up, unp_dn))
+    print(
+        f"  wrote INCAR with NUPDOWN={n_up - n_dn}, "
+        f"DOCCUP={n_up}*1.0 {nbands - n_up}*0.0, DOCCDO={n_dn}*1.0 {nbands - n_dn}*0.0"
+    )
 
     if failures:
         print(f"\n  {len(failures)} problem(s) found -- do NOT launch until fixed")

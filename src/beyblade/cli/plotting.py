@@ -25,9 +25,7 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
     _add_output_args(rates)
     rates.set_defaults(func=_run_rates)
 
-    t1 = subparsers.add_parser(
-        "t1", help="Plot T1 curves from one or more npz files or run directories in one figure"
-    )
+    t1 = subparsers.add_parser("t1", help="Plot T1 curves from one or more npz files or run directories in one figure")
     t1.add_argument("inputs", nargs="+", type=Path)
     t1.add_argument("--plain-name", action="store_true", help="Do not append metadata to the output filename")
     _add_output_args(t1)
