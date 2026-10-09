@@ -24,6 +24,7 @@ from __future__ import annotations
 
 
 from pathlib import Path
+import sys
 
 import numpy as np
 
@@ -143,6 +144,30 @@ def plot_pert_convergence(
                 "warning: no Q=0 point (no 0 in perts, no 'd0' key in npz); fits use the unanchored points only",
                 file=sys.stderr,
             )
+
+    # Q=0 is the relaxed structure, so the ZFS tensor there is identical for
+    # every mode: if a mode lacks its own Q=0 run (absent column or NaN),
+    # borrow the Q=0 tensor from whichever mode has one.
+    izero_g = int(np.argmin(np.abs(perts)))
+    q0_shared = None
+    if np.isclose(perts[izero_g], 0.0):
+        for i in range(tensors.shape[0]):
+            t0 = tensors[i][izero_g]
+            if not np.isnan(t0).any():
+                q0_shared = t0
+                break
+        if q0_shared is not None:
+            patched = 0
+            for i in range(tensors.shape[0]):
+                if np.isnan(tensors[i][izero_g]).any():
+                    tensors[i][izero_g] = q0_shared
+                    patched += 1
+            if patched:
+                print(
+                    f"borrowed the Q=0 tensor for {patched} mode(s) that lack "
+                    "their own pert=0 run (identical relaxed structure)",
+                    file=sys.stderr,
+                )
 
     wanted = mode if mode else [int(m) for m in modes]
     missing = [m for m in wanted if m not in set(modes.tolist())]
