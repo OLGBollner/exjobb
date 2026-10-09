@@ -117,6 +117,9 @@ def read_conv_metadata(npz_path: Path) -> dict:
         return {}
 
 
+PC_NAMES = ("xx", "yy", "zz")
+
+
 def plot_pert_convergence(
     npz_path: Path,
     output_path: Path | None = None,
@@ -241,14 +244,14 @@ def plot_pert_convergence(
         for k in range(3):
             a, b, y_lin, res = linear_fit(p_use, vals[:, k])
             qa, qb, qc, y_q, qres = quad_fit(p_use, vals[:, k])
-            axes[0, 0].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1}")
+            axes[0, 0].plot(p_use[sgn], vals[sgn, k], "o", label=rf"$D_{{\mathrm{{{PC_NAMES[k]}}}}}")
             axes[0, 0].plot(p_use[sgn], y_lin[sgn], "-", alpha=0.4, color=axes[0, 0].lines[-1].get_color())
             axes[1, 0].plot(p_use[sgn], res[sgn], "o-")
             axes[1, 0].axhline(np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
             axes[1, 0].axhline(-np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
             axes[0, 0].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray", label="Tr D")
             axes[0, 1].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray")
-            axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1} (b={b:.4g}, 2c={2 * qc:.4g})")
+            axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=rf"$D_{{\mathrm{{{PC_NAMES[k]}}}}}$ (b={b:.4g}, 2c={2 * qc:.4g})")
             axes[0, 1].plot(p_use[sgn], y_q[sgn], "-", alpha=0.4, color=axes[0, 1].lines[-1].get_color())
             axes[1, 1].plot(p_use[sgn], qres[sgn], "o-")
             axes[1, 1].axhline(np.max(np.abs(qres)), ls="--", lw=0.8, color="grey")
@@ -294,7 +297,7 @@ def plot_pert_convergence(
             csv_rows.append(tuple(row))
         for j, title in enumerate(["ax + b", "ax² + bx + c"]):
             axes[0, j].set_title(title)
-            axes[0, j].set_ylabel("principal component (MHz)")
+            axes[0, j].set_ylabel("principal value (MHz)")
             axes[1, j].set_xlabel("perturbation scale")
             axes[1, j].set_ylabel("residual (MHz)")
         fig.suptitle(f"mode {mode}: $D_\\lambda$" if not deviation else f"mode {mode}: $D_\\lambda - D_0$")
