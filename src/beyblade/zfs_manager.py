@@ -406,6 +406,12 @@ class ZFSManager:
         # Ex/Ey ordering convention of the eigenvectors does not affect them;
         # no per-defect/cell-size switch is needed.
 
+        inherit_coefficients = False
+        spectrum = self.spectrum
+        if len(self.treated_modes) < n_modes and spectrum is not None:
+            inherit_coefficients = True
+            print("Degenerate modes inherit coefficients")
+
         for i, item in sorted(self.zfs_tensors.items()):
             if i not in self.treated_modes:
                 continue
@@ -447,8 +453,7 @@ class ZFSManager:
             # The spectrum owns the pairing (strict involution); no frequency guessing.
             # Fill-only: never overwrite a twin's own non-zero coefficients (Ex
             # yields V_pm, Ey yields V_0pm; both are real data on a complete file).
-            spectrum = self.spectrum
-            if len(self.treated_modes) < n_modes and spectrum is not None:
+            if inherit_coefficients:
                 twin = twin_of(spectrum.deg_groups, i)
                 if twin is not None and twin != i:
                     V_0_pm[twin] = np.where(V_0_pm[twin] == 0, V_0_pm[i], V_0_pm[twin])
