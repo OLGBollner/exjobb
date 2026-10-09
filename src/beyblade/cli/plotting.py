@@ -64,7 +64,13 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
 
 def _run_convergence(args: argparse.Namespace) -> None:
     meta = read_conv_metadata(args.npz)
-    stem = "_".join(str(meta[k]) for k in ("defect", "cell") if meta.get(k) is not None) or args.npz.stem
+    stem = "_".join(str(meta[k]) for k in ("defect", "cell") if meta.get(k) is not None)
+    if not stem:
+        if not args.output:
+            raise SystemExit(
+                f"error: {args.npz} has no defect/cell metadata; repack it with 'beyblade package --conv' or pass -o explicitly"
+            )
+        stem = args.npz.stem
     out = args.output or _default_output(args, "convergence", stem)
     plot_pert_convergence(
         args.npz,

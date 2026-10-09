@@ -1,11 +1,8 @@
 """Tests for the beyblade CLI."""
 
 import numpy as np
-import pytest
 
 from beyblade.cli import build_parser
-import argparse
-import io
 
 
 def _make_t1_npz(path, defect="NV", cell=2, method="pbe", state="ms0"):

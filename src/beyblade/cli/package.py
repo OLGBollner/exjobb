@@ -116,8 +116,13 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
     for opt in ("orders", "pert", "method"):
         if getattr(args, opt) != {"orders": "first,second", "pert": None, "method": "all"}[opt]:
             print(f"warning: --{opt.replace('_', '-')} is ignored with --conv")
+    conv_roots = sorted(p for p in defect_folder.glob("convergence*") if p.is_dir())
+    if not conv_roots:
+        raise SystemExit(f"No convergence* folders found under {defect_folder}")
+    for root in conv_roots:
+        print(f"Convergence folder: {root}")
     defect = defect_folder.name.split("_")[0]
     cell = defect_folder.name.split("_")[-1]
     output = args.output_root / f"{defect}_{cell}_{date.today():%Y%m%d}_conv.npz"
     args.output_root.mkdir(parents=True, exist_ok=True)
-    pack_convergence(defect_folder, output, ground_state=args.ground_state, defect=defect, cell=cell)
+    pack_convergence(conv_roots, output, ground_state=args.ground_state, defect=defect, cell=cell)
