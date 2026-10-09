@@ -160,6 +160,16 @@ class ZFSManager:
             if "approx" in self.calc_method:
                 self.zfs_relaxed *= 1.5
 
+            # Pin every tensor's axis assignment to the relaxed structure: the
+            # relaxed tensor is the reference frame, so near-degenerate
+            # transverse axes (|D_xx| ~ |D_yy|) can never swap labels between
+            # the ground state and a perturbed run (x/y eigenframe flip bug).
+            raw.ground_state_zfs = raw.ground_state_zfs.with_reference(raw.ground_state_zfs.matrix)
+            for entry in getattr(raw, "perturbations", None) or []:
+                if entry is None or entry.zfs_tensor is None:
+                    continue
+                entry.zfs_tensor = entry.zfs_tensor.with_reference(raw.ground_state_zfs.matrix)
+
         # eigen_rotation columns are the ground-state principal-frame eigenvectors,
         # so rotating into that frame is R.T @ tensor @ R (NOT R @ tensor @ R.T).
         eigen_rot = self.eigen_rotation if self.eigen_rotation is not None else np.eye(3)
