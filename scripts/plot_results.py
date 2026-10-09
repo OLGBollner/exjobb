@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from beyblade.plotter import (
-    compare_runs_t1,
+    plot_t1,
     plot_run_coupling,
     plot_run_rates,
     plot_run_t1,
@@ -39,9 +39,7 @@ from beyblade.plotter import (
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Plot results from spin-phonon pipeline run folders."
-    )
+    parser = argparse.ArgumentParser(description="Plot results from spin-phonon pipeline run folders.")
     parser.add_argument(
         "run_dirs",
         type=str,
@@ -76,9 +74,7 @@ def main():
     )
 
     # Output options
-    parser.add_argument(
-        "-o", "--out_dir", type=str, help="Custom output directory for figures."
-    )
+    parser.add_argument("-o", "--out_dir", type=str, help="Custom output directory for figures.")
     parser.add_argument(
         "--format",
         type=str,
@@ -86,12 +82,8 @@ def main():
         choices=["png", "pdf", "svg"],
         help="Image format.",
     )
-    parser.add_argument(
-        "--dpi", type=int, default=300, help="Resolution for raster images."
-    )
-    parser.add_argument(
-        "--show", action="store_true", help="Display figures interactively."
-    )
+    parser.add_argument("--dpi", type=int, default=300, help="Resolution for raster images.")
+    parser.add_argument("--show", action="store_true", help="Display figures interactively.")
 
     args = parser.parse_args()
 
@@ -99,16 +91,16 @@ def main():
     do_all = args.all or (not args.coupling and not args.rates and not args.t1)
     plot_coupling = do_all or args.coupling
     plot_rates = do_all or args.rates
-    plot_t1 = do_all or args.t1
+    do_t1 = do_all or args.t1
 
     run_paths = [Path(p) for p in args.run_dirs]
 
     # If multiple run directories provided and T1 is requested, also create a comparison plot
-    if len(run_paths) > 1 and plot_t1:
+    if len(run_paths) > 1 and do_t1:
         comp_out = Path(args.out_dir) if args.out_dir else run_paths[0].parent
         comp_out.mkdir(parents=True, exist_ok=True)
         print(f"\n--- Generating Comparison Plots Across {len(run_paths)} Runs ---")
-        compare_runs_t1(run_paths, comp_out, args.format, args.dpi, args.show)
+        plot_t1(run_paths, output_path=comp_out / f"t1_comparison.{args.format}")
 
     for run_dir in run_paths:
         if not run_dir.is_dir():
@@ -123,7 +115,7 @@ def main():
             plot_run_coupling(run_dir, fig_out, args.format, args.dpi, args.show)
         if plot_rates:
             plot_run_rates(run_dir, fig_out, args.format, args.dpi, args.show)
-        if plot_t1:
+        if do_t1:
             plot_run_t1(run_dir, fig_out, args.format, args.dpi, args.show)
 
     if args.show:

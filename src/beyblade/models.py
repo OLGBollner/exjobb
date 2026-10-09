@@ -61,6 +61,7 @@ class ZFSTensor:
     Represents a Zero-Field Splitting (ZFS) tensor in 3x3 Cartesian matrix form.
     Default unit is MHz.
     """
+
     matrix: np.ndarray  # Shape (3, 3)
     unit: str = "MHz"
 
@@ -78,7 +79,7 @@ class ZFSTensor:
         """
         Calculates principal values (D_xx, D_yy, D_zz) and eigenvectors
         following standard EPR convention: |D_zz| >= |D_yy| >= |D_xx| (with trace=0).
-        
+
         Returns:
             (D_xx, D_yy, D_zz, eigenvectors)
         """
@@ -165,34 +166,26 @@ def check_original_indices(
     if oi.ndim != 1 or not np.issubdtype(oi.dtype, np.integer):
         raise TypeError("original_indices must be a 1-D integer array")
     if len(oi) != n_modes:
-        raise ValueError(
-            f"original_indices has length {len(oi)} but spectrum has "
-            f"{n_modes} modes — inconsistent"
-        )
+        raise ValueError(f"original_indices has length {len(oi)} but spectrum has {n_modes} modes — inconsistent")
     if len(oi) > 1 and np.any(np.diff(oi) <= 0):
-        raise ValueError(
-            "original_indices must be strictly increasing "
-            "(0-based, full-spectrum order preserved)"
-        )
+        raise ValueError("original_indices must be strictly increasing (0-based, full-spectrum order preserved)")
     if (oi < 0).any():
         raise ValueError("original_indices must be 0-based (no negative indices)")
     if n_full is not None and (oi >= n_full).any():
-        raise ValueError(
-            f"original_indices must be < n_full ({n_full}); the 0-based "
-            "idx convention is broken"
-        )
+        raise ValueError(f"original_indices must be < n_full ({n_full}); the 0-based idx convention is broken")
 
 
 @dataclass
 class PhononMode:
     """Represents a single vibrational mode."""
+
     index: int
     frequency_mev: float
     eigenvector: np.ndarray  # Shape (N_atoms, 3)
     symmetry: Optional[str] = None
     ipr: Optional[float] = None
-    pair_id: int = -1              # index of degenerate partner mode; -1 = unknown (no spectrum)
-    original_index: int = -1       # mode index in the full DFT run; -1 = unknown
+    pair_id: int = -1  # index of degenerate partner mode; -1 = unknown (no spectrum)
+    original_index: int = -1  # mode index in the full DFT run; -1 = unknown
 
     @property
     def frequency_thz(self) -> float:
@@ -206,17 +199,20 @@ class PhononMode:
 @dataclass
 class PhononSpectrum:
     """Represents a collection of phonon modes in a supercell."""
-    frequencies_mev: np.ndarray             # Shape (N_modes,)
-    eigenvectors: np.ndarray                # Shape (N_modes, N_atoms, 3)
-    atom_frac_coords: np.ndarray            # Shape (N_atoms, 3)
-    atom_symbols: list[str]                 # Length N_atoms
-    atomic_masses: np.ndarray               # Shape (N_atoms,)
-    lattice: np.ndarray                     # Shape (3, 3)
+
+    frequencies_mev: np.ndarray  # Shape (N_modes,)
+    eigenvectors: np.ndarray  # Shape (N_modes, N_atoms, 3)
+    atom_frac_coords: np.ndarray  # Shape (N_atoms, 3)
+    atom_symbols: list[str]  # Length N_atoms
+    atomic_masses: np.ndarray  # Shape (N_atoms,)
+    lattice: np.ndarray  # Shape (3, 3)
     symmetries: Optional[list[str]] = None  # Length N_modes
-    iprs: Optional[np.ndarray] = None       # Shape (N_modes,)
+    iprs: Optional[np.ndarray] = None  # Shape (N_modes,)
     e_pair_complete: Optional[list[bool]] = None  # Length N_modes
-    pair_ids: Optional[np.ndarray] = None   # Shape (N_modes,): degenerate partner index, n_modes if unpaired (out-of-bounds sentinel)
-    deg_groups: Optional[list] = None       # Lists of mode indices forming complete irrep component sets
+    pair_ids: Optional[np.ndarray] = (
+        None  # Shape (N_modes,): degenerate partner index, n_modes if unpaired (out-of-bounds sentinel)
+    )
+    deg_groups: Optional[list] = None  # Lists of mode indices forming complete irrep component sets
     original_indices: Optional[np.ndarray] = None  # Shape (N_modes,): mode index in the full DFT run
     n_full: Optional[int] = None  # size of the full spectrum original_indices point into
     frequency_unit: str = "meV"
@@ -227,6 +223,7 @@ class PhononSpectrum:
         if self.symmetries is None and self.eigenvectors is not None and len(self.eigenvectors) > 0:
             try:
                 from .symmetry import classify_and_pair
+
                 self.symmetries, self.deg_groups = classify_and_pair(self)
             except Exception:
                 # General detection unavailable (no table, or structure too
@@ -520,6 +517,7 @@ class PhononSpectrum:
         legacy method is kept as a validation reference only.
         """
         import warnings
+
         warnings.warn(
             "analyze_c3v_symmetry is deprecated; use beyblade.symmetry.classify_modes "
             "(general projection). Kept as a validation reference.",
@@ -632,6 +630,7 @@ class PhononSpectrum:
     def calc_ipr(self) -> np.ndarray:
         """Calculates and caches the Inverse Participation Ratio (IPR) for all phonon modes."""
         from beyblade.utils import MathUtils
+
         if self.iprs is None:
             self.iprs = MathUtils.calc_ipr(self.eigenvectors)
         return self.iprs
@@ -690,22 +689,20 @@ class PhononSpectrum:
             # 0-based indices into the ORIGINAL (full) spectrum, so downstream
             # code can map each reduced mode back to its source position.
             original_indices=kept,
-            n_full=(
-                (self.n_full if self.n_full is not None else len(original))
-                if original is not None else n
-            ),
+            n_full=((self.n_full if self.n_full is not None else len(original)) if original is not None else n),
         )
-        n_full = (
-            self.n_full if self.n_full is not None
-            else (len(original) if original is not None else n)
-        )
-        check_original_indices(
-            reduced.original_indices, reduced.n_modes, n_full=n_full
-        )
+        n_full = self.n_full if self.n_full is not None else (len(original) if original is not None else n)
+        check_original_indices(reduced.original_indices, reduced.n_modes, n_full=n_full)
         return reduced
 
     SCHEMA = [
-        FieldSpec("frequencies_mev", "array", npz_key="frequencies", shape=("n_modes",), save_aliases=("frequencies_mev", "freqs")),
+        FieldSpec(
+            "frequencies_mev",
+            "array",
+            npz_key="frequencies",
+            shape=("n_modes",),
+            save_aliases=("frequencies_mev", "freqs"),
+        ),
         FieldSpec("frequency_unit", "str", optional=True),
         FieldSpec("eigenvectors", "array", shape=("n_modes", "n_atoms", 3), save_aliases=("eigs",)),
         FieldSpec("atom_frac_coords", "array", shape=("n_atoms", 3)),
@@ -746,6 +743,7 @@ class PhononSpectrum:
 @dataclass
 class PerturbationEntry:
     """Represents a single 1D or 2D perturbed calculation."""
+
     order: int  # 1 for 1D (dD/dq), 2 for 2D (d2D/dq_i dq_j)
     mode_indices: tuple[int, ...]
     amplitude: Union[float, tuple[float, float]]
@@ -796,7 +794,9 @@ def _encode_second_order(d: dict) -> dict:
         if isinstance(entry, PerturbationEntry):
             amp = entry.amplitude
             if isinstance(amp, (tuple, list)):
-                amp = tuple(a * CONSTANTS["ang_amu2SI"] if (isinstance(a, (int, float)) and a > 1e-4) else a for a in amp)
+                amp = tuple(
+                    a * CONSTANTS["ang_amu2SI"] if (isinstance(a, (int, float)) and a > 1e-4) else a for a in amp
+                )
             elif isinstance(amp, (int, float)) and amp > 1e-4:
                 amp = (amp * CONSTANTS["ang_amu2SI"], amp * CONSTANTS["ang_amu2SI"])
             saved[key] = {"tensor": entry.zfs_tensor.matrix, "unit": entry.zfs_tensor.unit, "pert": amp}
@@ -1057,7 +1057,7 @@ class RawZFSData:
                     entry["ipr"] = (ipr_i, ipr_j)
 
     def _default_name(self):
-        return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.order}d.npz"
+        return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.combined_order}d.npz"
 
     SCHEMA = [
         FieldSpec("defect", "str"),
@@ -1067,8 +1067,22 @@ class RawZFSData:
         FieldSpec("order", "int", optional=True),
         FieldSpec("ground_state_zfs", "zfstensor", optional=True, legacy_keys=("zfs_relaxed",)),
         FieldSpec("eigen_rotation", "array", optional=True),
-        FieldSpec("first_order", "dict", optional=True, legacy_keys=("zfs_tensors",), encode=_encode_first_order, decode=_decode_order_dict),
-        FieldSpec("second_order", "dict", optional=True, legacy_keys=("zfs_tensors_2d",), encode=_encode_second_order, decode=_decode_order_dict),
+        FieldSpec(
+            "first_order",
+            "dict",
+            optional=True,
+            legacy_keys=("zfs_tensors",),
+            encode=_encode_first_order,
+            decode=_decode_order_dict,
+        ),
+        FieldSpec(
+            "second_order",
+            "dict",
+            optional=True,
+            legacy_keys=("zfs_tensors_2d",),
+            encode=_encode_second_order,
+            decode=_decode_order_dict,
+        ),
     ]
 
     def save(
@@ -1088,7 +1102,9 @@ class RawZFSData:
             elif self.first_order:
                 eff_order = 1
 
-        return save_npz(self, self._default_name() if out_path is None else out_path, self.SCHEMA, overrides={"order": eff_order})
+        return save_npz(
+            self, self._default_name() if out_path is None else out_path, self.SCHEMA, overrides={"order": eff_order}
+        )
 
     @classmethod
     def load(cls, in_path: Union[str, Path, Sequence[Union[str, Path]]]) -> RawZFSData:
@@ -1141,6 +1157,7 @@ class SpinPhononCouplingData:
     Container for calculated spin-phonon coupling coefficients (V-tensors),
     finite-difference derivatives, and frequencies with explicit unit tracking.
     """
+
     order: int
     defect: str
     cell_size: int
@@ -1221,7 +1238,9 @@ class SpinPhononCouplingData:
             V2_0_0=convert_energy(self.V2_0_0, self.coupling_unit, target_unit) if self.V2_0_0 is not None else None,
             V2_p_m=convert_energy(self.V2_p_m, self.coupling_unit, target_unit) if self.V2_p_m is not None else None,
             V2_0_pm=convert_energy(self.V2_0_pm, self.coupling_unit, target_unit) if self.V2_0_pm is not None else None,
-            zfs_2nd_derivs=convert_energy(self.zfs_2nd_derivs, self.derivs_unit, target_unit) if self.zfs_2nd_derivs is not None else None,
+            zfs_2nd_derivs=convert_energy(self.zfs_2nd_derivs, self.derivs_unit, target_unit)
+            if self.zfs_2nd_derivs is not None
+            else None,
         )
 
     def frequencies_to_unit(self, target_unit: str) -> SpinPhononCouplingData:

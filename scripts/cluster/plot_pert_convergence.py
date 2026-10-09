@@ -263,9 +263,9 @@ def main() -> int:
                             row[-1] = f"{cent:.6g}"
                     if cents:
                         msg += f"\n    central d2 (|Q|:value): {', '.join(cents)} MHz/pert^2"
-            print(20*"-")
+            print(20 * "-")
             print(msg)
-            print(20*"-","\n")
+            print(20 * "-", "\n")
             csv_rows.append(tuple(row))
         for j, title in enumerate(["linear regression", "quadratic least squares"]):
             axes[0, j].set_title(f"mode {mode}: ZFS PCs ({title})")

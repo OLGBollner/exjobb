@@ -51,11 +51,7 @@ class TestZFSTensor:
         # Rotate 90 degrees around z-axis
         mat = np.diag([100.0, 200.0, -300.0])
         tensor = ZFSTensor(matrix=mat)
-        R_z90 = np.array([
-            [0, -1, 0],
-            [1,  0, 0],
-            [0,  0, 1]
-        ])
+        R_z90 = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
         rot_tensor = tensor.rotate(R_z90)
         assert np.isclose(rot_tensor.matrix[0, 0], 200.0)
         assert np.isclose(rot_tensor.matrix[1, 1], 100.0)

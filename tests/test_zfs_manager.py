@@ -173,11 +173,13 @@ class TestZFSManager:
 
         # Ground state with a non-trivial eigenframe: NV axis along [1,1,1]
         # gives an off-diagonal crystal-frame matrix (like the real NV_64 data).
-        R = np.array([
-            [0.74867142,  0.32581862, -0.57735027],
-            [-0.0921685, -0.81127778, -0.57735027],
-            [-0.65650291,  0.48545915, -0.57735027],
-        ])
+        R = np.array(
+            [
+                [0.74867142, 0.32581862, -0.57735027],
+                [-0.0921685, -0.81127778, -0.57735027],
+                [-0.65650291, 0.48545915, -0.57735027],
+            ]
+        )
         D_gs_diag = np.diag([-2870.0 / 3, -2870.0 / 3, 2 * 2870.0 / 3])  # MHz
         gs_crystal = R @ D_gs_diag @ R.T  # MHz
         ground_state_zfs = ZFSTensor(matrix=gs_crystal, unit="MHz")
@@ -208,8 +210,7 @@ class TestZFSManager:
         ingested = manager.second_order[(0, 0)]["tensor"]
         expected = D_pert_diag * CONSTANTS["MHz2J"]
         assert np.allclose(ingested, expected, atol=1e-24), (
-            f"Tensor not rotated into eigenframe; off-diagonals remain.\n"
-            f"ingested: {ingested}\nexpected: {expected}"
+            f"Tensor not rotated into eigenframe; off-diagonals remain.\ningested: {ingested}\nexpected: {expected}"
         )
 
         # Sanity: the wrong orientation R @ T @ R.T would NOT match.

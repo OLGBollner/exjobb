@@ -17,7 +17,7 @@ from beyblade.parsers import (
 )
 from beyblade.plotter import (
     plot_1d_spectral_functions,
-    plot_t1_relaxation,
+    plot_t1,
     plot_transition_rates_stacked,
 )
 from beyblade.relaxation_dynamics import RelaxationDynamics
@@ -327,14 +327,17 @@ def run_full_pipeline(
     omega_zfs = calculator.data["zfs"] / CONSTANTS["meV2J"]
 
     rate_results = {
-        "first_order":  {"0_1": [], "1_-1": []},
+        "first_order": {"0_1": [], "1_-1": []},
         "second_order": {"0_1": [], "1_-1": []},
-        "two_phonon":   {"0_1": [], "1_-1": []},
+        "two_phonon": {"0_1": [], "1_-1": []},
     }
     directional_results = {
-        "0_to_1": [], "0_to_-1": [],
-        "1_to_0": [], "-1_to_0": [],
-        "1_to_-1": [], "-1_to_1": [],
+        "0_to_1": [],
+        "0_to_-1": [],
+        "1_to_0": [],
+        "-1_to_0": [],
+        "1_to_-1": [],
+        "-1_to_1": [],
     }
     valid_temps = []
 
@@ -461,7 +464,7 @@ def run_full_pipeline(
         # Coupling plots (1D and 2D diagonal)
         try:
             coupling_display = coupling_data.to_unit("MHz").frequencies_to_unit("meV")
-            
+
             # 1D coupling plot
             fig_c1, _, _ = plot_1d_spectral_functions(
                 frequencies_mev=coupling_display.frequencies,
@@ -486,8 +489,16 @@ def run_full_pipeline(
                 v2_0pm = coupling_display.V2_0_pm
 
                 v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
-                v2_pm_diag = np.diag(v2_pm) if (v2_pm is not None and v2_pm.ndim == 2) else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
-                v2_0pm_diag = np.diag(v2_0pm) if (v2_0pm is not None and v2_0pm.ndim == 2) else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+                v2_pm_diag = (
+                    np.diag(v2_pm)
+                    if (v2_pm is not None and v2_pm.ndim == 2)
+                    else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
+                )
+                v2_0pm_diag = (
+                    np.diag(v2_0pm)
+                    if (v2_0pm is not None and v2_0pm.ndim == 2)
+                    else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+                )
 
                 fig_c2, _, _ = plot_1d_spectral_functions(
                     frequencies_mev=coupling_display.frequencies,
@@ -514,7 +525,7 @@ def run_full_pipeline(
         # T1 plot
         try:
             ft1_path = fig_dir / "t1_vs_temperature.png"
-            plot_t1_relaxation(t1_path, output_path=ft1_path, plain_name=True)
+            plot_t1([t1_path], output_path=ft1_path, plain_name=True)
             figures_saved.append(ft1_path)
         except Exception as e:
             print(f"Warning: could not generate T1 plot: {e}")

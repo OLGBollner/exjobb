@@ -35,3 +35,6 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+beyblade = "beyblade.cli:main"

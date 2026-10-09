@@ -17,6 +17,7 @@ schema for both directions:
   emitted (forward compatibility: old readers still open new files;
   new readers tell you when a file has unknown content).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -33,15 +34,15 @@ class SchemaError(ValueError):
 
 @dataclass(frozen=True)
 class FieldSpec:
-    name: str                                   # dataclass attribute name
-    kind: str                                   # array|int|float|str|bool|dict|list_str|list_bool|zfstensor
-    npz_key: str = None                         # key in the file (defaults to name)
-    shape: Tuple = ()                           # symbolic shape; ints fixed, strings matched across fields
-    optional: bool = False                      # None allowed; key omitted on save when None
-    legacy_keys: Tuple[str, ...] = ()           # fallback npz keys on load
-    save_aliases: Tuple[str, ...] = ()          # extra npz keys written with the same value
-    encode: Callable[[Any], Any] = None         # attribute -> file value (default identity)
-    decode: Callable[[Any, Any], Any] = None    # (file value, whole npz) -> attribute (default identity)
+    name: str  # dataclass attribute name
+    kind: str  # array|int|float|str|bool|dict|list_str|list_bool|zfstensor
+    npz_key: str = None  # key in the file (defaults to name)
+    shape: Tuple = ()  # symbolic shape; ints fixed, strings matched across fields
+    optional: bool = False  # None allowed; key omitted on save when None
+    legacy_keys: Tuple[str, ...] = ()  # fallback npz keys on load
+    save_aliases: Tuple[str, ...] = ()  # extra npz keys written with the same value
+    encode: Callable[[Any], Any] = None  # attribute -> file value (default identity)
+    decode: Callable[[Any, Any], Any] = None  # (file value, whole npz) -> attribute (default identity)
 
     @property
     def key(self) -> str:
@@ -76,8 +77,16 @@ def _unwrap(value: Any) -> Any:
 
 
 _KINDS = {
-    "array", "int", "float", "str", "bool", "dict",
-    "list_str", "list_bool", "list_int", "zfstensor",
+    "array",
+    "int",
+    "float",
+    "str",
+    "bool",
+    "dict",
+    "list_str",
+    "list_bool",
+    "list_int",
+    "zfstensor",
 }
 
 
@@ -86,21 +95,17 @@ def _check_shape(kind: str, arr: np.ndarray, spec: FieldSpec, dims: Dict[str, in
         return arr
     if arr.ndim != len(spec.shape):
         raise SchemaError(
-            f"field '{spec.name}': expected {len(spec.shape)}-d array with shape "
-            f"{spec.shape}, got shape {arr.shape}"
+            f"field '{spec.name}': expected {len(spec.shape)}-d array with shape {spec.shape}, got shape {arr.shape}"
         )
     for axis, dim in enumerate(spec.shape):
         if isinstance(dim, str):
             if dim in dims and dims[dim] != arr.shape[axis]:
                 raise SchemaError(
-                    f"field '{spec.name}': dim '{dim}' inconsistent: expected "
-                    f"{dims[dim]}, got {arr.shape[axis]}"
+                    f"field '{spec.name}': dim '{dim}' inconsistent: expected {dims[dim]}, got {arr.shape[axis]}"
                 )
             dims[dim] = arr.shape[axis]
         elif arr.shape[axis] != dim:
-            raise SchemaError(
-                f"field '{spec.name}': expected shape {spec.shape}, got {arr.shape}"
-            )
+            raise SchemaError(f"field '{spec.name}': expected shape {spec.shape}, got {arr.shape}")
     return arr
 
 
@@ -169,6 +174,7 @@ def save_npz(
             continue  # omitted from the file entirely
         if spec.kind == "zfstensor":
             from .models import ZFSTensor  # lazy: serialization <-> models cycle
+
             if not isinstance(value, ZFSTensor):
                 raise SchemaError(f"field '{spec.name}': expected ZFSTensor, got {type(value).__name__}")
             payload[f"{spec.key}_matrix"] = value.matrix
@@ -188,6 +194,7 @@ def save_npz(
 
 def _zfstensor_from(data: Any, key: str) -> Any:
     from .models import ZFSTensor  # lazy: serialization <-> models cycle
+
     mk = f"{key}_matrix"
     if mk in data.files:
         return ZFSTensor(matrix=data[mk], unit=str(data.get(f"{key}_unit", "MHz")))
@@ -232,14 +239,13 @@ def _fields_from_npz(
             if spec.optional:
                 kwargs[spec.name] = None
             elif strict:
-                raise SchemaError(
-                    f"{cls.__name__}.load: missing required field '{spec.key}'"
-                )
+                raise SchemaError(f"{cls.__name__}.load: missing required field '{spec.key}'")
             continue
 
         if spec.kind == "zfstensor":
             if "zfs_relaxed" in present and mk not in present:
                 from beyblade.models import ZFSTensor  # lazy: models imports this module
+
                 value = ZFSTensor(matrix=data["zfs_relaxed"], unit="J")  # legacy: Joules
             else:
                 value = _zfstensor_from(data, spec.key)
@@ -250,14 +256,11 @@ def _fields_from_npz(
                     kwargs[spec.name] = None
                     continue
                 if strict:
-                    raise SchemaError(
-                        f"{cls.__name__}.load: required field '{spec.key}' is None in file"
-                    )
+                    raise SchemaError(f"{cls.__name__}.load: required field '{spec.key}' is None in file")
                 continue
 
             # ragged object arrays (e.g. deg_groups) read back as lists
-            if (isinstance(value, np.ndarray) and value.dtype == object
-                    and value.ndim >= 1):
+            if isinstance(value, np.ndarray) and value.dtype == object and value.ndim >= 1:
                 value = value.tolist()
 
             # kind conversion

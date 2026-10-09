@@ -89,8 +89,10 @@ class TestParsers:
             }
         }
 
-        with tempfile.NamedTemporaryFile(suffix="_1d.npz", delete=False) as f1, \
-             tempfile.NamedTemporaryFile(suffix="_2d.npz", delete=False) as f2:
+        with (
+            tempfile.NamedTemporaryFile(suffix="_1d.npz", delete=False) as f1,
+            tempfile.NamedTemporaryFile(suffix="_2d.npz", delete=False) as f2,
+        ):
             path_1d = Path(f1.name)
             path_2d = Path(f2.name)
 

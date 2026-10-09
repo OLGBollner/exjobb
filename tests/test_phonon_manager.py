@@ -3,6 +3,7 @@ import numpy as np
 from beyblade.models import PhononSpectrum
 from beyblade.utils import MathUtils
 
+
 class TestPhononSpectrumProperties:
     @pytest.fixture
     def sample_spectrum(self):
@@ -140,9 +141,9 @@ class TestC3vSymmetryClassification:
         v1 = v1 / np.linalg.norm(v1) * 1.54
         pos = np.zeros((4, 3))
         pos[0] = [0.0, 0.0, 0.0]  # N
-        pos[1] = v1               # C1
-        pos[2] = R_C3 @ v1        # C2
-        pos[3] = R_C3 @ pos[2]    # C3
+        pos[1] = v1  # C1
+        pos[2] = R_C3 @ v1  # C2
+        pos[3] = R_C3 @ pos[2]  # C3
 
         lattice = np.eye(3) * 10.0
         frac_coords = pos / 10.0
@@ -192,12 +193,14 @@ class TestC3vSymmetryClassification:
         n_atoms = 4
         lattice = np.eye(3) * 10.0  # 10x10x10 A supercell
         # Atom 0 at origin (defect), Atom 1 at 1.0 A, Atom 2 at 1.5 A, Atom 3 at 8.0 A
-        frac_coords = np.array([
-            [0.0, 0.0, 0.0],
-            [0.1, 0.0, 0.0],  # 1.0 A
-            [0.15, 0.0, 0.0], # 1.5 A
-            [0.8, 0.0, 0.0],  # 8.0 A (or 2.0 A with PBC)
-        ])
+        frac_coords = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],  # 1.0 A
+                [0.15, 0.0, 0.0],  # 1.5 A
+                [0.8, 0.0, 0.0],  # 8.0 A (or 2.0 A with PBC)
+            ]
+        )
 
         # Mode with vibration on atom 0 and atom 1 (both within radius 1.2 A)
         eigs = np.zeros((1, n_atoms, 3))

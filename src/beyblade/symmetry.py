@@ -13,6 +13,7 @@ The analytic selection of coupling coefficients from the ZFS matrix
 remains a per-group mapping table; only irrep labels cross
 this seam.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -85,10 +86,11 @@ class SymmetryDetectionError(RuntimeError):
 @dataclass(frozen=True)
 class PointGroup:
     """Detected point group of a structure."""
-    symbol: str                # Hermann-Mauguin point-group symbol (spglib)
-    order: int                 # number of symmetry operations
-    operations: tuple          # rotation matrices (3x3)
-    space_group: str           # international space group symbol
+
+    symbol: str  # Hermann-Mauguin point-group symbol (spglib)
+    order: int  # number of symmetry operations
+    operations: tuple  # rotation matrices (3x3)
+    space_group: str  # international space group symbol
 
 
 def detect_point_group(structure: Structure, symprec: float = 1e-3) -> PointGroup:
@@ -99,14 +101,9 @@ def detect_point_group(structure: Structure, symprec: float = 1e-3) -> PointGrou
     except Exception as exc:
         # spglib raises its own error for pathological (e.g. all-atoms-at-
         # origin) structures; translate it so callers can catch our type.
-        raise SymmetryDetectionError(
-            f"Unable to determine symmetry (symprec={symprec}): {exc}"
-        ) from exc
+        raise SymmetryDetectionError(f"Unable to determine symmetry (symprec={symprec}): {exc}") from exc
     if not symm_ops:
-        raise SymmetryDetectionError(
-            f"No symmetry operations found (symprec={symprec}); "
-            "cannot classify modes."
-        )
+        raise SymmetryDetectionError(f"No symmetry operations found (symprec={symprec}); cannot classify modes.")
     return PointGroup(
         symbol=sga.get_point_group_symbol(),
         order=len(symm_ops),
@@ -137,29 +134,26 @@ def classify_modes(spectrum, tol_mev: float = 0.01, symprec: float = 1e-3) -> tu
     pg = detect_point_group_from_spectrum(spectrum, symprec=symprec)
     table = CHARACTER_TABLES.get(pg.symbol)
     if table is None:
-        raise NotImplementedError(
-            f"No character table for point group '{pg.symbol}'. "
-            "Add one to CHARACTER_TABLES."
-        )
+        raise NotImplementedError(f"No character table for point group '{pg.symbol}'. Add one to CHARACTER_TABLES.")
 
     ops = defect_frame_operations(spectrum)
     chars = _mode_characters(spectrum, ops)
     # Sublabels of a 2D irrep (Ex/Ey) are a basis convention, not physics:
     # the stored convention (set by the legacy analyzer) is the sign of the
     # character on the first reflection operation. Compute that index here.
-    first_reflection = next(
-        (k for k, R in enumerate(ops) if np.linalg.det(R) < 0), None
-    )
-    labels, deg_groups = _match_irreps(
-        spectrum, chars, table, tol_mev, first_reflection=first_reflection
-    )
+    first_reflection = next((k for k, R in enumerate(ops) if np.linalg.det(R) < 0), None)
+    labels, deg_groups = _match_irreps(spectrum, chars, table, tol_mev, first_reflection=first_reflection)
     spectrum.symmetries = labels
     spectrum.sym_check = verify_deg_groups(chars, labels, deg_groups, table)
     return labels, deg_groups
 
 
 def verify_deg_groups(
-    chars, labels, deg_groups, table, atol: float = 0.05,
+    chars,
+    labels,
+    deg_groups,
+    table,
+    atol: float = 0.05,
 ) -> dict:
     """Check that each degenerate group sums to its parent irrep's characters.
 
@@ -279,8 +273,10 @@ def classify_and_pair(
 def _build_groups_from_labels(spectrum, labels, tol_mev):
     """Build degeneracy groups from stored labels without re-deriving."""
     parent_of = {
-        sub: parent for parent, entry in CHARACTER_TABLES["3m"].items()
-        if isinstance(entry, dict) for sub in entry["sublabels"]
+        sub: parent
+        for parent, entry in CHARACTER_TABLES["3m"].items()
+        if isinstance(entry, dict)
+        for sub in entry["sublabels"]
     }
     freqs = spectrum.frequencies_mev
     by_parent: dict[str, list[int]] = {}
@@ -314,6 +310,7 @@ def _build_groups_from_labels(spectrum, labels, tol_mev):
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
+
 
 def _defect_frame(spectrum) -> tuple[np.ndarray, np.ndarray]:
     """Returns (axis, reflection_normal) of the defect in Cartesian coords.
@@ -388,16 +385,16 @@ def _mode_characters(spectrum, operations: list[np.ndarray]) -> np.ndarray:
     eigs = np.asarray(spectrum.eigenvectors)
     n_modes = eigs.shape[0]
     if eigs.ndim == 3:
-        vecs = eigs                     # (n_modes, n_atoms, 3)
+        vecs = eigs  # (n_modes, n_atoms, 3)
     else:
-        n_atoms = eigs.shape[-1] // 3   # flat (n_modes, 3N)
+        n_atoms = eigs.shape[-1] // 3  # flat (n_modes, 3N)
         vecs = eigs.reshape(n_modes, n_atoms, 3)
 
     lattice = np.asarray(spectrum.lattice, dtype=float)
     inv_lat = np.linalg.inv(lattice)
     frac = np.mod(np.asarray(spectrum.atom_frac_coords, dtype=float), 1.0)
     center = _defect_center(spectrum)
-    frac = np.mod(frac - center, 1.0)   # PBC-aware centering, defect at origin
+    frac = np.mod(frac - center, 1.0)  # PBC-aware centering, defect at origin
     cart_atoms = frac @ lattice
     symbols = np.asarray(spectrum.atom_symbols)
 
@@ -480,11 +477,7 @@ def _match_irreps(spectrum, chars, table, tol_mev, first_reflection=None):
             score = abs(np.dot(v, chi)) / (nv * (np.linalg.norm(chi) + 1e-12))
             if score > best_score:
                 best, best_score, best_parent = name, score, parent_of[name]
-        if (
-            best is not None
-            and best in sublabel_rule
-            and first_reflection is not None
-        ):
+        if best is not None and best in sublabel_rule and first_reflection is not None:
             op_idx, pos, neg = sublabel_rule[best]
             chi_ref = v[op_idx]
             best = pos if chi_ref > 0 else neg
@@ -507,10 +500,7 @@ def _match_irreps(spectrum, chars, table, tol_mev, first_reflection=None):
             seed = remaining.pop(0)
             group = [seed]
             # partners: modes sharing the seed's frequency (within tol)
-            partners = [
-                j for j in remaining
-                if abs(freqs[j] - freqs[seed]) < tol_mev
-            ]
+            partners = [j for j in remaining if abs(freqs[j] - freqs[seed]) < tol_mev]
             # keep at most one partner per distinct sublabel beyond the seed
             taken: set[str] = set()
             for j in partners:
@@ -579,17 +569,11 @@ def filter_degenerate_partners(
         symmetries=[s for k, s in enumerate(labels) if mask[k]],
         iprs=spectrum.iprs[mask] if spectrum.iprs is not None else None,
         original_indices=kept,
-        n_full=(
-            (spectrum.n_full if spectrum.n_full is not None else len(original))
-            if original is not None else n
-        ),
+        n_full=((spectrum.n_full if spectrum.n_full is not None else len(original)) if original is not None else n),
     )
     # indices point into the FULL pre-reduction spectrum, so the parent
     # size is the recorded n_full (or the input's own size when unreduced)
-    n_full = (
-        spectrum.n_full if spectrum.n_full is not None
-        else (len(original) if original is not None else n)
-    )
+    n_full = spectrum.n_full if spectrum.n_full is not None else (len(original) if original is not None else n)
     check_original_indices(reduced.original_indices, reduced.n_modes, n_full=n_full)
     return reduced
 
@@ -616,10 +600,7 @@ def _op_mappings(spectrum, operations) -> list[np.ndarray]:
     frac = np.mod(frac - center, 1.0)
     cart = frac @ lattice
     symbols = np.asarray(spectrum.atom_symbols)
-    return [
-        _atom_mapping(np.asarray(R, dtype=float), cart, frac, inv_lat, symbols, lattice)
-        for R in operations
-    ]
+    return [_atom_mapping(np.asarray(R, dtype=float), cart, frac, inv_lat, symbols, lattice) for R in operations]
 
 
 def _group_operator_apply(mappings, operations, vecs) -> np.ndarray:
@@ -769,8 +750,7 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
         ok = True
         for parent in parents:
             basis = _project_sector(vecs, g, mappings, ops, table, parent)
-            n_expected = _irrep_dimension(table, parent) * sum(
-                1 for i in g if _parent_label(labels[i]) == parent)
+            n_expected = _irrep_dimension(table, parent) * sum(1 for i in g if _parent_label(labels[i]) == parent)
             if len(basis) > n_expected:
                 report["skipped"].append((g, parents))
                 ok = False
@@ -802,9 +782,14 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
     # its whole point), and classify_and_pair applies the sublabel sign rule
     # the same way everywhere else in the module.
     new_spec = replace(
-        spectrum, frequencies_mev=freqs, eigenvectors=vecs,
-        symmetries=None, e_pair_complete=None, pair_ids=None,
-        deg_groups=None, original_indices=spectrum.original_indices,
+        spectrum,
+        frequencies_mev=freqs,
+        eigenvectors=vecs,
+        symmetries=None,
+        e_pair_complete=None,
+        pair_ids=None,
+        deg_groups=None,
+        original_indices=spectrum.original_indices,
     )
     classify_and_pair(new_spec, tol_mev)
     new_spec.symmetrization_report = report

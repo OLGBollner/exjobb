@@ -74,7 +74,9 @@ class TransitionRate:
                 "cell_size": filename.cell_size,
                 "calc_method": filename.calc_method,
                 "pert_scale": filename.pert_scale,
-                "zfs": filename.ground_state_zfs.to_unit("J").D if filename.ground_state_zfs is not None else 0.0,  # legacy scalar D in Joules
+                "zfs": filename.ground_state_zfs.to_unit("J").D
+                if filename.ground_state_zfs is not None
+                else 0.0,  # legacy scalar D in Joules
                 "V_0_0": filename.V_0_0,
                 "V_p_m": filename.V_p_m,
                 "V_0_pm": filename.V_0_pm,

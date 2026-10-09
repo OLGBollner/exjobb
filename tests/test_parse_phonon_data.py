@@ -45,12 +45,8 @@ def test_dispatch_yaml(tmp_path):
         "  - q-position: [0.0, 0.0, 0.0]\n"
         "    band:\n"
         + "".join(
-            f'      - frequency: {f}\n'
-            '        eigenvector:\n'
-            + "".join(
-                f'        - [[{a}, 0.0], [0.0, {a}], [0.0, 0.0]]\n'
-                for a in (1.0, 2.0)
-            )
+            f"      - frequency: {f}\n"
+            "        eigenvector:\n" + "".join(f"        - [[{a}, 0.0], [0.0, {a}], [0.0, 0.0]]\n" for a in (1.0, 2.0))
             for f in (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
         )
     )
