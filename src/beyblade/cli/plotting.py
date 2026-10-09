@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 
+from beyblade.convergence import plot_pert_convergence
 from beyblade.plotter import plot_run_coupling, plot_run_rates, plot_t1
 from beyblade.runs_index import filter_rows, read_rows, run_dirs
 
@@ -35,6 +36,44 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
     t1.add_argument("--plain-name", action="store_true", help="Do not append metadata to the output filename")
     _add_output_args(t1)
     t1.set_defaults(func=_run_t1)
+
+    conv = subparsers.add_parser(
+        "convergence", help="Plot ZFS principal components vs perturbation scale from a packed npz"
+    )
+    conv.add_argument("npz", type=Path, help="npz from pack_perturbation_runs.py")
+    conv.add_argument("-m", "--mode", type=int, action="append", help="plot only this mode (repeatable; default: all)")
+    conv.add_argument(
+        "--quad", action="store_true", help="also fit y = a + b x + c x^2 and report the second-order derivative 2c"
+    )
+    conv.add_argument(
+        "--deviation",
+        action="store_true",
+        help="plot D(Q) - D(Q=0) instead of raw D, so the response fills the y-range",
+    )
+    conv.add_argument(
+        "--csv", type=Path, default=None, help="write slopes (and quad coefficients with --quad) to this csv"
+    )
+    conv.add_argument(
+        "--drop-anchor",
+        action="store_true",
+        help="exclude the Q=0 anchor from fits and residuals (curves still extrapolate to Q=0)",
+    )
+    _add_output_args(conv)
+    conv.set_defaults(func=_run_convergence)
+
+
+def _run_convergence(args: argparse.Namespace) -> None:
+    out = _require_output(args)
+    plot_pert_convergence(
+        args.npz,
+        output_path=out,
+        mode=args.mode,
+        quad=args.quad,
+        deviation=args.deviation,
+        csv_path=args.csv,
+        show=args.show,
+        drop_anchor=args.drop_anchor,
+    )
 
 
 def _require_output(args: argparse.Namespace) -> Path:
