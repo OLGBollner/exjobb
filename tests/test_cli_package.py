@@ -1,4 +1,5 @@
 import argparse
+from datetime import date
 
 import numpy as np
 from unittest.mock import patch
@@ -56,7 +57,7 @@ def test_default_combines_orders_into_one_file(tmp_path):
     with _patch(lambda **kw: _raw(order=kw["order"])):
         _run(_make_args(tmp_path))
     files = list((tmp_path / "data").rglob("*.npz"))
-    assert files == [tmp_path / "data" / "NV_512_20261008" / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_2d.npz"]
+    assert files == [tmp_path / "data" / f"NV_512_{date.today():%Y%m%d}" / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_2d.npz"]
 
 
 def test_single_order_saves_separate_file(tmp_path):
@@ -64,7 +65,7 @@ def test_single_order_saves_separate_file(tmp_path):
     with _patch():
         _run(_make_args(tmp_path, orders="first"))
     files = list((tmp_path / "data").rglob("*.npz"))
-    assert files == [tmp_path / "data" / "NV_512_20261008" / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz"]
+    assert files == [tmp_path / "data" / f"NV_512_{date.today():%Y%m%d}" / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz"]
 
 
 def test_pert_filter(tmp_path):

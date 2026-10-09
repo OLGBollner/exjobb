@@ -47,6 +47,9 @@ def _run(args: argparse.Namespace) -> None:
     if not defect_folder.is_dir():
         raise SystemExit(f"Defect folder not found: {defect_folder}")
 
+    print(f"Defect folder: {defect_folder}")
+    print(f"Orders: {', '.join(orders)} | method: {args.method}")
+
     defect = defect_folder.name.split("_")[0]
     cell_size = int(defect_folder.name.split("_")[-1])
 
@@ -68,7 +71,10 @@ def _run(args: argparse.Namespace) -> None:
         return perts
 
     datasets = {o: _collect(o) for o in orders}
+    for o in orders:
+        print(f"  {o} order: {len(datasets[o])} perturbation(s) found in {defect_folder / _ORDER_DIRS[o]}")
     pert_scales = sorted(set().union(*datasets.values()))
+    print(f"Perturbation scales to package: {pert_scales}")
 
     for pert_scale in pert_scales:
         raw = None
@@ -76,7 +82,7 @@ def _run(args: argparse.Namespace) -> None:
             if pert_scale not in datasets[o]:
                 continue
             data = parse_zfs_simulation_dataset(
-                sim_folder=datasets[o][pert_scale], order=_ORDER_NUM[o], calc_method=args.method
+                sim_folder=datasets[o][pert_scale], order=_ORDER_NUM[o], calc_method=args.method, verbose=True
             )
             raw = data if raw is None else raw.combine(data)
         pert_folder = folder / f"pert_{pert_scale:g}"

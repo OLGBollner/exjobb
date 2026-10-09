@@ -463,6 +463,7 @@ def parse_perturbation_directory(
     order: int = 1,
     amplitude: float | tuple[float, float] = 1.0,
     max_workers: int = 4,
+    verbose: bool = False,
 ) -> dict[Any, PerturbationEntry]:
     """
     Parses all perturbed OUTCARs under a directory for 1D or 2D displacements in parallel.
@@ -470,7 +471,11 @@ def parse_perturbation_directory(
     dir_path = Path(directory)
     outcar_files = list(dir_path.glob("**/OUTCAR"))
     if not outcar_files:
+        if verbose:
+            print(f"No OUTCARs found in: {dir_path}")
         return {}
+    if verbose:
+        print(f"Parsing {len(outcar_files)} OUTCARs in {dir_path} ...")
 
     worker_fn = _worker_parse_outcar_1d if order == 1 else _worker_parse_outcar_2d
     results = {}
@@ -488,6 +493,11 @@ def parse_perturbation_directory(
                     energy=energy,
                 )
 
+    if verbose:
+        skipped = len(outcar_files) - len(results)
+        suffix = f" ({skipped} skipped)" if skipped else ""
+        print(f"  -> {len(results)}/{len(outcar_files)} parsed{suffix}")
+
     return results
 
 
@@ -501,6 +511,7 @@ def parse_zfs_simulation_dataset(
     *,
     calc_method: str | None = None,
     zfs_folder: str | None = None,
+    verbose: bool = False,
 ) -> RawZFSData:
     """
     Parses an entire simulation directory structure:
@@ -546,10 +557,12 @@ def parse_zfs_simulation_dataset(
         order = 1 if "first" in sim_path.parent.name else 2 if "second" in sim_path.parent.name else None
 
     if order == 1:
-        first_order = parse_perturbation_directory(search_path, order=1, amplitude=pert_scale, max_workers=max_workers)
+        first_order = parse_perturbation_directory(
+            search_path, order=1, amplitude=pert_scale, max_workers=max_workers, verbose=verbose
+        )
     elif order == 2:
         second_order = parse_perturbation_directory(
-            search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers
+            search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers, verbose=verbose
         )
 
     return RawZFSData(
