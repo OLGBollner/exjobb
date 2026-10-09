@@ -1,6 +1,7 @@
 """CLI subcommands for the plotting functions."""
 
 import argparse
+import re
 from pathlib import Path
 
 from beyblade.convergence import plot_pert_convergence
@@ -63,7 +64,8 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
 
 
 def _run_convergence(args: argparse.Namespace) -> None:
-    out = args.output or _default_output(args, "convergence", args.npz.stem)
+    stem = re.sub(r"_?raw_zfs_data_.*$", "", args.npz.stem) or args.npz.stem
+    out = args.output or _default_output(args, "convergence", stem)
     plot_pert_convergence(
         args.npz,
         output_path=out,
