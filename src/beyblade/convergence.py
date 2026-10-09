@@ -294,8 +294,7 @@ def plot_pert_convergence(
             axes[0, j].set_ylabel("principal component (MHz)")
             axes[1, j].set_xlabel("perturbation scale")
             axes[1, j].set_ylabel("residual (MHz)")
-        if deviation:
-            fig.suptitle("$D_\\lambda - D_0$")
+        fig.suptitle(f"mode {mode}: $D_\\lambda$" if not deviation else f"mode {mode}: $D_\\lambda - D_0$")
         axes[0, 1].legend(fontsize=7)
         fig.tight_layout()
         stem, ext = output_path.stem, output_path.suffix or ".png"
