@@ -228,6 +228,7 @@ def plot_pert_convergence(
                 print(f"mode {mode}: --drop-anchor leaves no points, skipping", file=sys.stderr)
                 continue
         vals = np.stack([np.diag(R.T @ t @ R) for t in t_use])
+        trace = vals.sum(axis=1)
         if deviation:
             # plot D(Q) - D(Q=0) so the response is visible on its own scale
             vals = vals - vals[izero]
@@ -245,6 +246,8 @@ def plot_pert_convergence(
             axes[1, 0].plot(p_use[sgn], res[sgn], "o-")
             axes[1, 0].axhline(np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
             axes[1, 0].axhline(-np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
+            axes[0, 0].plot(p_use[sgn], trace[sgn], "o", label="Tr D")
+            axes[0, 1].plot(p_use[sgn], trace[sgn], "o")
             axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=f"PC {k + 1} (b={b:.4g}, 2c={2 * qc:.4g})")
             axes[0, 1].plot(p_use[sgn], y_q[sgn], "-", alpha=0.4, color=axes[0, 1].lines[-1].get_color())
             axes[1, 1].plot(p_use[sgn], qres[sgn], "o-")
