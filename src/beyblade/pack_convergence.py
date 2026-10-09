@@ -47,30 +47,21 @@ def infer_defect_cell(folder: Path) -> tuple[str | None, str | None]:
 
 
 def pack_convergence(
-    run_root: Path | list[Path],
+    run_root: Path,
     output: Path,
     ground_state: Path | None = None,
     defect: str | None = None,
     cell: str | None = None,
+    method: str | None = None,
+    method_key: str | None = None,
 ) -> Path:
-    """Pack runs/<mode>_pert_<p>/OUTCAR under one or more roots into one .npz."""
-    roots = [Path(r) for r in run_root] if isinstance(run_root, list) else [Path(run_root)]
-    for r in roots:
-        if not (r / "runs").is_dir():
-            sys.exit(f"Error: no runs/ under {r}")
-    runs = [t for r in roots for t in discover_runs(r)]
-    # dedupe (mode, pert) across roots: first root wins
-    seen: set[tuple[int, float]] = set()
-    unique = []
-    for mode, pert, outcar in runs:
-        if (mode, pert) in seen:
-            print(f"warning: duplicate run {mode}_pert_{pert} across convergence folders, keeping first", file=sys.stderr)
-            continue
-        seen.add((mode, pert))
-        unique.append((mode, pert, outcar))
-    runs = unique
+    """Pack runs/<mode>_pert_<p>/OUTCAR under one root into one .npz."""
+    run_root = Path(run_root)
+    if not (run_root / "runs").is_dir():
+        sys.exit(f"Error: no runs/ under {run_root}")
+    runs = [t for t in discover_runs(run_root)]
     if not runs:
-        sys.exit(f"Error: no runs/*/OUTCAR found under {roots}")
+        sys.exit(f"Error: no runs/*/OUTCAR found under {run_root}")
 
     modes = sorted({m for m, _, _ in runs})
     perts = sorted({p for _, p, _ in runs})
@@ -115,6 +106,8 @@ def pack_convergence(
         "created": f"{date.today():%Y-%m-%d}",
         "ground_state": str(ground_state) if ground_state is not None else None,
         "n_runs": len(runs),
+        "method": method,
+        "method_key": method_key,
     }
     np.savez_compressed(
         output,

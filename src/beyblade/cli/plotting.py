@@ -65,6 +65,9 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
 def _run_convergence(args: argparse.Namespace) -> None:
     meta = read_conv_metadata(args.npz)
     stem = "_".join(str(meta[k]) for k in ("defect", "cell") if meta.get(k) is not None)
+    method = meta.get("method") or meta.get("method_key")
+    if method:
+        stem = f"{stem}_{method}" if stem else str(method)
     if not stem:
         if not args.output:
             raise SystemExit(

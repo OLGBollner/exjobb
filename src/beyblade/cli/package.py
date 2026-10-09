@@ -1,6 +1,7 @@
 """CLI command for packaging raw ZFS simulation data into a single .npz."""
 
 import argparse
+import re
 import warnings
 from datetime import date
 from pathlib import Path
@@ -119,10 +120,16 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
     conv_roots = sorted(p for p in defect_folder.glob("convergence*") if p.is_dir())
     if not conv_roots:
         raise SystemExit(f"No convergence* folders found under {defect_folder}")
+    method_map = {"all": "all", "occup": "approx"}
     for root in conv_roots:
         print(f"Convergence folder: {root}")
-    defect = defect_folder.name.split("_")[0]
-    cell = defect_folder.name.split("_")[-1]
-    output = args.output_root / f"{defect}_{cell}_{date.today():%Y%m%d}_conv.npz"
-    args.output_root.mkdir(parents=True, exist_ok=True)
-    pack_convergence(conv_roots, output, ground_state=args.ground_state, defect=defect, cell=cell)
+        suffix = re.sub(r"^convergence[._-]*", "", root.name).lstrip("_-") or "conv"
+        method = next((v for k, v in method_map.items() if k in suffix), None)
+        defect = defect_folder.name.split("_")[0]
+        cell = defect_folder.name.split("_")[-1]
+        stem = f"{defect}_{cell}_{date.today():%Y%m%d}_conv_{suffix}"
+        output = args.output_root / f"{stem}.npz"
+        args.output_root.mkdir(parents=True, exist_ok=True)
+        pack_convergence(
+            root, output, ground_state=args.ground_state, defect=defect, cell=cell, method=method, method_key=suffix
+        )
