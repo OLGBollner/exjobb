@@ -9,7 +9,7 @@ from beyblade.runs_index import filter_rows, read_rows, run_dirs
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("-o", "--output", type=Path, help="Output file (or directory for run plots)")
+    parser.add_argument("-o", "--output", type=Path, help="Output file (or directory for run plots); defaults to figures/<kind>/")
     parser.add_argument("--fmt", default="png", help="Image format, e.g. png or pdf")
     parser.add_argument("--dpi", type=int, default=300, help="Image resolution")
     parser.add_argument("--show", action="store_true", help="Show the figure interactively")
@@ -63,7 +63,7 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
 
 
 def _run_convergence(args: argparse.Namespace) -> None:
-    out = _require_output(args)
+    out = args.output or _default_output(args, "convergence", args.npz.stem)
     plot_pert_convergence(
         args.npz,
         output_path=out,
@@ -76,19 +76,26 @@ def _run_convergence(args: argparse.Namespace) -> None:
     )
 
 
-def _require_output(args: argparse.Namespace) -> Path:
-    if args.output is None:
-        raise SystemExit("error: -o/--output is required")
-    return args.output
+def _figures_dir(kind: str) -> Path:
+    return Path("figures") / kind
+
+
+def _default_output(args: argparse.Namespace, kind: str, stem: str) -> Path:
+    """Default output file under figures/<kind>/ when -o is omitted."""
+    p = _figures_dir(kind) / f"{stem}.{args.fmt}"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def _run_coupling(args: argparse.Namespace) -> None:
-    out_dir = _require_output(args)
+    out_dir = args.output or _figures_dir("coupling") / args.run_dir.name
+    out_dir.mkdir(parents=True, exist_ok=True)
     plot_run_coupling(args.run_dir, out_dir, args.fmt, args.dpi, args.show)
 
 
 def _run_rates(args: argparse.Namespace) -> None:
-    out_dir = _require_output(args)
+    out_dir = args.output or _figures_dir("rates") / args.run_dir.name
+    out_dir.mkdir(parents=True, exist_ok=True)
     plot_run_rates(args.run_dir, out_dir, args.fmt, args.dpi, args.show)
 
 
@@ -108,7 +115,8 @@ def _run_t1(args: argparse.Namespace) -> None:
         if not args.inputs:
             raise SystemExit("error: provide npz/run paths, or use --filter to select indexed runs")
         inputs = args.inputs
-    plot_t1(inputs, output_path=_require_output(args), show=args.show, plain_name=args.plain_name)
+    out = args.output or _default_output(args, "t1", "t1")
+    plot_t1(inputs, output_path=out, show=args.show, plain_name=args.plain_name)
 
 
 def _parse_filters(pairs: list[str]) -> list[tuple[str, str]]:
