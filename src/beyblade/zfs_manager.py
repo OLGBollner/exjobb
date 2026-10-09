@@ -160,6 +160,16 @@ class ZFSManager:
             if "approx" in self.calc_method:
                 self.zfs_relaxed *= 1.5
 
+            # Pin every tensor's axis assignment to the relaxed structure: the
+            # relaxed tensor is the reference frame, so near-degenerate
+            # transverse axes (|D_xx| ~ |D_yy|) can never swap labels between
+            # the ground state and a perturbed run (x/y eigenframe flip bug).
+            raw.ground_state_zfs = raw.ground_state_zfs.with_reference(raw.ground_state_zfs.matrix)
+            for entry in getattr(raw, "perturbations", None) or []:
+                if entry is None or entry.zfs_tensor is None:
+                    continue
+                entry.zfs_tensor = entry.zfs_tensor.with_reference(raw.ground_state_zfs.matrix)
+
         # eigen_rotation columns are the ground-state principal-frame eigenvectors,
         # so rotating into that frame is R.T @ tensor @ R (NOT R @ tensor @ R.T).
         eigen_rot = self.eigen_rotation if self.eigen_rotation is not None else np.eye(3)
@@ -396,6 +406,12 @@ class ZFSManager:
         # Ex/Ey ordering convention of the eigenvectors does not affect them;
         # no per-defect/cell-size switch is needed.
 
+        inherit_coefficients = False
+        spectrum = self.spectrum
+        if len(self.treated_modes) < n_modes and spectrum is not None:
+            inherit_coefficients = True
+            print("Degenerate modes inherit coefficients")
+
         for i, item in sorted(self.zfs_tensors.items()):
             if i not in self.treated_modes:
                 continue
@@ -437,8 +453,7 @@ class ZFSManager:
             # The spectrum owns the pairing (strict involution); no frequency guessing.
             # Fill-only: never overwrite a twin's own non-zero coefficients (Ex
             # yields V_pm, Ey yields V_0pm; both are real data on a complete file).
-            spectrum = self.spectrum
-            if len(self.treated_modes) < n_modes and spectrum is not None:
+            if inherit_coefficients:
                 twin = twin_of(spectrum.deg_groups, i)
                 if twin is not None and twin != i:
                     V_0_pm[twin] = np.where(V_0_pm[twin] == 0, V_0_pm[i], V_0_pm[twin])

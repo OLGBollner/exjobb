@@ -64,6 +64,7 @@ class ZFSTensor:
 
     matrix: np.ndarray  # Shape (3, 3)
     unit: str = "MHz"
+    reference: Optional[np.ndarray] = None  # reference tensor (3x3) pinning the x/y axis assignment
 
     def __post_init__(self):
         self.matrix = np.asarray(self.matrix, dtype=float)
@@ -75,10 +76,31 @@ class ZFSTensor:
         tr = np.trace(self.matrix) / 3.0
         return self.matrix - tr * np.eye(3)
 
-    def principal_components(self) -> tuple[float, float, float, np.ndarray]:
+    def with_reference(self, reference: np.ndarray) -> "ZFSTensor":
+        """Return a copy whose axis assignment is pinned to ``reference``.
+
+        ``reference`` is a 3x3 tensor (or principal-frame matrix) in the same
+        orientation as ``self.matrix``: the returned tensor's principal axes are
+        matched to those of the reference by eigenvector overlap, so that
+        near-degenerate transverse axes (|D_xx| ~ |D_yy|) never swap labels
+        between runs. Pass the relaxed/Q=0 tensor.
         """
-        Calculates principal values (D_xx, D_yy, D_zz) and eigenvectors
-        following standard EPR convention: |D_zz| >= |D_yy| >= |D_xx| (with trace=0).
+        return ZFSTensor(matrix=self.matrix.copy(), unit=self.unit, reference=np.asarray(reference, dtype=float).copy())
+
+    def principal_components(self, reference: Optional[np.ndarray] = None) -> tuple[float, float, float, np.ndarray]:
+        """
+        Calculates principal values (D_xx, D_yy, D_zz) and eigenvectors.
+
+        Default convention (no reference): standard EPR convention,
+        |D_zz| >= |D_yy| >= |D_xx| (with trace=0).
+
+        If a reference tensor is given (explicitly or via ``self.reference``,
+        see :meth:`with_reference`), the axes are instead matched to the
+        reference's principal axes by largest eigenvector overlap, with signs
+        aligned so that each axis has positive overlap with its reference
+        partner. This keeps the x/y assignment continuous across runs whose
+        transverse splitting |D_xx| - |D_yy| is near zero, where a magnitude
+        sort can silently swap x and y (and flip the sign of E).
 
         Returns:
             (D_xx, D_yy, D_zz, eigenvectors)
@@ -86,16 +108,38 @@ class ZFSTensor:
         D_tl = self.traceless()
         evals, evecs = np.linalg.eigh(D_tl)
 
-        # Sort by absolute magnitude so that |D_zz| is largest
-        abs_order = np.argsort(np.abs(evals))  # [smallest, middle, largest]
-        ix, iy, iz = abs_order[0], abs_order[1], abs_order[2]
+        ref = reference if reference is not None else self.reference
+        if ref is not None:
+            ref_mat = np.asarray(ref, dtype=float)
+            if ref_mat.shape != (3, 3):
+                raise ValueError(f"reference must be a 3x3 tensor, got shape {ref_mat.shape}")
+            # Reference frame: use its own principal axes (sorted convention is fine
+            # here; overlap matching removes any ambiguity).
+            _, _, _, R_ref = ZFSTensor(matrix=ref_mat).principal_components()
+            # Greedy match each reference axis to the closest eigenvector.
+            # Eigenvectors are orthonormal on both sides, so greedy is exact.
+            G = np.abs(R_ref.T @ evecs)  # [ref_axis, eigvec]
+            order = []
+            for j in range(3):
+                k = int(np.argmax(G[j]))
+                order.append(k)
+                G[:, k] = -1.0  # claim it
+            ix, iy, iz = order
+        else:
+            # Sort by absolute magnitude so that |D_zz| is largest
+            abs_order = np.argsort(np.abs(evals))  # [smallest, middle, largest]
+            ix, iy, iz = abs_order[0], abs_order[1], abs_order[2]
 
         D_xx_val = evals[ix]
         D_yy_val = evals[iy]
         D_zz_val = evals[iz]
 
-        # Ensure right-handed coordinate system for eigenvectors
         R = np.column_stack([evecs[:, ix], evecs[:, iy], evecs[:, iz]])
+        if ref is not None:
+            # Sign-align each axis with its reference partner (dot > 0).
+            dots = np.diag(R_ref.T @ R)
+            R = R @ np.diag(np.where(dots < 0, -1.0, 1.0))
+        # Ensure right-handed coordinate system for eigenvectors
         if np.linalg.det(R) < 0:
             R[:, 0] = -R[:, 0]
 
@@ -140,15 +184,18 @@ class ZFSTensor:
     def to_unit(self, target_unit: str) -> ZFSTensor:
         """Convert tensor matrix into target energy unit using convert_energy."""
         if self.unit == target_unit:
-            return ZFSTensor(matrix=self.matrix.copy(), unit=self.unit)
+            return ZFSTensor(matrix=self.matrix.copy(), unit=self.unit, reference=self.reference)
         out_mat = convert_energy(self.matrix, self.unit, target_unit)
-        return ZFSTensor(matrix=out_mat, unit=target_unit)
+        return ZFSTensor(matrix=out_mat, unit=target_unit, reference=self.reference)
 
     def rotate(self, rotation_matrix: np.ndarray) -> ZFSTensor:
         """Rotate tensor: D' = R @ D @ R.T"""
         R = np.asarray(rotation_matrix, dtype=float)
         rotated_mat = R @ self.matrix @ R.T
-        return ZFSTensor(matrix=rotated_mat, unit=self.unit)
+        # Rotate the pinned reference frame along with the tensor, so the
+        # axis assignment stays consistent with the tensor's new orientation.
+        ref = None if self.reference is None else R @ np.asarray(self.reference, dtype=float) @ R.T
+        return ZFSTensor(matrix=rotated_mat, unit=self.unit, reference=ref)
 
 
 def check_original_indices(

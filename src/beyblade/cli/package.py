@@ -1,15 +1,34 @@
 """CLI command for packaging raw ZFS simulation data into a single .npz."""
 
 import argparse
+import re
 import warnings
 from datetime import date
 from pathlib import Path
 
+from beyblade.pack_convergence import pack_convergence
 from beyblade.parsers import parse_zfs_simulation_dataset
 
 
 def build_package_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--defect-folder", type=Path, required=True, help="Root folder for one defect, e.g. ../NV_512.")
+    parser.add_argument(
+        "--defect-folder",
+        type=Path,
+        required=True,
+        help="Root folder for one defect, e.g. ../NV_512. With --conv: the folder containing runs/.",
+    )
+    parser.add_argument(
+        "--conv",
+        action="store_true",
+        help="Package convergence runs (runs/<mode>_pert_<p>/OUTCAR) into one npz instead of raw simulation folders.",
+    )
+    parser.add_argument(
+        "--ground-state",
+        type=Path,
+        default=None,
+        metavar="OUTCAR",
+        help="With --conv: ground-state OUTCAR; its ZFS tensor is stored as 'd0' (the Q=0 point) in the npz.",
+    )
     parser.add_argument(
         "--orders",
         type=str,
@@ -38,14 +57,18 @@ _ORDER_NUM = {"first": 1, "second": 2}
 
 
 def _run(args: argparse.Namespace) -> None:
+    defect_folder = args.defect_folder.resolve()
+    if not defect_folder.is_dir():
+        raise SystemExit(f"Defect folder not found: {defect_folder}")
+
+    if getattr(args, "conv", False):
+        _run_conv(args, defect_folder)
+        return
+
     orders = [o.strip().lower() for o in args.orders.split(",") if o.strip()]
     unknown = [o for o in orders if o not in _ORDER_DIRS]
     if unknown:
         raise SystemExit(f"Unknown order(s): {', '.join(unknown)} (expected 'first' and/or 'second')")
-
-    defect_folder = args.defect_folder.resolve()
-    if not defect_folder.is_dir():
-        raise SystemExit(f"Defect folder not found: {defect_folder}")
 
     print(f"Defect folder: {defect_folder}")
     print(f"Orders: {', '.join(orders)} | method: {args.method}")
@@ -75,7 +98,6 @@ def _run(args: argparse.Namespace) -> None:
         print(f"  {o} order: {len(datasets[o])} perturbation(s) found in {defect_folder / _ORDER_DIRS[o]}")
     pert_scales = sorted(set().union(*datasets.values()))
     print(f"Perturbation scales to package: {pert_scales}")
-
     for pert_scale in pert_scales:
         raw = None
         for o in orders:
@@ -89,3 +111,25 @@ def _run(args: argparse.Namespace) -> None:
         pert_folder.mkdir(parents=True, exist_ok=True)
         save_path = raw.save(pert_folder / raw._default_name())
         print(f"Saved raw data in: {save_path}")
+
+
+def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
+    for opt in ("orders", "pert", "method"):
+        if getattr(args, opt) != {"orders": "first,second", "pert": None, "method": "all"}[opt]:
+            print(f"warning: --{opt.replace('_', '-')} is ignored with --conv")
+    conv_roots = sorted(p for p in defect_folder.glob("convergence*") if p.is_dir())
+    if not conv_roots:
+        raise SystemExit(f"No convergence* folders found under {defect_folder}")
+    method_map = {"all": "all", "occup": "approx"}
+    for root in conv_roots:
+        print(f"Convergence folder: {root}")
+        suffix = re.sub(r"^convergence[._-]*", "", root.name).lstrip("_-") or "conv"
+        method = next((v for k, v in method_map.items() if k in suffix), None)
+        defect = defect_folder.name.split("_")[0]
+        cell = defect_folder.name.split("_")[-1]
+        stem = f"{defect}_{cell}_{date.today():%Y%m%d}_conv_{suffix}"
+        output = args.output_root / f"{stem}.npz"
+        args.output_root.mkdir(parents=True, exist_ok=True)
+        pack_convergence(
+            root, output, ground_state=args.ground_state, defect=defect, cell=cell, method=method, method_key=suffix
+        )
