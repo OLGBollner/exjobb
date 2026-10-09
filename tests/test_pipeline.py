@@ -117,7 +117,7 @@ def test_run_full_pipeline_from_coupling_data(tmp_path, dummy_coupling_file):
 def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
     """
     Verifies that passing a single raw_zfs_file containing both 1D and 2D data:
-    1. Preserves order=2 (or detects it automatically) and uses _2d_ in run_dir name.
+    1. Preserves order=2 (or detects it automatically) and places the run under a pert_ folder.
     2. Computes both 1D and 2D couplings via process_both_orders.
     3. Preserves calc_method='all_bands' instead of resetting to None.
     """
@@ -187,7 +187,7 @@ def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
         temperatures=[10.0],
     )
     run_dir = res["run_dir"]
-    assert "_2d_" in run_dir.name
+    assert "pert_0.025" in str(run_dir)
     coupling_file = run_dir / "spin_phonon_coupling.npz"
     assert coupling_file.exists()
     cdata = SpinPhononCouplingData.load(coupling_file)
@@ -206,7 +206,7 @@ def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
         temperatures=[10.0],
     )
     run_dir2 = res2["run_dir"]
-    assert "_2d_" in run_dir2.name
+    assert "pert_0.025" in str(run_dir2)
     cdata2 = SpinPhononCouplingData.load(run_dir2 / "spin_phonon_coupling.npz")
     assert cdata2.has_second_order
     assert cdata2.V2_0_0 is not None
@@ -266,7 +266,7 @@ def test_pipeline_with_multiple_sim_folders(tmp_path):
         temperatures=[10.0],
     )
     run_dir = res["run_dir"]
-    assert "_2d_" in run_dir.name
+    assert "pert_0.1" in str(run_dir)
     raw_saved = RawZFSData.load(run_dir / "raw_zfs_data.npz")
     assert 0 in raw_saved.first_order
     assert 1 in raw_saved.first_order

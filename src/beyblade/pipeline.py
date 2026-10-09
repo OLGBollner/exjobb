@@ -21,8 +21,16 @@ from beyblade.plotter import (
     plot_transition_rates_stacked,
 )
 from beyblade.relaxation_dynamics import RelaxationDynamics
+from beyblade.runs_index import append_row, index_path
 from beyblade.transition_rate import TransitionRate
 from beyblade.zfs_manager import ZFSManager
+
+
+def _pert_dir_name(pert_scale: float | None) -> str:
+    """Folder name for a perturbation scale, e.g. 'pert_1.0' or 'pert_none'."""
+    if pert_scale is None:
+        return "pert_none"
+    return f"pert_{pert_scale:g}"
 
 
 def get_unique_run_dir(
@@ -31,15 +39,19 @@ def get_unique_run_dir(
     cell_size: str | int = "",
     calc_method: str = "all_bands",
     order: int = 1,
+    pert_scale: float | None = None,
     run_name: str | None = None,
 ) -> Path:
     """
     Creates a unique run directory so prior results are never overwritten.
+
+    Layout: <output_root>/<defect>_<cell>/<method>/<pert>_<scale>/<YYYYmmdd_HHMMSS>
+    With --run-name, <output_root>/<run_name>[_N] is used instead.
     """
     base = Path(output_root)
-    base.mkdir(parents=True, exist_ok=True)
 
     if run_name:
+        base.mkdir(parents=True, exist_ok=True)
         candidate = base / run_name
         if not candidate.exists():
             candidate.mkdir(parents=True, exist_ok=True)
@@ -52,16 +64,18 @@ def get_unique_run_dir(
         return final_dir
 
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dir_name = f"{defect}_{cell_size}_{calc_method}_{order}d_{now_str}"
-    candidate = base / dir_name
-    if not candidate.exists():
-        candidate.mkdir(parents=True, exist_ok=True)
-        return candidate
+    leaf = (
+        base / f"{defect}_{cell_size}" / calc_method
+        / _pert_dir_name(pert_scale) / now_str
+    )
+    if not leaf.exists():
+        leaf.mkdir(parents=True, exist_ok=True)
+        return leaf
 
     idx = 1
-    while (base / f"{dir_name}_{idx}").exists():
+    while (leaf.parent / f"{now_str}_{idx}").exists():
         idx += 1
-    final_dir = base / f"{dir_name}_{idx}"
+    final_dir = leaf.parent / f"{now_str}_{idx}"
     final_dir.mkdir(parents=True, exist_ok=True)
     return final_dir
 
@@ -254,12 +268,18 @@ def run_full_pipeline(
             order = 1
 
     # ── 3. Create Unique Run Folder ──────────────────────────────────────────
+    pert_eff = (
+        pert_scale
+        if pert_scale is not None
+        else (raw_data.pert_scale if raw_data else coupling_data.pert_scale)
+    )
     run_dir = get_unique_run_dir(
         output_root=output_root,
         defect=str(defect),
         cell_size=cell_size,
         calc_method=calc_method,
         order=order,
+        pert_scale=pert_eff,
         run_name=run_name,
     )
     print("\n========================================================")
@@ -453,6 +473,29 @@ def run_full_pipeline(
     info_path = run_dir / "run_info.json"
     with open(info_path, "w") as f:
         json.dump(run_info, f, indent=2)
+
+    # ── 8b. Runs Index ────────────────────────────────────────────────────────
+    dims: list[int] = []
+    if raw_data is not None:
+        if len(raw_data.second_order) > 0:
+            dims.append(2)
+        if len(raw_data.first_order) > 0:
+            dims.append(1)
+    append_row(
+        output_root,
+        defect=str(defect),
+        cell=cell_size,
+        method=calc_method,
+        order=order,
+        pert=pert_eff,
+        n_dims=dims,
+        temp_min=float(np.min(valid_temps_arr)),
+        temp_max=float(np.max(valid_temps_arr)),
+        n_temps=len(valid_temps_arr),
+        npz_files=[p.name for p in sorted(run_dir.glob("*.npz"))],
+        run_dir=run_dir,
+    )
+    print(f"      Indexed run in {index_path(output_root)}")
 
     # ── 9. Optional Plotting ─────────────────────────────────────────────────
     figures_saved = []
