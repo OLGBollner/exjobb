@@ -1,10 +1,9 @@
 """CLI subcommands for the plotting functions."""
 
 import argparse
-import re
 from pathlib import Path
 
-from beyblade.convergence import plot_pert_convergence
+from beyblade.convergence import plot_pert_convergence, read_conv_metadata
 from beyblade.plotter import plot_run_coupling, plot_run_rates, plot_t1
 from beyblade.runs_index import filter_rows, read_rows, run_dirs
 
@@ -64,7 +63,8 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
 
 
 def _run_convergence(args: argparse.Namespace) -> None:
-    stem = re.sub(r"_?raw_zfs_data_.*$", "", args.npz.stem) or args.npz.stem
+    meta = read_conv_metadata(args.npz)
+    stem = "_".join(str(meta[k]) for k in ("defect", "cell") if meta.get(k) is not None) or args.npz.stem
     out = args.output or _default_output(args, "convergence", stem)
     plot_pert_convergence(
         args.npz,

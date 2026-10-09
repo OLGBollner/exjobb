@@ -23,6 +23,7 @@ from __future__ import annotations
 
 
 
+import json
 from pathlib import Path
 import sys
 
@@ -103,6 +104,17 @@ def one_sided_d2(p: np.ndarray, v: np.ndarray) -> float | None:
     return 2 * (v3[0] / (h1 * (h1 + h2)) - v3[1] / (h1 * h2) + v3[2] / (h2 * (h1 + h2)))
 
 
+
+
+def read_conv_metadata(npz_path: Path) -> dict:
+    """Return the JSON 'metadata' key of a packed convergence npz ({} if absent)."""
+    data = np.load(npz_path)
+    if "metadata" not in data:
+        return {}
+    try:
+        return json.loads(str(data["metadata"]))
+    except (ValueError, TypeError):
+        return {}
 
 
 def plot_pert_convergence(
