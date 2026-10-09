@@ -250,7 +250,7 @@ def plot_pert_convergence(
             axes[1, 0].axhline(np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
             axes[1, 0].axhline(-np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
             axes[0, 0].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray", label="Tr D")
-            axes[0, 1].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray")
+            axes[0, 1].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray", label="Tr D")
             axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=rf"$D_{{\mathrm{{{PC_NAMES[k]}}}}}$ (b={b:.4g}, 2c={2 * qc:.4g})")
             axes[0, 1].plot(p_use[sgn], y_q[sgn], "-", alpha=0.4, color=axes[0, 1].lines[-1].get_color())
             axes[1, 1].plot(p_use[sgn], qres[sgn], "o-")
