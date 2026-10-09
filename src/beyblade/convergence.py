@@ -241,6 +241,7 @@ def plot_pert_convergence(
 
         ncols = 2
         fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
+        trace_labeled = False
         for k in range(3):
             a, b, y_lin, res = linear_fit(p_use, vals[:, k])
             qa, qb, qc, y_q, qres = quad_fit(p_use, vals[:, k])
@@ -249,7 +250,8 @@ def plot_pert_convergence(
             axes[1, 0].plot(p_use[sgn], res[sgn], "o-")
             axes[1, 0].axhline(np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
             axes[1, 0].axhline(-np.max(np.abs(res)), ls="--", lw=0.8, color="grey")
-            trace_label = "Tr D" if sgn == 0 else None
+            trace_label = "Tr D" if not trace_labeled else None
+            trace_labeled = True
             axes[0, 0].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray", label=trace_label)
             axes[0, 1].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray", label=trace_label)
             axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=rf"$D_{{\mathrm{{{PC_NAMES[k]}}}}}$ (b={b:.4g}, 2c={2 * qc:.4g})")
