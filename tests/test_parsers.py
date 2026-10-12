@@ -422,8 +422,17 @@ def test_combine_flag_mismatch_raises(tmp_path):
     corrected = RawZFSData.load(out)
     out2 = tmp_path / "corrected.npz"
     corrected.save(out2)
+    # make `out` a legacy raw file (flag False, unscaled tensors)
+    RawZFSData.load(out, apply_corrections=False).save(out)
+    # give the corrected file a distinct tensor so only the flag check fails
+    corrected = RawZFSData.load(out2)
+    key = next(iter(corrected.first_order))
+    corrected.ground_state_zfs["tensor"] = corrected.ground_state_zfs["tensor"] * 2
+    corrected.save(out2)
+    legacy = RawZFSData.load(out, apply_corrections=False)
+    corrected = RawZFSData.load(out2)
     with pytest.raises(ValueError, match="spin_correction"):
-        RawZFSData.load([out, out2])
+        legacy + corrected
 
 
 def test_combine_all_corrected_flag_is_true(tmp_path):
