@@ -20,7 +20,8 @@ from beyblade.constants import CONSTANTS
 from beyblade.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor
 
 ZFS_REGEX = re.compile(
-    r"Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*D_xx\s+D_yy\s+D_zz\s+D_xy\s+D_xz\s+D_yz\s*-+\s*([\s\d\.\-]+?)(?=\s*-{3,})",
+    r"Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*"
+    r"D_xx\s+D_yy\s+D_zz\s+D_xy\s+D_xz\s+D_yz\s*-+\s*([\s\d\.\-]+?)(?=\s*-{3,})",
     re.MULTILINE | re.DOTALL,
 )
 

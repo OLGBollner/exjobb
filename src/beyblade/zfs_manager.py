@@ -582,7 +582,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.calc_method}_{self.pert_scale}_.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_"
+            f"{self.calc_method}_{self.pert_scale}_.npz"
         )
 
         save_path = self.save_data(
@@ -621,7 +622,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_{self.calc_method}_{self.pert_scale}_.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_"
+            f"{self.calc_method}_{self.pert_scale}_.npz"
         )
         save_path = self.save_data(
             save_name,
@@ -676,7 +678,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coupling_{self.calc_method}_{self.pert_scale}_both.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coupling_"
+            f"{self.calc_method}_{self.pert_scale}_both.npz"
         )
         save_path = self.save_data(
             save_name,

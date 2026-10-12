@@ -254,7 +254,8 @@ def plot_pert_convergence(
             trace_labeled = True
             axes[0, 0].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray", label=trace_label)
             axes[0, 1].plot(p_use[sgn], trace[sgn], "-", lw=0.8, color="gray", label=trace_label)
-            axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=rf"$D_{{\mathrm{{{PC_NAMES[k]}}}}}$ (b={b:.4g}, 2c={2 * qc:.4g})")
+            pc_label = rf"$D_{{\mathrm{{{PC_NAMES[k]}}}}}$ (b={b:.4g}, 2c={2 * qc:.4g})"
+            axes[0, 1].plot(p_use[sgn], vals[sgn, k], "o", label=pc_label)
             axes[0, 1].plot(p_use[sgn], y_q[sgn], "-", alpha=0.4, color=axes[0, 1].lines[-1].get_color())
             axes[1, 1].plot(p_use[sgn], qres[sgn], "o-")
             axes[1, 1].axhline(np.max(np.abs(qres)), ls="--", lw=0.8, color="grey")
@@ -278,7 +279,10 @@ def plot_pert_convergence(
                 msg += f"\n    d2D/dQ2: regression {d2:.4g}, one-sided fwd {fwd_txt} MHz/pert^2{rel}"
                 qreq = q_needed(qc, np.max(np.abs(res)))
                 if qreq is not None:
-                    msg += f"\n    Q needed for quad term at SNR 3: |Q| ~ {qreq:.3g} (current max |Q|: {np.max(np.abs(p_use)):.3g})"
+                    msg += (
+                        f"\n    Q needed for quad term at SNR 3: |Q| ~ {qreq:.3g} "
+                        f"(current max |Q|: {np.max(np.abs(p_use)):.3g})"
+                    )
                 else:
                     msg += "\n    Q needed for quad term at SNR 3: n/a (c negligible vs noise)"
                 row += [f"{d2:.6g}", fwd_txt]

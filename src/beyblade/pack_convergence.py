@@ -138,8 +138,14 @@ def build_parser(parser: argparse.ArgumentParser) -> None:
         metavar="OUTCAR",
         help="ground-state OUTCAR; its ZFS tensor is stored as 'd0' (the Q=0 point) in the npz",
     )
-    parser.add_argument("--defect", type=str, default=None, help="defect name for the metadata key (default: inferred from the run-root name)")
-    parser.add_argument("--cell", type=str, default=None, help="cell size for the metadata key (default: inferred from the run-root name)")
+    parser.add_argument(
+        "--defect", type=str, default=None,
+        help="defect name for the metadata key (default: inferred from the run-root name)",
+    )
+    parser.add_argument(
+        "--cell", type=str, default=None,
+        help="cell size for the metadata key (default: inferred from the run-root name)",
+    )
 
 
 def run(args: argparse.Namespace) -> int:

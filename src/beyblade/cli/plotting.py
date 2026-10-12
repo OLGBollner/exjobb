@@ -9,7 +9,9 @@ from beyblade.runs_index import filter_rows, read_rows, run_dirs
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("-o", "--output", type=Path, help="Output file (or directory for run plots); defaults to figures/<kind>/")
+    parser.add_argument(
+        "-o", "--output", type=Path, help="Output file (or directory for run plots); defaults to figures/<kind>/"
+    )
     parser.add_argument("--fmt", default="png", help="Image format, e.g. png or pdf")
     parser.add_argument("--dpi", type=int, default=300, help="Image resolution")
     parser.add_argument("--show", action="store_true", help="Show the figure interactively")
@@ -31,7 +33,8 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
     t1.add_argument("inputs", nargs="*", type=Path)
     t1.add_argument("-r", "--output-root", default="runs", help="Root folder containing runs_index.csv (default: runs)")
     t1.add_argument("--filter", action="append", metavar="FIELD=VALUE",
-                    help="Resolve runs from the index, e.g. --filter method=all_bands,pert=1.0. Repeatable; comma-separated values allowed.")
+                    help="Resolve runs from the index, e.g. --filter method=all_bands,pert=1.0. "
+                         "Repeatable; comma-separated values allowed.")
     t1.add_argument("--latest", action="store_true", help="With --filter, use only the most recent matching run")
     t1.add_argument("--plain-name", action="store_true", help="Do not append metadata to the output filename")
     _add_output_args(t1)
@@ -71,7 +74,8 @@ def _run_convergence(args: argparse.Namespace) -> None:
     if not stem:
         if not args.output:
             raise SystemExit(
-                f"error: {args.npz} has no defect/cell metadata; repack it with 'beyblade package --conv' or pass -o explicitly"
+                f"error: {args.npz} has no defect/cell metadata; "
+                "repack it with 'beyblade package --conv' or pass -o explicitly"
             )
         stem = args.npz.stem
     out = args.output or _default_output(args, "convergence", stem)
