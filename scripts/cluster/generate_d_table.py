@@ -166,8 +166,14 @@ def render_tex(rows: list[dict], unit: str) -> str:
         defect = row["defect"]
         if row["configuration"]:
             defect = f"{defect}$_\\mathrm{{{row['configuration']}}}$"
-        corrected = f"{row['corrected']:.3f}" if row["corrected"] is not None else "---"
-        contaminated = f"{row['contaminated']:.3f}" if row["contaminated"] is not None else "---"
+        superscript = rf"$^\mathrm{{{row['cell']}}}$" if row["cell"] else ""
+        corrected = (
+            f"{row['corrected']:.3f}{superscript}" if row["corrected"] is not None else "---"
+        )
+        contaminated = (
+            f"{row['contaminated']:.3f}{superscript}"
+            if row["contaminated"] is not None else "---"
+        )
         lines.append(
             f"    {defect} & {row['configuration'] or '---'} & --- & {corrected} & {contaminated} \\\\"
         )
