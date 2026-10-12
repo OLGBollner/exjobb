@@ -36,6 +36,12 @@ def infer_orientation(path: Path) -> str:
     return match.group(1).lower() if match else ""
 
 
+def infer_cell(path: Path) -> str:
+    """Pull the supercell size (e.g. '512' in NV_512_k) out of a path, or '' if absent."""
+    match = re.search(r"(?<![\dA-Za-z])(1?\d{2,3})(?![\dA-Za-z])", "/".join(path.parts))
+    return match.group(1) if match else ""
+
+
 def find_npz(folder: Path) -> list[Path]:
     return sorted(folder.rglob("*_raw_zfs_data_*.npz"))
 
@@ -76,6 +82,7 @@ def collect_rows(paths: list[Path]) -> list[dict]:
                 "defect": data.defect,
                 "configuration": orientation,
                 "column": column,
+                "cell": infer_cell(npz_path.parent) or infer_cell(path),
                 "d_mhz": zfs.to_unit("MHz").D,
                 "source": npz_path,
             })
@@ -120,6 +127,7 @@ def collect_outcar_rows(folder: Path) -> list[dict]:
             "defect": defect,
             "configuration": orientation,
             "column": column,
+            "cell": infer_cell(defect_root),
             "d_mhz": zfs.to_unit("MHz").D,
             "source": outcar,
         })
@@ -134,6 +142,7 @@ def merge_rows(rows: list[dict]) -> list[dict]:
         entry = merged.setdefault(key, {
             "defect": row["defect"],
             "configuration": row["configuration"],
+            "cell": row["cell"],
             "corrected": None,
             "contaminated": None,
         })
@@ -166,7 +175,7 @@ def render_tex(rows: list[dict], unit: str) -> str:
         r"    \bottomrule",
         r"  \end{tabular}",
         rf"  \caption{{Zero-field splitting parameter $D$ ({unit}). "
-        r"Corrected: defect-band approximation (ZFS\_occup); contaminated: all-electron bands (ZFS\_hyp).}",
+        r"Corrected: defect-band approximation (ZFS\_occup); contaminated: all-electron bands (ZFS\_hyp). Superscripts denote the supercell size.}",
         r"  \label{tab:zfs_d}",
         r"\end{table}",
     ]
