@@ -868,8 +868,9 @@ def _decode_order_dict(value: Any, data: Any) -> dict:
 
 
 # Factor 3/2 scaling applied to defect_band_approx (ZFS_occup) tensors: the
-# defect-band approximation overestimates the ZFS splitting; raw .npz files always
-# store UNSCALED tensors and RawZFSData.load applies this factor once on load.
+# defect-band approximation overestimates the ZFS splitting. The parser applies
+# this factor at intake and stores spin_correction_applied=True; legacy npz
+# files (unscaled, flag=False) are scaled by RawZFSData.load once on load.
 SPIN_CORRECTION_SCALE = 1.5
 
 
@@ -877,7 +878,8 @@ def _scale_correction_fields(fields: dict) -> dict:
     """Returns a copy of RawZFSData constructor kwargs with approx tensors scaled by 3/2.
 
     Shared by RawZFSData.load (per-file, before merging) and _apply_spin_correction,
-    so both paths scale identically. Mutates PerturbationEntry objects in place.
+    so both paths scale identically. NOTE: PerturbationEntry objects inside the
+    kwargs are mutated in place — pass copies if the caller must keep originals.
     """
     out = dict(fields)
     gs = out.get("ground_state_zfs")
@@ -1006,9 +1008,11 @@ class RawZFSData:
         # 3/2 correction, mark the combination as corrected (see _apply_spin_correction).
         merged_correction = self.spin_correction_applied or other.spin_correction_applied
         if self.spin_correction_applied != other.spin_correction_applied:
-            print(
-                "warning: combining datasets with inconsistent spin-correction flags; "
-                "merged data is marked as corrected — verify the tensors are consistent."
+            raise ValueError(
+                "Cannot combine datasets with inconsistent spin-correction flags: "
+                "one part is corrected (x3/2) and the other is not. Scaling the "
+                "merged tensors would silently mix corrected and uncorrected values. "
+                "Correct the raw dataset first (RawZFSData.load with apply_corrections=True)."
             )
 
         merged_metadata = dict(self.metadata)
@@ -1214,15 +1218,39 @@ class RawZFSData:
         raw_data = [np.load(str(p), allow_pickle=True) for p in paths]
         warn_unknown_keys(raw_data[0].files, cls.SCHEMA)
 
-        base = _fields_from_npz(raw_data[0], cls, cls.SCHEMA)
+        # Scale EACH file before merging, based on that file's own method and
+        # flag. Scaling the merged object once would mis-handle mixed inputs:
+        # a corrected file could be scaled again, an uncorrected one missed.
+        def _per_file(npz: np.lib.npyio.NpzFile) -> tuple[dict, bool]:
+            fields = _fields_from_npz(npz, cls, cls.SCHEMA, strict=False)
+            if fields.get("spin_correction_applied"):
+                fields["spin_correction_applied"] = True
+                return fields, False
+            fields["spin_correction_applied"] = False
+            if not apply_corrections or _normalize_calc_method(fields.get("calc_method")) != "defect_band_approx":
+                return fields, False
+            scaled = _scale_correction_fields(
+                {
+                    "ground_state_zfs": fields.get("ground_state_zfs"),
+                    "first_order": fields.get("first_order"),
+                    "second_order": fields.get("second_order"),
+                }
+            )
+            fields.update(scaled)
+            fields["spin_correction_applied"] = True
+            return fields, True
+
+        scaled_pairs = [_per_file(d) for d in raw_data]
+        scaled_fields = [f for f, _ in scaled_pairs]
+
+        base = scaled_fields[0]
         first_order = dict(base.get("first_order") or {})
         second_order = dict(base.get("second_order") or {})
 
-        for data in raw_data[1:]:
-            kw = _fields_from_npz(data, cls, cls.SCHEMA, strict=False)
-            for k, v in (kw.get("first_order") or {}).items():
+        for fields in scaled_fields[1:]:
+            for k, v in (fields.get("first_order") or {}).items():
                 first_order.setdefault(k, v)
-            for k, v in (kw.get("second_order") or {}).items():
+            for k, v in (fields.get("second_order") or {}).items():
                 second_order.setdefault(k, v)
 
         order = base.get("order")
@@ -1236,23 +1264,26 @@ class RawZFSData:
             cell_size=base["cell_size"],
             pert_scale=base["pert_scale"],
             calc_method=base.get("calc_method"),
-            spin_correction_applied=bool(base.get("spin_correction_applied", False)),
+            spin_correction_applied=any(f.get("spin_correction_applied") for f in scaled_fields),
             order=order,
             ground_state_zfs=base.get("ground_state_zfs"),
             eigen_rotation=base.get("eigen_rotation"),
             first_order=first_order,
             second_order=second_order,
         )
-        if apply_corrections:
-            obj._apply_spin_correction()
+        for p, (_, scaled_now) in zip(paths, scaled_pairs):
+            if apply_corrections and scaled_now:
+                print(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE:g} (x3/2) [{p.name}]")
         return obj.to_unit("J")
 
     def _apply_spin_correction(self) -> None:
         """Scales defect_band_approx tensors by 3/2 exactly once.
 
-        Raw .npz files always store unscaled tensors. Files written after the
-        correction moved into the loader carry spin_correction_applied=True and
-        are skipped. all_bands data is never scaled.
+        npz files written before the correction moved into the loader/parser
+        store unscaled tensors and carry spin_correction_applied=False; they
+        are scaled here. Files written after carry the flag=True and are
+        skipped (the parser applies the correction at intake). all_bands
+        data is never scaled.
         """
         if self.spin_correction_applied:
             return

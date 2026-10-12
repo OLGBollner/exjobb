@@ -581,7 +581,6 @@ def parse_zfs_simulation_dataset(
     # data sees corrected tensors, matching RawZFSData.load for npz files.
     if _normalize_calc_method(data.calc_method) == "defect_band_approx":
         data._apply_spin_correction()
-        data.spin_correction_applied = True
     return data
 
 

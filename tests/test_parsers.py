@@ -369,6 +369,18 @@ class TestSpinCorrectionOnLoad:
         reloaded = RawZFSData.load(out2)
         assert reloaded.ground_state_zfs.matrix[2, 2] == pytest.approx(3000.0e6 * h)
 
+    def test_load_with_mixed_flags_scales_only_uncorrected_files(self, tmp_path):
+        legacy = self._save(self._make_raw("defect_band_approx"), tmp_path)
+        # Build an already-corrected companion file by round-tripping through load
+        corrected = tmp_path / "already_corrected.npz"
+        RawZFSData.load(legacy).save(corrected)
+
+        h = 6.62607015e-34
+        merged = RawZFSData.load([legacy, corrected])
+        assert merged.spin_correction_applied is True
+        # Legacy file scaled exactly once; corrected file untouched
+        assert merged.ground_state_zfs.matrix[2, 2] == pytest.approx(3000.0e6 * h)
+
     def test_apply_corrections_false_leaves_raw_tensors(self, tmp_path):
         out = self._save(self._make_raw("defect_band_approx"), tmp_path)
         raw = RawZFSData.load(out, apply_corrections=False)

@@ -147,5 +147,12 @@ def run_dirs(rows: Iterable[dict], output_root: str | Path) -> list[Path]:
     resolved = []
     for r in rows:
         p = Path(r["run_dir"])
-        resolved.append(p if p.is_absolute() else root / p)
+        if p.is_absolute():
+            resolved.append(p)
+            continue
+        joined = root / p
+        # Legacy rows written before the root-relative convention may carry
+        # paths that no longer resolve under a moved output_root; fall back
+        # to the stored value as-is when the joined path does not exist.
+        resolved.append(joined if joined.exists() else p)
     return resolved
