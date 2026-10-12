@@ -1,11 +1,11 @@
-"""Tests for beyblade.vasp.structures.compare_displacement."""
+"""Tests for spinlabs.vasp.structures.compare_displacement."""
 
 import numpy as np
 import pytest
 from pymatgen.core import Lattice, Structure
 from pymatgen.io.vasp.inputs import Poscar
 
-from beyblade.vasp import compare_displacement, compare_displacement_cli
+from spinlabs.vasp import compare_displacement, compare_displacement_cli
 
 
 @pytest.fixture

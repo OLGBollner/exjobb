@@ -7,8 +7,8 @@ from typing import Any, Dict, Optional, Sequence, Union
 import numpy as np
 from scipy import constants as Cn
 
-from beyblade.constants import CONSTANTS
-from beyblade.serialization import FieldSpec, SchemaError, load_npz, save_npz, _fields_from_npz, warn_unknown_keys
+from spinlabs.constants import CONSTANTS
+from spinlabs.serialization import FieldSpec, SchemaError, load_npz, save_npz, _fields_from_npz, warn_unknown_keys
 
 
 class EnergyUnit(str, Enum):
@@ -336,7 +336,7 @@ class PhononSpectrum:
         return completeness
 
     def build_pair_ids(self, tol_mev: float = 0.05) -> np.ndarray:
-        """Deprecated: use beyblade.symmetry.classify_and_pair (deg_groups)."""
+        """Deprecated: use spinlabs.symmetry.classify_and_pair (deg_groups)."""
         """
         Builds the symmetric pair_ids mapping between degenerate E-mode partners.
 
@@ -537,7 +537,7 @@ class PhononSpectrum:
             else:
                 # Generic fallback: self-contained point-defect localizer
                 # (local import avoids the structures -> models cycle).
-                from beyblade.vasp.structures import detect_defect_position
+                from spinlabs.vasp.structures import detect_defect_position
 
                 detected = detect_defect_position(self)
                 if detected is not None:
@@ -559,19 +559,19 @@ class PhononSpectrum:
         """
         Analyzes C3v point group symmetry representations (A1, A2, Ex, Ey) for each phonon mode.
 
-        Deprecated: use beyblade.symmetry.classify_modes, which detects the
+        Deprecated: use spinlabs.symmetry.classify_modes, which detects the
         point group and classifies via general projection. This
         legacy method is kept as a validation reference only.
         """
         import warnings
 
         warnings.warn(
-            "analyze_c3v_symmetry is deprecated; use beyblade.symmetry.classify_modes "
+            "analyze_c3v_symmetry is deprecated; use spinlabs.symmetry.classify_modes "
             "(general projection). Kept as a validation reference.",
             DeprecationWarning,
             stacklevel=2,
         )
-        from beyblade.utils import MathUtils
+        from spinlabs.utils import MathUtils
 
         try:
             frac_atoms, _ = self.translate_defect_to_origin()
@@ -676,7 +676,7 @@ class PhononSpectrum:
 
     def calc_ipr(self) -> np.ndarray:
         """Calculates and caches the Inverse Participation Ratio (IPR) for all phonon modes."""
-        from beyblade.utils import MathUtils
+        from spinlabs.utils import MathUtils
 
         if self.iprs is None:
             self.iprs = MathUtils.calc_ipr(self.eigenvectors)

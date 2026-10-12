@@ -1,4 +1,4 @@
-"""Tests for beyblade.vasp.structures.find_defect.
+"""Tests for spinlabs.vasp.structures.find_defect.
 
 Synthetic diamond-Si structures with known defects: a vacancy is
 detected as the centroid of its under-coordinated neighbours, an
@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from pymatgen.core import Structure
 
-from beyblade.vasp.structures import detect_defect_position, find_defect
+from spinlabs.vasp.structures import detect_defect_position, find_defect
 
 
 def _diamond_si_supercell(n: int = 3) -> Structure:
@@ -100,7 +100,7 @@ class TestDefectPositionIntegration:
     """find_defect wired into translate_defect_to_origin / _defect_center."""
 
     def _spectrum(self, structure: Structure):
-        from beyblade.models import PhononSpectrum
+        from spinlabs.models import PhononSpectrum
 
         n_atoms = len(structure)
         n_modes = 1
@@ -115,9 +115,9 @@ class TestDefectPositionIntegration:
         )
 
     def test_vacancy_translation(self):
-        from beyblade.models import PhononSpectrum  # noqa: F401
-        from beyblade.vasp.structures import spectrum_structure
-        from beyblade.symmetry import _defect_center
+        from spinlabs.models import PhononSpectrum  # noqa: F401
+        from spinlabs.vasp.structures import spectrum_structure
+        from spinlabs.symmetry import _defect_center
 
         pristine = _diamond_si_supercell()
         removed = pristine[5]
@@ -138,7 +138,7 @@ class TestDefectPositionIntegration:
         assert spectrum_structure(spectrum).num_sites == len(pristine) - 1
 
     def test_divacancy_translation(self):
-        from beyblade.symmetry import _defect_center
+        from spinlabs.symmetry import _defect_center
 
         pristine = _diamond_si_supercell(n=3)
         remove = [pristine[15], pristine[44]]
@@ -163,7 +163,7 @@ class TestDetectDefectPosition:
     """detect_defect_position: success, None, wrap, and multi-defect error."""
 
     def _spectrum(self, structure: Structure):
-        from beyblade.models import PhononSpectrum
+        from spinlabs.models import PhononSpectrum
 
         return PhononSpectrum(
             frequencies_mev=np.array([10.0]),

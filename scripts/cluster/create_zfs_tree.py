@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """create_zfs_tree.py -- create the VASP directory tree for a point defect.
 
-Thin CLI wrapper; the logic lives in beyblade.vasp.
+Thin CLI wrapper; the logic lives in spinlabs.vasp.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from beyblade.vasp import build_zfs_tree
+from spinlabs.vasp import build_zfs_tree
 
 
 def main() -> int:

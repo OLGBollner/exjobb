@@ -18,8 +18,8 @@ if ".npz" in sys.argv[1]:
         idx = np.arange(1, phonon_data["freqs"].shape[0] + 1)
 
     if with_sym:
-        from beyblade.parsers import parse_phonon_npz
-        from beyblade.symmetry import classify_and_pair
+        from spinlabs.parsers import parse_phonon_npz
+        from spinlabs.symmetry import classify_and_pair
 
         spectrum = parse_phonon_npz(file)
         if spectrum.symmetries is None:

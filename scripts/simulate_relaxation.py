@@ -3,7 +3,7 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 
-from beyblade.relaxation_dynamics import RelaxationDynamics
+from spinlabs.relaxation_dynamics import RelaxationDynamics
 
 file_path = sys.argv[1]
 

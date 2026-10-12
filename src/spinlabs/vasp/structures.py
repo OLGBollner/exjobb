@@ -11,8 +11,8 @@ import numpy as np
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp.inputs import Poscar
 
-from beyblade.models import PhononSpectrum
-from beyblade.parsers import parse_phonon_data
+from spinlabs.models import PhononSpectrum
+from spinlabs.parsers import parse_phonon_data
 
 
 def load_poscar(poscar_file: str | Path) -> Structure:

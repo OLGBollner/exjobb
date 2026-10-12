@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
-from beyblade.models import ZFSTensor, PhononMode, PhononSpectrum
-from beyblade.constants import CONSTANTS
+from spinlabs.models import ZFSTensor, PhononMode, PhononSpectrum
+from spinlabs.constants import CONSTANTS
 
 
 class TestZFSTensor:
@@ -128,7 +128,7 @@ class TestPhononPert:
     def test_displacement_values_match_old_phonon_manager(self):
         """Exact regression against the legacy PhononManager formula."""
         from scipy import constants as Cn
-        from beyblade.constants import CONSTANTS
+        from spinlabs.constants import CONSTANTS
 
         freq_mev = 36.5
         pert_scale = 0.025
@@ -146,7 +146,7 @@ class TestPhononPert:
 
     def test_frequencies_converted_to_joule(self):
         """Frequencies must be returned in SI (Joule)."""
-        from beyblade.constants import CONSTANTS
+        from spinlabs.constants import CONSTANTS
 
         spectrum = self._make_spectrum([0.0, 25.0])
         pert = spectrum.get_phonon_pert(0.025)
@@ -158,8 +158,8 @@ class TestSpinPhononCouplingData:
         """Tests that SpinPhononCouplingData converts units and saves/loads with explicit unit tags."""
         import tempfile
         from pathlib import Path
-        from beyblade.models import SpinPhononCouplingData, ZFSTensor
-        from beyblade.constants import CONSTANTS
+        from spinlabs.models import SpinPhononCouplingData, ZFSTensor
+        from spinlabs.constants import CONSTANTS
 
         freqs_j = np.array([10.0, 20.0, 30.0]) * CONSTANTS["meV2J"]
         v_00_j = np.array([1.0, 2.0, 3.0]) * CONSTANTS["MHz2J"]
@@ -212,7 +212,7 @@ class TestSpinPhononCouplingData:
 
     def test_raw_zfs_data_combine_success(self):
         """Verifies that two RawZFSData objects with matching metadata combine correctly."""
-        from beyblade.models import RawZFSData, ZFSTensor, PerturbationEntry
+        from spinlabs.models import RawZFSData, ZFSTensor, PerturbationEntry
 
         gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
         p1 = PerturbationEntry(order=1, mode_indices=(0,), amplitude=0.1, zfs_tensor=gs)
@@ -256,7 +256,7 @@ class TestSpinPhononCouplingData:
 
     def test_raw_zfs_data_combine_metadata_mismatches_raise(self):
         """Verifies that combine() raises ValueError when metadata doesn't match."""
-        from beyblade.models import RawZFSData, ZFSTensor
+        from spinlabs.models import RawZFSData, ZFSTensor
 
         gs1 = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
         gs2 = ZFSTensor(matrix=np.diag([-500.0, -500.0, 1000.0]), unit="MHz")

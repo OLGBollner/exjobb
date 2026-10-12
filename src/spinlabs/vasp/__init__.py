@@ -4,8 +4,8 @@ High-level functions build ready-to-run simulation folders; thin scripts in
 scripts/cluster/ wrap them with argparse CLIs.
 """
 
-from beyblade.vasp.occupations import prepare_relax_to_zfs
-from beyblade.vasp.structures import (
+from spinlabs.vasp.occupations import prepare_relax_to_zfs
+from spinlabs.vasp.structures import (
     apply_combined_perturbation,
     apply_perturbation,
     compare_displacement,
@@ -14,7 +14,7 @@ from beyblade.vasp.structures import (
     load_poscar,
     write_perturbed_poscar,
 )
-from beyblade.vasp.trees import (
+from spinlabs.vasp.trees import (
     build_perturbation_tree,
     build_zfs_tree,
     default_phonon,

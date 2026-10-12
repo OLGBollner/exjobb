@@ -3,9 +3,9 @@
 import argparse
 from pathlib import Path
 
-from beyblade.convergence import plot_pert_convergence, read_conv_metadata
-from beyblade.plotter import plot_run_coupling, plot_run_rates, plot_t1
-from beyblade.runs_index import filter_rows, read_rows, run_dirs
+from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
+from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
+from spinlabs.runs_index import filter_rows, read_rows, run_dirs
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -75,7 +75,7 @@ def _run_convergence(args: argparse.Namespace) -> None:
         if not args.output:
             raise SystemExit(
                 f"error: {args.npz} has no defect/cell metadata; "
-                "repack it with 'beyblade package --conv' or pass -o explicitly"
+                "repack it with 'spinlabs package --conv' or pass -o explicitly"
             )
         stem = args.npz.stem
     out = args.output or _default_output(args, "convergence", stem)

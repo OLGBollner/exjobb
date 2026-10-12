@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """create_phonon_struct.py -- perturb a POSCAR along phonon normal modes.
 
-Thin CLI wrapper; the logic lives in beyblade.vasp (apply_perturbation).
+Thin CLI wrapper; the logic lives in spinlabs.vasp (apply_perturbation).
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import argparse
 import sys
 
 
-from beyblade.vasp import apply_perturbation, load_phonon_data, load_poscar, write_perturbed_poscar
+from spinlabs.vasp import apply_perturbation, load_phonon_data, load_poscar, write_perturbed_poscar
 
 
 def parse_index(s: str) -> list[int]:

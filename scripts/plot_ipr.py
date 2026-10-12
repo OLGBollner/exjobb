@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.colors import Normalize
 from argparse import ArgumentParser as Parser
-from beyblade.parsers import parse_phonon_npz
-from beyblade.constants import CONSTANTS
+from spinlabs.parsers import parse_phonon_npz
+from spinlabs.constants import CONSTANTS
 
 if __name__ == "__main__":
     parser = Parser("Plots IPR.")

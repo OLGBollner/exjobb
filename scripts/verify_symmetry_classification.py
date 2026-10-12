@@ -19,8 +19,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from beyblade.parsers import parse_phonon_npz  # noqa: E402
-from beyblade.symmetry import classify_modes  # noqa: E402
+from spinlabs.parsers import parse_phonon_npz  # noqa: E402
+from spinlabs.symmetry import classify_modes  # noqa: E402
 
 
 def find_reference(data) -> list[str] | None:

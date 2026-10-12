@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """create_perturbation_tree.py -- build ready-to-go perturbed ZFS run folders.
 
-Thin CLI wrapper; the logic lives in beyblade.vasp (see its docstrings).
+Thin CLI wrapper; the logic lives in spinlabs.vasp (see its docstrings).
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from beyblade.vasp import build_perturbation_tree, default_phonon
+from spinlabs.vasp import build_perturbation_tree, default_phonon
 
 
 def main() -> int:

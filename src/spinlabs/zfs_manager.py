@@ -5,14 +5,14 @@ from pathlib import Path
 from typing import Any, Optional, Union
 import numpy as np
 
-from beyblade.constants import CONSTANTS
-from beyblade.symmetry import twin_of, _build_groups_from_labels
-from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, _normalize_calc_method
-from beyblade.parsers import (
+from spinlabs.constants import CONSTANTS
+from spinlabs.symmetry import twin_of, _build_groups_from_labels
+from spinlabs.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, _normalize_calc_method
+from spinlabs.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
 )
-from beyblade.utils import MathUtils
+from spinlabs.utils import MathUtils
 
 
 class ZFSManager:

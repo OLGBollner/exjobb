@@ -102,7 +102,7 @@ def patch_incar(
         body_lines.append(line)
 
     additions = f"""
-### ZFS stage (added by beyblade.vasp)
+### ZFS stage (added by spinlabs.vasp)
 NSW = 0                  # single point: no ionic relaxation
 IBRION = -1              # no ionic degrees of freedom
 LDMATRIX = .TRUE.

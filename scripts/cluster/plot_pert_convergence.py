@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""plot_pert_convergence.py -- thin wrapper around beyblade.plot convergence.
+"""plot_pert_convergence.py -- thin wrapper around spinlabs.plot convergence.
 
-The implementation moved into the package (src/beyblade/convergence.py); this
+The implementation moved into the package (src/spinlabs/convergence.py); this
 script stays for compatibility with existing cluster workflows. Same flags.
 
 Usage:
@@ -14,12 +14,12 @@ import argparse
 import sys
 from pathlib import Path
 
-# allow running from anywhere: find the beyblade package on the repo's src/
+# allow running from anywhere: find the spinlabs package on the repo's src/
 _repo = Path(__file__).resolve().parents[2]
 if (_repo / "src").is_dir():
     sys.path.insert(0, str(_repo / "src"))
 
-from beyblade.convergence import plot_pert_convergence  # noqa: E402
+from spinlabs.convergence import plot_pert_convergence  # noqa: E402
 
 
 def main() -> int:

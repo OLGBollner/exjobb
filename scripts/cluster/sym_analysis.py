@@ -8,7 +8,7 @@ and the `get_n_modes.py` printout (`i+1`) are 1-based. Downstream code that
 joins on `idx` must not mix the two conventions.
 
 Enforced here so the convention cannot silently regress if
-`beyblade.symmetry.filter_degenerate_partners` changes:
+`spinlabs.symmetry.filter_degenerate_partners` changes:
 
 1. The filter must return an `original_indices` array whose values
    are exactly the 0-based positions of the kept modes in the full spectrum.
@@ -18,8 +18,8 @@ Enforced here so the convention cannot silently regress if
 from argparse import ArgumentParser as Parser
 from pathlib import Path
 
-from beyblade.parsers import parse_phonon_npz, save_phonon_npz
-from beyblade.symmetry import (
+from spinlabs.parsers import parse_phonon_npz, save_phonon_npz
+from spinlabs.symmetry import (
     classify_and_pair,
     filter_degenerate_partners,
     sym_check_summary,

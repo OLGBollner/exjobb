@@ -1,7 +1,7 @@
 """Generate a LaTeX table of ground-state D values from packaged ZFS data.
 
 Inputs are defect folders (searched recursively for *_raw_zfs_data_*.npz) or
-npz files produced by ``beyblade package``.
+npz files produced by ``spinlabs package``.
 
     Defect | Configuration | D_experiment | D_corrected | D_contaminated
 
@@ -18,7 +18,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from beyblade.models import RawZFSData, ZFSTensor  # noqa: E402
+from spinlabs.models import RawZFSData, ZFSTensor  # noqa: E402
 
 # Method name fragments in the packaged npz filenames -> table columns.
 METHOD_COLUMN = {

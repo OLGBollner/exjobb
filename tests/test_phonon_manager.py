@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
-from beyblade.models import PhononSpectrum
-from beyblade.utils import MathUtils
+from spinlabs.models import PhononSpectrum
+from spinlabs.utils import MathUtils
 
 
 class TestPhononSpectrumProperties:

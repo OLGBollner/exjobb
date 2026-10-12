@@ -2,7 +2,7 @@
 
 import argparse
 
-from beyblade.pipeline import run_full_pipeline
+from spinlabs.pipeline import run_full_pipeline
 
 
 def build_run_parser(parser: argparse.ArgumentParser) -> None:
@@ -97,7 +97,7 @@ def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
 
 
 def _run(args: argparse.Namespace) -> None:
-    _validate(argparse.ArgumentParser(prog="beyblade run"), args)
+    _validate(argparse.ArgumentParser(prog="spinlabs run"), args)
     run_full_pipeline(
         sim_folder=args.sim_folder[0] if args.sim_folder and len(args.sim_folder) == 1 else args.sim_folder,
         raw_zfs_file=args.raw_zfs_file[0] if args.raw_zfs_file and len(args.raw_zfs_file) == 1 else args.raw_zfs_file,

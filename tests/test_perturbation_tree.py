@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from beyblade.vasp import build_zfs_tree, default_phonon, resolve_sym_phonon, sbatch_time
+from spinlabs.vasp import build_zfs_tree, default_phonon, resolve_sym_phonon, sbatch_time
 
 
 @pytest.fixture
@@ -19,14 +19,14 @@ def defect(tmp_path):
 
 
 def _save(spec, path):
-    from beyblade.parsers import save_phonon_npz
+    from spinlabs.parsers import save_phonon_npz
 
     save_phonon_npz(spec, path)
 
 
 def _tiny(freqs, syms):
     """Minimal PhononSpectrum with preset labels (bypasses classification)."""
-    from beyblade.models import PhononSpectrum
+    from spinlabs.models import PhononSpectrum
 
     n = len(freqs)
     return PhononSpectrum(
@@ -99,7 +99,7 @@ def test_build_zfs_tree_refuses_overwrite(tmp_path):
 
 
 def test_patch_restart_incar_rewrites_flags():
-    from beyblade.vasp.trees import patch_restart_incar
+    from spinlabs.vasp.trees import patch_restart_incar
 
     def tag(text, name):
         vals = re.findall(rf"^\s*{name}\s*=\s*(.+?)\s*(?:!|#|$)", text, re.M | re.I)
@@ -115,7 +115,7 @@ def test_patch_restart_incar_rewrites_flags():
 
 
 def test_patch_restart_incar_appends_missing():
-    from beyblade.vasp.trees import patch_restart_incar
+    from spinlabs.vasp.trees import patch_restart_incar
 
     out = patch_restart_incar("ENCUT = 520\n")
     for name in ("ISTART", "ICHARG", "LWAVE", "LCHARG"):
@@ -124,7 +124,7 @@ def test_patch_restart_incar_appends_missing():
 
 
 def test_forbid_algo_none_corrects_and_warns():
-    from beyblade.vasp.trees import forbid_algo_none
+    from spinlabs.vasp.trees import forbid_algo_none
 
     incar = "ALGO = None\nENCUT = 520\n"
     out, warning = forbid_algo_none(incar)
@@ -134,7 +134,7 @@ def test_forbid_algo_none_corrects_and_warns():
 
 
 def test_forbid_algo_none_leaves_scf_incar_alone():
-    from beyblade.vasp.trees import forbid_algo_none
+    from spinlabs.vasp.trees import forbid_algo_none
 
     out, warning = forbid_algo_none("ALGO = Normal\nENCUT = 520\n")
     assert warning is None
@@ -145,7 +145,7 @@ def test_forbid_algo_none_leaves_scf_incar_alone():
 
 
 def test_perturbation_input_incar_is_restart_ready(tmp_path):
-    from beyblade.vasp import build_perturbation_tree
+    from spinlabs.vasp import build_perturbation_tree
 
     defect = tmp_path / "NV_512"
     (defect / "data").mkdir(parents=True)
@@ -175,7 +175,7 @@ def test_perturbation_input_incar_is_restart_ready(tmp_path):
 
 
 def test_forbid_sym_ldmatrix_corrects_isym_12():
-    from beyblade.vasp.trees import forbid_sym_ldmatrix
+    from spinlabs.vasp.trees import forbid_sym_ldmatrix
 
     for isym in ("1", "2"):
         out, warning = forbid_sym_ldmatrix(f"ISYM = {isym}\nLDMATRIX = .TRUE.\n")
@@ -184,7 +184,7 @@ def test_forbid_sym_ldmatrix_corrects_isym_12():
 
 
 def test_forbid_sym_ldmatrix_leaves_valid_incars_alone():
-    from beyblade.vasp.trees import forbid_sym_ldmatrix
+    from spinlabs.vasp.trees import forbid_sym_ldmatrix
 
     cases = (
         "ISYM = 3\nLDMATRIX = .TRUE.\n",  # already safe
@@ -198,7 +198,7 @@ def test_forbid_sym_ldmatrix_leaves_valid_incars_alone():
 
 def test_perturbation_input_incar_corrects_algo_none(tmp_path, capsys):
     """ALGO=None in the ZFS source INCAR is corrected to Normal with a log."""
-    from beyblade.vasp import build_perturbation_tree
+    from spinlabs.vasp import build_perturbation_tree
 
     defect = tmp_path / "NV_512"
     (defect / "data").mkdir(parents=True)
@@ -229,7 +229,7 @@ def test_perturbation_input_incar_corrects_algo_none(tmp_path, capsys):
 
 def test_perturbation_input_incar_corrects_isym_with_ldmatrix(tmp_path, capsys):
     """ISYM=1/2 with LDMATRIX in the source INCAR is corrected to 3."""
-    from beyblade.vasp import build_perturbation_tree
+    from spinlabs.vasp import build_perturbation_tree
 
     defect = tmp_path / "NV_512"
     (defect / "data").mkdir(parents=True)
@@ -284,7 +284,7 @@ def test_cli_expands_tilde_binary(tmp_path, monkeypatch):
 
 
 def test_forbid_relaxation_corrects_ibrion():
-    from beyblade.vasp.trees import forbid_relaxation
+    from spinlabs.vasp.trees import forbid_relaxation
 
     for incar in ("IBRION = 2\nNSW = 100\nLDMATRIX = .TRUE.\n", "NSW = 10\nLDMATRIX = .TRUE.\n"):
         out, warning = forbid_relaxation(incar)
@@ -293,7 +293,7 @@ def test_forbid_relaxation_corrects_ibrion():
 
 
 def test_forbid_relaxation_leaves_static_incars_alone():
-    from beyblade.vasp.trees import forbid_relaxation
+    from spinlabs.vasp.trees import forbid_relaxation
 
     for incar in (
         "IBRION = -1\nLDMATRIX = .TRUE.\n",
@@ -315,7 +315,7 @@ def _verify_folder(
     "GET_N_MODES=/bin/true\nPERT=0.025\n",
     incar="LDMATRIX = .TRUE.\nALGO = Normal\nIBRION = -1\n",
 ):
-    from beyblade.vasp.verify import verify_setup
+    from spinlabs.vasp.verify import verify_setup
 
     phon = tmp_path / "phon.npz"
     phon.write_bytes(b"x")
@@ -347,7 +347,7 @@ def test_verify_setup_flags_missing_phonon_path(tmp_path):
     (tmp_path / "input").mkdir()
     (tmp_path / "input" / "INCAR").write_text("LDMATRIX = .TRUE.\n")
     (tmp_path / "run_x.sh").write_text("BINARY=/bin/true\nPHONON_PATH=/no/such/phon.npz\n")
-    from beyblade.vasp.verify import verify_setup
+    from spinlabs.vasp.verify import verify_setup
 
     problems = verify_setup(tmp_path, "run_x.sh")
     assert any(p.startswith("FAIL") and "PHONON_PATH" in p for p in problems)

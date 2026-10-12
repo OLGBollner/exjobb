@@ -1,6 +1,6 @@
 """Append-only index of analysis runs.
 
-Each `beyblade run` invocation appends one row to <output_root>/runs_index.csv.
+Each `spinlabs run` invocation appends one row to <output_root>/runs_index.csv.
 The index is plain CSV so it can be grepped, sorted, or loaded with pandas.
 Rows are never updated or deleted; newer runs simply supersede older ones.
 

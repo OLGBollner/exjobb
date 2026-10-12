@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from beyblade.parsers import (
+from spinlabs.parsers import (
     parse_phonon_data,
     prepare_phonopy_yaml,
     save_phonon_npz,

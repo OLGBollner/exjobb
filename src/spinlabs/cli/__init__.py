@@ -1,4 +1,4 @@
-"""Command line interface for beyblade.
+"""Command line interface for spinlabs.
 
 Each module in this package defines one CLI domain, e.g. plotting.
 """
@@ -7,11 +7,11 @@ import argparse
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from beyblade.cli.package import build_package_parser
-    from beyblade.cli.plotting import build_plot_parser
-    from beyblade.cli.run import build_run_parser
+    from spinlabs.cli.package import build_package_parser
+    from spinlabs.cli.plotting import build_plot_parser
+    from spinlabs.cli.run import build_run_parser
 
-    parser = argparse.ArgumentParser(prog="beyblade", description="Beyblade command line tools")
+    parser = argparse.ArgumentParser(prog="spinlabs", description="SpinLabs command line tools")
     subparsers = parser.add_subparsers(dest="domain", required=True)
 
     plot_parser = subparsers.add_parser("plot", help="Plotting commands")

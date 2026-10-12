@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """create_combined_phonon_struct.py -- two-mode combined perturbed POSCAR.
 
-Thin CLI wrapper; the logic lives in beyblade.vasp (apply_combined_perturbation).
+Thin CLI wrapper; the logic lives in spinlabs.vasp (apply_combined_perturbation).
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from beyblade.vasp import apply_combined_perturbation, load_phonon_data, load_poscar, write_perturbed_poscar
+from spinlabs.vasp import apply_combined_perturbation, load_phonon_data, load_poscar, write_perturbed_poscar
 
 
 def main() -> int:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """compare_displacement.py -- how large is a perturbed POSCAR, really?
 
-Thin CLI wrapper; the logic lives in beyblade.vasp (see its docstrings).
+Thin CLI wrapper; the logic lives in spinlabs.vasp (see its docstrings).
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from beyblade.vasp import compare_displacement_cli
+from spinlabs.vasp import compare_displacement_cli
 
 
 def main() -> int:

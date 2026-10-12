@@ -2,10 +2,10 @@ import numpy as np
 import tempfile
 from pathlib import Path
 
-from beyblade.parsers import save_phonon_npz, parse_phonon_npz
-from beyblade.models import ZFSTensor, PhononSpectrum, RawZFSData
-from beyblade.zfs_manager import ZFSManager
-from beyblade.constants import CONSTANTS
+from spinlabs.parsers import save_phonon_npz, parse_phonon_npz
+from spinlabs.models import ZFSTensor, PhononSpectrum, RawZFSData
+from spinlabs.zfs_manager import ZFSManager
+from spinlabs.constants import CONSTANTS
 
 
 class TestFullIntegration:

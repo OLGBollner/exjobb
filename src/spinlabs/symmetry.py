@@ -22,7 +22,7 @@ from typing import Any, Optional
 import numpy as np
 
 
-from beyblade.models import PhononSpectrum, check_original_indices
+from spinlabs.models import PhononSpectrum, check_original_indices
 from pymatgen.core import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
@@ -340,7 +340,7 @@ def _defect_center(spectrum) -> np.ndarray:
         return frac[symbols_list.index("N")]
     if "Cl" in symbols_list:
         return frac[np.asarray(symbols_list) == "Cl"].mean(axis=0)
-    from beyblade.vasp.structures import detect_defect_position
+    from spinlabs.vasp.structures import detect_defect_position
 
     detected = detect_defect_position(spectrum)
     if detected is not None:
@@ -357,7 +357,7 @@ def defect_frame_operations(spectrum) -> list[np.ndarray]:
     origin: applying them to an off-center structure corrupts the atom mapping
     and hence the characters.
     """
-    from beyblade.utils import MathUtils
+    from spinlabs.utils import MathUtils
 
     axis, normal = _defect_frame(spectrum)
     axis = axis / np.linalg.norm(axis)

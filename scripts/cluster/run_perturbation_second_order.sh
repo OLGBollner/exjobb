@@ -48,8 +48,8 @@ case $PAIR_MODE in *'<pair_mode>'*|'') fail "PAIR_MODE unset or still placeholde
 [ -f "$PHONON_PATH" ] || fail "phonon data file missing: $PHONON_PATH"
 python -c "import numpy, pymatgen.core" >/dev/null 2>&1 \
   || fail "python env broken (numpy/pymatgen import failed) -- conda env did not activate?"
-python -c "import beyblade" >/dev/null 2>&1 \
-  || fail "python cannot import beyblade -- install/check sim-env"
+python -c "import spinlabs" >/dev/null 2>&1 \
+  || fail "python cannot import spinlabs -- install/check sim-env"
 MODES=$(python "$get_n_modes" "$PHONON_PATH") || fail "get_n_modes exited nonzero on $PHONON_PATH"
 [ -n "$MODES" ] || fail "get_n_modes returned no modes for $PHONON_PATH"
 echo "Preflight OK: $(echo $MODES | wc -w) modes, pair_mode=$PAIR_MODE, binary=$binary"
