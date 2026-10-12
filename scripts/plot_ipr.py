@@ -108,7 +108,10 @@ if __name__ == "__main__":
             filename = args.output
         else:
             order = "2d" if "2d" in args.data else "1d"
-            base_name = f"{coupling_data['defect']}_{coupling_data['cell_size']}_{coupling_data['sub_folder']}_{coupling_data['pert_scale']}_{order}_ipr"
+            base_name = (
+                f"{coupling_data['defect']}_{coupling_data['cell_size']}_"
+                f"{coupling_data['sub_folder']}_{coupling_data['pert_scale']}_{order}_ipr"
+            )
 
             ext = args.format if args.format else "png"
             if not ext.startswith("."):

@@ -331,6 +331,18 @@ class TestSpinPhononCouplingData:
         with pytest.raises(ValueError, match="metadata mismatch for 'k_points'"):
             base_with_meta.combine(other_with_meta)
 
+        # 5b. Spin-correction flag mismatch
+        corrected = RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.1,
+            calc_method="all_bands",
+            ground_state_zfs=gs1,
+            spin_correction_applied=True,
+        )
+        with pytest.raises(ValueError, match="inconsistent spin-correction flags"):
+            base.combine(corrected)
+
         # 6. Ground state ZFS tensor mismatch
         mismatched_gs = RawZFSData(
             defect="NV",

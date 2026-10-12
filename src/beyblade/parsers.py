@@ -17,10 +17,11 @@ except ImportError:
 from pymatgen.core import Structure
 
 from beyblade.constants import CONSTANTS
-from beyblade.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor
+from beyblade.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor, _normalize_calc_method
 
 ZFS_REGEX = re.compile(
-    r"Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*D_xx\s+D_yy\s+D_zz\s+D_xy\s+D_xz\s+D_yz\s*-+\s*([\s\d\.\-]+?)(?=\s*-{3,})",
+    r"Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*"
+    r"D_xx\s+D_yy\s+D_zz\s+D_xy\s+D_xz\s+D_yz\s*-+\s*([\s\d\.\-]+?)(?=\s*-{3,})",
     re.MULTILINE | re.DOTALL,
 )
 
@@ -28,6 +29,20 @@ ENERGY_REGEX = re.compile(
     r"free  energy   TOTEN  =\s+([\-\d\.]+)\s+eV",
     re.MULTILINE,
 )
+
+
+def split_defect_folder_name(name: str) -> tuple[str, int | None]:
+    """Split a defect folder name like ``NV_512`` or ``V_Si_128``.
+
+    Returns ``(defect, cell_size)`` where ``defect`` is everything up to the
+    trailing underscore-separated cell size, so multi-part names like
+    ``V_Si_128`` keep their full label (``V_Si``) instead of truncating to
+    ``V``.
+    """
+    match = re.match(r"^(?P<defect>.+?)_(?P<cell>\d+)(?:_.*)?$", name)
+    if match:
+        return match.group("defect"), int(match.group("cell"))
+    return name, None
 
 
 def parse_outcar_zfs(outcar_path: str | Path) -> ZFSTensor | None:
@@ -538,8 +553,9 @@ def parse_zfs_simulation_dataset(
     if "pert" not in sim_path.name:
         raise ValueError("Perturbation scale not found in folder name (expected e.g. 'pert_0.01').")
 
-    defect = defect or sim_path.parent.parent.name.split("_")[0]
-    cell_size = cell_size or int(sim_path.parent.parent.name.split("_")[-1])
+    defect_name, cell_size_inferred = split_defect_folder_name(sim_path.parent.parent.name)
+    defect = defect or defect_name
+    cell_size = cell_size or cell_size_inferred
     pert_scale = pert_scale if pert_scale is not None else float(sim_path.name.split("_")[1])
 
     # Unperturbed relaxed ground state
@@ -565,7 +581,7 @@ def parse_zfs_simulation_dataset(
             search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers, verbose=verbose
         )
 
-    return RawZFSData(
+    data = RawZFSData(
         defect=defect,
         cell_size=cell_size,
         pert_scale=pert_scale,
@@ -576,6 +592,11 @@ def parse_zfs_simulation_dataset(
         second_order=second_order,
         metadata={"calc_method": calc_method, "sim_path": str(sim_path)},
     )
+    # Apply the spin correction here so every consumer of parsed sim-folder
+    # data sees corrected tensors, matching RawZFSData.load for npz files.
+    if _normalize_calc_method(data.calc_method) == "defect_band_approx":
+        data._apply_spin_correction()
+    return data
 
 
 def parse_zfs_dataset_npz(raw_paths: list[str | Path] | tuple[str | Path, ...]) -> RawZFSData:

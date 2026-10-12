@@ -7,7 +7,7 @@ import numpy as np
 
 from beyblade.constants import CONSTANTS
 from beyblade.symmetry import twin_of, _build_groups_from_labels
-from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
+from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, _normalize_calc_method
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
@@ -157,8 +157,6 @@ class ZFSManager:
             D_xx, D_yy, D_zz, R = raw.ground_state_zfs.principal_components()
             self.eigen_rotation = R
             self.zfs_relaxed = np.diag([D_xx, D_yy, D_zz])
-            if "approx" in self.calc_method:
-                self.zfs_relaxed *= 1.5
 
         # eigen_rotation columns are the ground-state principal-frame eigenvectors,
         # so rotating into that frame is R.T @ tensor @ R (NOT R @ tensor @ R.T).
@@ -223,8 +221,6 @@ class ZFSManager:
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
-                    if "approx" in self.calc_method:
-                        tensor_j *= 1.5
                     self.first_order[sp] = {
                         "tensor": tensor_j,
                         "symmetry": phonon_pert["sym"][sp] if phonon_pert else None,
@@ -240,8 +236,6 @@ class ZFSManager:
                     enriched = dict(entry)
                     tensor = np.asarray(enriched.get("tensor"), dtype=float)
                     rotated = eigen_rot_t @ tensor @ eigen_rot if self.eigen_rotation is not None else tensor
-                    if "approx" in self.calc_method:
-                        rotated *= 1.5
                     enriched["tensor"] = rotated
                     # When phonon data is available, always update symmetry/pert/ipr
                     # so that mode-dependent SI displacements q_i = q0 * sqrt(2*omega/hbar)
@@ -266,8 +260,6 @@ class ZFSManager:
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
-                    if "approx" in self.calc_method:
-                        tensor_j *= 1.5
                     self.second_order[(si, sj)] = {
                         "tensor": tensor_j,
                         "symmetry": (phonon_pert["sym"][si], phonon_pert["sym"][sj]) if phonon_pert else None,
@@ -282,8 +274,6 @@ class ZFSManager:
                     enriched = dict(entry)
                     tensor = np.asarray(enriched.get("tensor"), dtype=float)
                     rotated = eigen_rot_t @ tensor @ eigen_rot if self.eigen_rotation is not None else tensor
-                    if "approx" in self.calc_method:
-                        rotated *= 1.5
                     enriched["tensor"] = rotated
                     if phonon_pert is not None:
                         if (
@@ -396,6 +386,12 @@ class ZFSManager:
         # Ex/Ey ordering convention of the eigenvectors does not affect them;
         # no per-defect/cell-size switch is needed.
 
+        inherit_coefficients = False
+        spectrum = self.spectrum
+        if len(self.treated_modes) < n_modes and spectrum is not None:
+            inherit_coefficients = True
+            print("Degenerate modes inherit coefficients")
+
         for i, item in sorted(self.zfs_tensors.items()):
             if i not in self.treated_modes:
                 continue
@@ -437,8 +433,7 @@ class ZFSManager:
             # The spectrum owns the pairing (strict involution); no frequency guessing.
             # Fill-only: never overwrite a twin's own non-zero coefficients (Ex
             # yields V_pm, Ey yields V_0pm; both are real data on a complete file).
-            spectrum = self.spectrum
-            if len(self.treated_modes) < n_modes and spectrum is not None:
+            if inherit_coefficients:
                 twin = twin_of(spectrum.deg_groups, i)
                 if twin is not None and twin != i:
                     V_0_pm[twin] = np.where(V_0_pm[twin] == 0, V_0_pm[i], V_0_pm[twin])
@@ -567,7 +562,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.calc_method}_{self.pert_scale}_.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_"
+            f"{self.calc_method}_{self.pert_scale}_.npz"
         )
 
         save_path = self.save_data(
@@ -606,7 +602,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_{self.calc_method}_{self.pert_scale}_.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_"
+            f"{self.calc_method}_{self.pert_scale}_.npz"
         )
         save_path = self.save_data(
             save_name,
@@ -661,7 +658,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coupling_{self.calc_method}_{self.pert_scale}_both.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coupling_"
+            f"{self.calc_method}_{self.pert_scale}_both.npz"
         )
         save_path = self.save_data(
             save_name,
@@ -729,6 +727,9 @@ class ZFSManager:
                 cell_size=self.cell_size,
                 pert_scale=self.pert_scale,
                 calc_method=self.calc_method,
+                # Tensors stored on the manager were ingested via parse/load,
+                # which apply the 3/2 correction for approx data at intake.
+                spin_correction_applied=_normalize_calc_method(self.calc_method) == "defect_band_approx",
                 order=kwargs.get("order", 1 if first is not None else 2),
                 ground_state_zfs=gs_tensor,
                 eigen_rotation=self.eigen_rotation,

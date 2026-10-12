@@ -64,6 +64,7 @@ class ZFSTensor:
 
     matrix: np.ndarray  # Shape (3, 3)
     unit: str = "MHz"
+    reference: Optional[np.ndarray] = None  # reference tensor (3x3) pinning the x/y axis assignment
 
     def __post_init__(self):
         self.matrix = np.asarray(self.matrix, dtype=float)
@@ -75,10 +76,31 @@ class ZFSTensor:
         tr = np.trace(self.matrix) / 3.0
         return self.matrix - tr * np.eye(3)
 
-    def principal_components(self) -> tuple[float, float, float, np.ndarray]:
+    def with_reference(self, reference: np.ndarray) -> "ZFSTensor":
+        """Return a copy whose axis assignment is pinned to ``reference``.
+
+        ``reference`` is a 3x3 tensor (or principal-frame matrix) in the same
+        orientation as ``self.matrix``: the returned tensor's principal axes are
+        matched to those of the reference by eigenvector overlap, so that
+        near-degenerate transverse axes (|D_xx| ~ |D_yy|) never swap labels
+        between runs. Pass the relaxed/Q=0 tensor.
         """
-        Calculates principal values (D_xx, D_yy, D_zz) and eigenvectors
-        following standard EPR convention: |D_zz| >= |D_yy| >= |D_xx| (with trace=0).
+        return ZFSTensor(matrix=self.matrix.copy(), unit=self.unit, reference=np.asarray(reference, dtype=float).copy())
+
+    def principal_components(self, reference: Optional[np.ndarray] = None) -> tuple[float, float, float, np.ndarray]:
+        """
+        Calculates principal values (D_xx, D_yy, D_zz) and eigenvectors.
+
+        Default convention (no reference): standard EPR convention,
+        |D_zz| >= |D_yy| >= |D_xx| (with trace=0).
+
+        If a reference tensor is given (explicitly or via ``self.reference``,
+        see :meth:`with_reference`), the axes are instead matched to the
+        reference's principal axes by largest eigenvector overlap, with signs
+        aligned so that each axis has positive overlap with its reference
+        partner. This keeps the x/y assignment continuous across runs whose
+        transverse splitting |D_xx| - |D_yy| is near zero, where a magnitude
+        sort can silently swap x and y (and flip the sign of E).
 
         Returns:
             (D_xx, D_yy, D_zz, eigenvectors)
@@ -86,16 +108,38 @@ class ZFSTensor:
         D_tl = self.traceless()
         evals, evecs = np.linalg.eigh(D_tl)
 
-        # Sort by absolute magnitude so that |D_zz| is largest
-        abs_order = np.argsort(np.abs(evals))  # [smallest, middle, largest]
-        ix, iy, iz = abs_order[0], abs_order[1], abs_order[2]
+        ref = reference if reference is not None else self.reference
+        if ref is not None:
+            ref_mat = np.asarray(ref, dtype=float)
+            if ref_mat.shape != (3, 3):
+                raise ValueError(f"reference must be a 3x3 tensor, got shape {ref_mat.shape}")
+            # Reference frame: use its own principal axes (sorted convention is fine
+            # here; overlap matching removes any ambiguity).
+            _, _, _, R_ref = ZFSTensor(matrix=ref_mat).principal_components()
+            # Greedy match each reference axis to the closest eigenvector.
+            # Eigenvectors are orthonormal on both sides, so greedy is exact.
+            G = np.abs(R_ref.T @ evecs)  # [ref_axis, eigvec]
+            order = []
+            for j in range(3):
+                k = int(np.argmax(G[j]))
+                order.append(k)
+                G[:, k] = -1.0  # claim it
+            ix, iy, iz = order
+        else:
+            # Sort by absolute magnitude so that |D_zz| is largest
+            abs_order = np.argsort(np.abs(evals))  # [smallest, middle, largest]
+            ix, iy, iz = abs_order[0], abs_order[1], abs_order[2]
 
         D_xx_val = evals[ix]
         D_yy_val = evals[iy]
         D_zz_val = evals[iz]
 
-        # Ensure right-handed coordinate system for eigenvectors
         R = np.column_stack([evecs[:, ix], evecs[:, iy], evecs[:, iz]])
+        if ref is not None:
+            # Sign-align each axis with its reference partner (dot > 0).
+            dots = np.diag(R_ref.T @ R)
+            R = R @ np.diag(np.where(dots < 0, -1.0, 1.0))
+        # Ensure right-handed coordinate system for eigenvectors
         if np.linalg.det(R) < 0:
             R[:, 0] = -R[:, 0]
 
@@ -140,15 +184,18 @@ class ZFSTensor:
     def to_unit(self, target_unit: str) -> ZFSTensor:
         """Convert tensor matrix into target energy unit using convert_energy."""
         if self.unit == target_unit:
-            return ZFSTensor(matrix=self.matrix.copy(), unit=self.unit)
+            return ZFSTensor(matrix=self.matrix.copy(), unit=self.unit, reference=self.reference)
         out_mat = convert_energy(self.matrix, self.unit, target_unit)
-        return ZFSTensor(matrix=out_mat, unit=target_unit)
+        return ZFSTensor(matrix=out_mat, unit=target_unit, reference=self.reference)
 
     def rotate(self, rotation_matrix: np.ndarray) -> ZFSTensor:
         """Rotate tensor: D' = R @ D @ R.T"""
         R = np.asarray(rotation_matrix, dtype=float)
         rotated_mat = R @ self.matrix @ R.T
-        return ZFSTensor(matrix=rotated_mat, unit=self.unit)
+        # Rotate the pinned reference frame along with the tensor, so the
+        # axis assignment stays consistent with the tensor's new orientation.
+        ref = None if self.reference is None else R @ np.asarray(self.reference, dtype=float) @ R.T
+        return ZFSTensor(matrix=rotated_mat, unit=self.unit, reference=ref)
 
 
 def check_original_indices(
@@ -820,6 +867,46 @@ def _decode_order_dict(value: Any, data: Any) -> dict:
     return out
 
 
+# Factor 3/2 scaling applied to defect_band_approx (ZFS_occup) tensors: the
+# defect-band approximation overestimates the ZFS splitting. The parser applies
+# this factor at intake and stores spin_correction_applied=True; legacy npz
+# files (unscaled, flag=False) are scaled by RawZFSData.load once on load.
+SPIN_CORRECTION_SCALE = 1.5
+
+
+def _scale_correction_fields(fields: dict) -> dict:
+    """Returns a copy of RawZFSData constructor kwargs with approx tensors scaled by 3/2.
+
+    Shared by RawZFSData.load (per-file, before merging) and _apply_spin_correction,
+    so both paths scale identically. NOTE: PerturbationEntry objects inside the
+    kwargs are mutated in place — pass copies if the caller must keep originals.
+    """
+    out = dict(fields)
+    gs = out.get("ground_state_zfs")
+    if gs is not None:
+        out["ground_state_zfs"] = ZFSTensor(matrix=gs.matrix * SPIN_CORRECTION_SCALE, unit=gs.unit)
+    for name in ("first_order", "second_order"):
+        entries = dict(out.get(name) or {})
+        for key, entry in entries.items():
+            if isinstance(entry, PerturbationEntry):
+                entry.zfs_tensor = ZFSTensor(matrix=entry.zfs_tensor.matrix * SPIN_CORRECTION_SCALE, unit=entry.zfs_tensor.unit)
+            elif isinstance(entry, dict) and entry.get("tensor") is not None:
+                entry["tensor"] = np.asarray(entry["tensor"], dtype=float) * SPIN_CORRECTION_SCALE
+        out[name] = entries
+    return out
+
+
+def _normalize_calc_method(m: Optional[str]) -> Optional[str]:
+    """Normalizes calc_method aliases ('approx' -> 'defect_band_approx', etc.)."""
+    if not m or m in ("None", ""):
+        return None
+    if m in ("all", "all_bands"):
+        return "all_bands"
+    if m in ("approx", "defect_band_approx"):
+        return "defect_band_approx"
+    return str(m)
+
+
 @dataclass
 class RawZFSData:
     """Container for raw unperturbed and perturbed ZFS simulation data."""
@@ -828,6 +915,7 @@ class RawZFSData:
     cell_size: int
     pert_scale: float
     calc_method: Optional[str] = None
+    spin_correction_applied: bool = False
     order: Optional[int] = None
     ground_state_zfs: Optional[ZFSTensor] = None
     eigen_rotation: Optional[np.ndarray] = None
@@ -879,17 +967,8 @@ class RawZFSData:
             raise ValueError(f"Cannot combine RawZFSData: pert_scale mismatch ({p1} != {p2}).")
 
         # 4. Verify calc_method
-        def _norm_method(m: Optional[str]) -> Optional[str]:
-            if not m or m in ("None", ""):
-                return None
-            if m in ("all", "all_bands"):
-                return "all_bands"
-            if m in ("approx", "defect_band_approx"):
-                return "defect_band_approx"
-            return str(m)
-
-        m1 = _norm_method(self.calc_method)
-        m2 = _norm_method(other.calc_method)
+        m1 = _normalize_calc_method(self.calc_method)
+        m2 = _normalize_calc_method(other.calc_method)
         if m1 is not None and m2 is not None and m1 != m2:
             raise ValueError(f"Cannot combine RawZFSData: calc_method mismatch ('{m1}' != '{m2}').")
 
@@ -925,6 +1004,16 @@ class RawZFSData:
         merged_scale = p1 or p2 or 0.0
         merged_method = m1 or m2 or self.calc_method or other.calc_method
         merged_rotation = self.eigen_rotation if self.eigen_rotation is not None else other.eigen_rotation
+        # Never re-scale a merged dataset: if either part already carries the
+        # 3/2 correction, mark the combination as corrected (see _apply_spin_correction).
+        merged_correction = self.spin_correction_applied or other.spin_correction_applied
+        if self.spin_correction_applied != other.spin_correction_applied:
+            raise ValueError(
+                "Cannot combine datasets with inconsistent spin-correction flags: "
+                "one part is corrected (x3/2) and the other is not. Scaling the "
+                "merged tensors would silently mix corrected and uncorrected values. "
+                "Correct the raw dataset first (RawZFSData.load with apply_corrections=True)."
+            )
 
         merged_metadata = dict(self.metadata)
         for k, v in other.metadata.items():
@@ -945,6 +1034,7 @@ class RawZFSData:
             cell_size=merged_cell,
             pert_scale=merged_scale,
             calc_method=merged_method,
+            spin_correction_applied=merged_correction,
             order=eff_order,
             ground_state_zfs=gs,
             eigen_rotation=merged_rotation,
@@ -1003,6 +1093,7 @@ class RawZFSData:
             cell_size=self.cell_size,
             pert_scale=self.pert_scale,
             calc_method=self.calc_method,
+            spin_correction_applied=self.spin_correction_applied,
             order=self.order,
             ground_state_zfs=new_gs,
             eigen_rotation=self.eigen_rotation.copy() if self.eigen_rotation is not None else None,
@@ -1064,6 +1155,7 @@ class RawZFSData:
         FieldSpec("cell_size", "int"),
         FieldSpec("pert_scale", "float"),
         FieldSpec("calc_method", "str", optional=True, decode=_decode_calc_method),
+        FieldSpec("spin_correction_applied", "bool", optional=True),
         FieldSpec("order", "int", optional=True),
         FieldSpec("ground_state_zfs", "zfstensor", optional=True, legacy_keys=("zfs_relaxed",)),
         FieldSpec("eigen_rotation", "array", optional=True),
@@ -1107,10 +1199,16 @@ class RawZFSData:
         )
 
     @classmethod
-    def load(cls, in_path: Union[str, Path, Sequence[Union[str, Path]]]) -> RawZFSData:
+    def load(
+        cls,
+        in_path: Union[str, Path, Sequence[Union[str, Path]]],
+        apply_corrections: bool = True,
+    ) -> RawZFSData:
         """
         Loads RawZFSData from one or more .npz files.
         Maintains backward compatibility with legacy keys (zfs_tensors, zfs_tensors_2d, zfs_relaxed).
+        If apply_corrections is True (default), defect_band_approx tensors are scaled by 3/2
+        exactly once on load; files already carrying the correction are skipped.
         """
         if isinstance(in_path, (list, tuple)):
             paths = [Path(p) for p in in_path]
@@ -1120,15 +1218,39 @@ class RawZFSData:
         raw_data = [np.load(str(p), allow_pickle=True) for p in paths]
         warn_unknown_keys(raw_data[0].files, cls.SCHEMA)
 
-        base = _fields_from_npz(raw_data[0], cls, cls.SCHEMA)
+        # Scale EACH file before merging, based on that file's own method and
+        # flag. Scaling the merged object once would mis-handle mixed inputs:
+        # a corrected file could be scaled again, an uncorrected one missed.
+        def _per_file(npz: np.lib.npyio.NpzFile, strict: bool) -> tuple[dict, bool]:
+            fields = _fields_from_npz(npz, cls, cls.SCHEMA, strict=strict)
+            if fields.get("spin_correction_applied"):
+                fields["spin_correction_applied"] = True
+                return fields, False
+            fields["spin_correction_applied"] = False
+            if not apply_corrections or _normalize_calc_method(fields.get("calc_method")) != "defect_band_approx":
+                return fields, False
+            scaled = _scale_correction_fields(
+                {
+                    "ground_state_zfs": fields.get("ground_state_zfs"),
+                    "first_order": fields.get("first_order"),
+                    "second_order": fields.get("second_order"),
+                }
+            )
+            fields.update(scaled)
+            fields["spin_correction_applied"] = True
+            return fields, True
+
+        scaled_pairs = [_per_file(d, i == 0) for i, d in enumerate(raw_data)]
+        scaled_fields = [f for f, _ in scaled_pairs]
+
+        base = scaled_fields[0]
         first_order = dict(base.get("first_order") or {})
         second_order = dict(base.get("second_order") or {})
 
-        for data in raw_data[1:]:
-            kw = _fields_from_npz(data, cls, cls.SCHEMA, strict=False)
-            for k, v in (kw.get("first_order") or {}).items():
+        for fields in scaled_fields[1:]:
+            for k, v in (fields.get("first_order") or {}).items():
                 first_order.setdefault(k, v)
-            for k, v in (kw.get("second_order") or {}).items():
+            for k, v in (fields.get("second_order") or {}).items():
                 second_order.setdefault(k, v)
 
         order = base.get("order")
@@ -1142,13 +1264,45 @@ class RawZFSData:
             cell_size=base["cell_size"],
             pert_scale=base["pert_scale"],
             calc_method=base.get("calc_method"),
+            # all(): if some files are uncorrected (only possible with
+            # apply_corrections=False), never report the merge as corrected.
+            spin_correction_applied=all(f.get("spin_correction_applied") for f in scaled_fields),
             order=order,
             ground_state_zfs=base.get("ground_state_zfs"),
             eigen_rotation=base.get("eigen_rotation"),
             first_order=first_order,
             second_order=second_order,
         )
+        for p, (_, scaled_now) in zip(paths, scaled_pairs):
+            if apply_corrections and scaled_now:
+                print(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE:g} (x3/2) [{p.name}]")
         return obj.to_unit("J")
+
+    def _apply_spin_correction(self) -> None:
+        """Scales defect_band_approx tensors by 3/2 exactly once.
+
+        npz files written before the correction moved into the loader/parser
+        store unscaled tensors and carry spin_correction_applied=False; they
+        are scaled here. Files written after carry the flag=True and are
+        skipped (the parser applies the correction at intake). all_bands
+        data is never scaled.
+        """
+        if self.spin_correction_applied:
+            return
+        if _normalize_calc_method(self.calc_method) != "defect_band_approx":
+            return
+        scaled = _scale_correction_fields(
+            {
+                "ground_state_zfs": self.ground_state_zfs,
+                "first_order": self.first_order,
+                "second_order": self.second_order,
+            }
+        )
+        self.ground_state_zfs = scaled["ground_state_zfs"]
+        self.first_order = scaled["first_order"]
+        self.second_order = scaled["second_order"]
+        self.spin_correction_applied = True
+        print(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE:g} (x3/2)")
 
 
 @dataclass

@@ -52,7 +52,8 @@ def test_zfs_manager_rejects_incomplete_spectrum():
 
 
 def test_clv_128_lonely_e_modes_expansion():
-    # Synthetic spectrum mimicking the lonely Ex mode case (e.g. 2 atoms -> 6 total modes, 4 present: 2 A1 + 2 lonely Ex)
+    # Synthetic spectrum mimicking the lonely Ex mode case
+    # (e.g. 2 atoms -> 6 total modes, 4 present: 2 A1 + 2 lonely Ex)
     n_atoms = 3
     # 3 atoms -> 3 * 3 = 9 modes total.
     # Suppose we have 2 A1 modes and 2 Ex modes without Ey partners (total 4 modes present)
