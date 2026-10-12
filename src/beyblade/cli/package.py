@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from beyblade.pack_convergence import pack_convergence
-from beyblade.parsers import parse_zfs_simulation_dataset
+from beyblade.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
 
 
 def build_package_parser(parser: argparse.ArgumentParser) -> None:
@@ -80,8 +80,9 @@ def _run(args: argparse.Namespace) -> None:
     print(f"Defect folder: {defect_folder}")
     print(f"Orders: {', '.join(orders)} | method: {args.method}")
 
-    defect = defect_folder.name.split("_")[0]
-    cell_size = int(defect_folder.name.split("_")[-1])
+    defect, cell_size = split_defect_folder_name(defect_folder.name)
+    if cell_size is None:
+        raise SystemExit(f"Cell size not found in defect folder name: {defect_folder.name} (expected e.g. NV_512)")
 
     folder = args.output_root / f"{defect}_{cell_size}_{date.today():%Y%m%d}"
     folder.mkdir(parents=True, exist_ok=True)
@@ -158,8 +159,7 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
         print(f"Convergence folder: {root}")
         suffix = re.sub(r"^convergence[._-]*", "", root.name).lstrip("_-") or "conv"
         method = next((v for k, v in method_map.items() if k in suffix), None)
-        defect = defect_folder.name.split("_")[0]
-        cell = defect_folder.name.split("_")[-1]
+        defect, cell = split_defect_folder_name(defect_folder.name)
         stem = f"{defect}_{cell}_{date.today():%Y%m%d}_conv_{suffix}"
         output = args.output_root / f"{stem}.npz"
         args.output_root.mkdir(parents=True, exist_ok=True)

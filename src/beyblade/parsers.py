@@ -31,6 +31,20 @@ ENERGY_REGEX = re.compile(
 )
 
 
+def split_defect_folder_name(name: str) -> tuple[str, int | None]:
+    """Split a defect folder name like ``NV_512`` or ``V_Si_128``.
+
+    Returns ``(defect, cell_size)`` where ``defect`` is everything up to the
+    trailing underscore-separated cell size, so multi-part names like
+    ``V_Si_128`` keep their full label (``V_Si``) instead of truncating to
+    ``V``.
+    """
+    match = re.match(r"^(?P<defect>.+?)_(?P<cell>\d+)$", name)
+    if match:
+        return match.group("defect"), int(match.group("cell"))
+    return name, None
+
+
 def parse_outcar_zfs(outcar_path: str | Path) -> ZFSTensor | None:
     """
     Parses the dipole-dipole spin-spin ZFS tensor from a VASP OUTCAR file.
@@ -539,8 +553,9 @@ def parse_zfs_simulation_dataset(
     if "pert" not in sim_path.name:
         raise ValueError("Perturbation scale not found in folder name (expected e.g. 'pert_0.01').")
 
-    defect = defect or sim_path.parent.parent.name.split("_")[0]
-    cell_size = cell_size or int(sim_path.parent.parent.name.split("_")[-1])
+    defect_name, cell_size_inferred = split_defect_folder_name(sim_path.parent.parent.name)
+    defect = defect or defect_name
+    cell_size = cell_size or cell_size_inferred
     pert_scale = pert_scale if pert_scale is not None else float(sim_path.name.split("_")[1])
 
     # Unperturbed relaxed ground state

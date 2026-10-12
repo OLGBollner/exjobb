@@ -163,10 +163,19 @@ class ZFSManager:
             # transverse axes (|D_xx| ~ |D_yy|) can never swap labels between
             # the ground state and a perturbed run (x/y eigenframe flip bug).
             raw.ground_state_zfs = raw.ground_state_zfs.with_reference(raw.ground_state_zfs.matrix)
-            for entry in getattr(raw, "perturbations", None) or []:
-                if entry is None or entry.zfs_tensor is None:
+            ref = raw.ground_state_zfs.matrix
+            for entry in list(raw.first_order.values()) + list(raw.second_order.values()):
+                tensor = entry.zfs_tensor if isinstance(entry, PerturbationEntry) else entry.get("tensor")
+                if tensor is None:
                     continue
-                entry.zfs_tensor = entry.zfs_tensor.with_reference(raw.ground_state_zfs.matrix)
+                if not isinstance(tensor, ZFSTensor):
+                    unit = entry.get("unit", "MHz") if isinstance(entry, dict) else "MHz"
+                    tensor = ZFSTensor(matrix=np.asarray(tensor, dtype=float), unit=unit)
+                pinned = tensor.with_reference(ref)
+                if isinstance(entry, PerturbationEntry):
+                    entry.zfs_tensor = pinned
+                else:
+                    entry["tensor"] = pinned.matrix
 
         # eigen_rotation columns are the ground-state principal-frame eigenvectors,
         # so rotating into that frame is R.T @ tensor @ R (NOT R @ tensor @ R.T).
