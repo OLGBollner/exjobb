@@ -416,7 +416,7 @@ class TestSpinCorrectionOnLoad:
 
 
 def test_combine_flag_mismatch_raises(tmp_path):
-    raw = _make_raw("defect_band_approx")
+    raw = TestSpinCorrectionOnLoad._make_raw("defect_band_approx")
     out = tmp_path / "legacy.npz"
     raw.save(out)
     corrected = RawZFSData.load(out)
@@ -427,7 +427,7 @@ def test_combine_flag_mismatch_raises(tmp_path):
 
 
 def test_combine_all_corrected_flag_is_true(tmp_path):
-    raw = _make_raw("defect_band_approx")
+    raw = TestSpinCorrectionOnLoad._make_raw("defect_band_approx")
     out = tmp_path / "a.npz"
     raw.save(out)
     loaded = RawZFSData.load(out)
