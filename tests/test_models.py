@@ -340,7 +340,7 @@ class TestSpinPhononCouplingData:
             ground_state_zfs=gs1,
             spin_correction_applied=True,
         )
-        with pytest.raises(ValueError, match="spin_correction_applied mismatch"):
+        with pytest.raises(ValueError, match="inconsistent spin-correction flags"):
             base.combine(corrected)
 
         # 6. Ground state ZFS tensor mismatch
