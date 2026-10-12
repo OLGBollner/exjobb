@@ -2,6 +2,7 @@
 
 import argparse
 import re
+import sys
 import warnings
 from datetime import date
 from pathlib import Path
@@ -25,9 +26,14 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--ground-state",
         type=Path,
+        nargs="?",
+        const=_GS_AUTO,
         default=None,
         metavar="OUTCAR",
-        help="With --conv: ground-state OUTCAR; its ZFS tensor is stored as 'd0' (the Q=0 point) in the npz.",
+        help=(
+            "With --conv: ground-state OUTCAR; its ZFS tensor is stored as 'd0' (the Q=0 point) in the npz. "
+            "Flag without a path: auto-discover <defect-folder>/ZFS_hyp/OUTCAR (all) or ZFS_occup/OUTCAR (occup)."
+        ),
     )
     parser.add_argument(
         "--orders",
@@ -54,6 +60,7 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
 
 _ORDER_DIRS = {"first": "first_order", "second": "second_order"}
 _ORDER_NUM = {"first": 1, "second": 2}
+_GS_AUTO = Path("__auto__")  # --ground-state given without a path: auto-discover
 
 
 def _run(args: argparse.Namespace) -> None:
@@ -113,9 +120,31 @@ def _run(args: argparse.Namespace) -> None:
         print(f"Saved raw data in: {save_path}")
 
 
+def _auto_ground_state(defect_folder: Path, method: str | None) -> Path | None:
+    """Flag-only --ground-state: pick ZFS_hyp (all) or ZFS_occup (occup) OUTCAR."""
+    if method == "all":
+        zfs_folder = "ZFS_hyp"
+    elif method in ("occup", "approx"):
+        zfs_folder = "ZFS_occup"
+    else:
+        print(
+            "warning: cannot infer ground-state method from folder suffix "
+            "(neither 'all' nor 'occup'); skipping ground state",
+            file=sys.stderr,
+        )
+        return None
+    candidate = defect_folder / zfs_folder / "OUTCAR"
+    if candidate.exists():
+        print(f"ground state: {candidate}")
+        return candidate
+    print(f"warning: no ground-state OUTCAR at {candidate}; skipping ground state", file=sys.stderr)
+    return None
+
+
 def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
+    defaults = {"orders": "first,second", "pert": None, "method": "all"}
     for opt in ("orders", "pert", "method"):
-        if getattr(args, opt) != {"orders": "first,second", "pert": None, "method": "all"}[opt]:
+        if getattr(args, opt, defaults[opt]) != defaults[opt]:
             print(f"warning: --{opt.replace('_', '-')} is ignored with --conv")
     conv_roots = sorted(p for p in defect_folder.glob("convergence*") if p.is_dir())
     if not conv_roots:
@@ -130,6 +159,9 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
         stem = f"{defect}_{cell}_{date.today():%Y%m%d}_conv_{suffix}"
         output = args.output_root / f"{stem}.npz"
         args.output_root.mkdir(parents=True, exist_ok=True)
+        ground_state = args.ground_state
+        if ground_state == _GS_AUTO:
+            ground_state = _auto_ground_state(defect_folder, method)
         pack_convergence(
-            root, output, ground_state=args.ground_state, defect=defect, cell=cell, method=method, method_key=suffix
+            root, output, ground_state=ground_state, defect=defect, cell=cell, method=method, method_key=suffix
         )

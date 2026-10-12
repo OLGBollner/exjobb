@@ -1,12 +1,13 @@
 import argparse
 from datetime import date
+from pathlib import Path
 
 import numpy as np
 from unittest.mock import patch
 
 import pytest
 
-from beyblade.cli.package import _run
+from beyblade.cli.package import _run, _run_conv
 from beyblade.models import PerturbationEntry, RawZFSData, ZFSTensor
 
 
@@ -83,3 +84,74 @@ def test_missing_order_folder_warns(tmp_path):
         with pytest.warns(UserWarning):
             _run(_make_args(tmp_path))
     assert len(list((tmp_path / "data").rglob("*.npz"))) == 1
+
+
+# ── --conv --ground-state (flag-only auto-discovery) ─────────────────────────
+
+def _outcar(path, d_diag, energy=-10.0):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f" free  energy   TOTEN  =       {energy:.8f} eV\n\n"
+        " Spin-spin contribution to zero-field splitting tensor (MHz)\n"
+        " -------------------------------------------------------------\n"
+        "      D_xx      D_yy      D_zz      D_xy      D_xz      D_yz\n"
+        " -------------------------------------------------------------\n"
+        f"   {d_diag[0]:.2f}   {d_diag[1]:.2f}   {d_diag[2]:.2f}      0.00      0.00      0.00\n"
+        " -------------------------------------------------------------\n",
+        encoding="utf-8",
+    )
+
+
+def _conv_args(tmp_path, ground_state):
+    return argparse.Namespace(
+        defect_folder=tmp_path / "NV_512",
+        output_root=tmp_path / "data",
+        ground_state=ground_state,
+    )
+
+
+def _conv_tree(tmp_path):
+    root = tmp_path / "NV_512" / "convergence_test_all"
+    for p in (0.025, 0.05):
+        _outcar(root / "runs" / f"0_pert_{p:g}" / "OUTCAR", (1.0, 1.0, 2.0))
+    return root
+
+
+def test_conv_ground_state_flag_auto_all(tmp_path, capsys):
+    _conv_tree(tmp_path)
+    _outcar(tmp_path / "NV_512" / "ZFS_hyp" / "OUTCAR", (1.0, 1.0, 4.0))
+    _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
+    out = next((tmp_path / "data").glob("NV_512_*_conv_test_all.npz"))
+    data = np.load(out, allow_pickle=True)
+    assert data["d0"].shape == (3, 3)
+    assert abs(data["d0"][2, 2] - 4.0) < 1e-9
+    assert "ground state:" in capsys.readouterr().out
+
+
+def test_conv_ground_state_flag_auto_occup(tmp_path):
+    root = tmp_path / "NV_512" / "convergence_test_occup"
+    for p in (0.025,):
+        _outcar(root / "runs" / f"0_pert_{p:g}" / "OUTCAR", (1.0, 1.0, 2.0))
+    _outcar(tmp_path / "NV_512" / "ZFS_occup" / "OUTCAR", (1.0, 1.0, 3.0))
+    _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
+    out = next((tmp_path / "data").glob("NV_512_*_conv_test_occup.npz"))
+    data = np.load(out, allow_pickle=True)
+    assert abs(data["d0"][2, 2] - 3.0) < 1e-9
+
+
+def test_conv_ground_state_missing_warns(tmp_path, capsys):
+    _conv_tree(tmp_path)
+    _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
+    out = next((tmp_path / "data").glob("NV_512_*_conv_*.npz"))
+    data = np.load(out, allow_pickle=True)
+    assert not any(k == "d0" for k in data.files)
+    assert "no ground-state OUTCAR" in capsys.readouterr().err
+
+
+def test_conv_ground_state_explicit_path(tmp_path):
+    _conv_tree(tmp_path)
+    _outcar(tmp_path / "elsewhere" / "OUTCAR", (1.0, 1.0, 5.0))
+    _run_conv(args=_conv_args(tmp_path, tmp_path / "elsewhere" / "OUTCAR"), defect_folder=tmp_path / "NV_512")
+    out = next((tmp_path / "data").glob("NV_512_*_conv_*.npz"))
+    data = np.load(out, allow_pickle=True)
+    assert abs(data["d0"][2, 2] - 5.0) < 1e-9
