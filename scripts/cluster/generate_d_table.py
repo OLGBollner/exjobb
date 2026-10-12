@@ -18,7 +18,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from beyblade.models import SPIN_CORRECTION_SCALE, RawZFSData, ZFSTensor  # noqa: E402
+from beyblade.models import SPIN_CORRECTION_SCALE, RawZFSData, ZFSTensor, _normalize_calc_method  # noqa: E402
 from beyblade.parsers import parse_outcar_zfs  # noqa: E402
 
 # Method name fragments in the packaged npz filenames -> table columns.
@@ -27,26 +27,46 @@ METHOD_COLUMN = {
     "defect_band_approx": "corrected",  # ZFS_occup: defect-band approximation, charge-corrected
 }
 
+# Values from different sources (OUTCAR vs npz, 1d vs 2d npz) closer than this
+# are the same ground state; anything further apart is reported.
+CONFLICT_TOL_MHZ = 0.01
+
 ORIENTATION_RE = re.compile(r"(?<![A-Za-z])(k{1,2}|hk|kh)(?![A-Za-z])", re.IGNORECASE)
 
 
 def infer_orientation(path: Path) -> str:
     """Pull the orientation token (k, kk, hk, kh) out of a path, or '' if absent."""
-    match = ORIENTATION_RE.search("/".join(path.parts))
-    return match.group(1).lower() if match else ""
+    for part in reversed(path.parts):  # innermost folder first, never the user's home path
+        match = ORIENTATION_RE.search(part)
+        if match:
+            return match.group(1).lower()
+    return ""
 
 
 def infer_cell(path: Path) -> str:
     """Pull the supercell size (e.g. '512' in NV_512_k) out of a path, or '' if absent."""
-    match = re.search(r"(?<![\dA-Za-z])(1?\d{2,3})(?![\dA-Za-z])", "/".join(path.parts))
-    return match.group(1) if match else ""
+    for part in reversed(path.parts):  # innermost folder first, never the user's home path
+        match = re.search(r"(?<![\dA-Za-z])(1?\d{2,3})(?![\dA-Za-z])", part)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def infer_defect(folder: Path) -> str:
+    """Defect name from a folder like NV_512, V_Si_128 or NV_512_kk (everything before the cell size)."""
+    match = re.fullmatch(r"(.+?)_\d+(?:_.*)?", folder.name)
+    return match.group(1) if match else folder.name
 
 
 def find_npz(folder: Path) -> list[Path]:
     return sorted(folder.rglob("*_raw_zfs_data_*.npz"))
 
 
-def method_of(npz_path: Path) -> str | None:
+def method_of(npz_path: Path, calc_method: str | None = None) -> str | None:
+    """Table column from the stored calc_method, else from the filename."""
+    stored = _normalize_calc_method(calc_method)
+    if stored in METHOD_COLUMN:
+        return METHOD_COLUMN[stored]
     name = npz_path.name
     for fragment, column in METHOD_COLUMN.items():
         if fragment in name:
@@ -73,16 +93,16 @@ def collect_rows(paths: list[Path]) -> list[dict]:
             if zfs is None:
                 print(f"warning: no ground-state ZFS in {npz_path}, skipping", file=sys.stderr)
                 continue
-            column = method_of(npz_path)
+            column = method_of(npz_path, data.calc_method)
             if column is None:
                 print(f"warning: unknown method in {npz_path.name}, skipping", file=sys.stderr)
                 continue
             orientation = infer_orientation(npz_path.parent) or infer_orientation(path)
             rows.append({
-                "defect": data.defect,
+                "defect": data.defect or infer_defect(npz_path.parent),
                 "configuration": orientation,
                 "column": column,
-                "cell": infer_cell(npz_path.parent) or infer_cell(path),
+                "cell": str(data.cell_size) if data.cell_size else (infer_cell(npz_path.parent) or infer_cell(path)),
                 "d_mhz": zfs.to_unit("MHz").D,
                 "source": npz_path,
             })
@@ -103,7 +123,7 @@ def collect_outcar_rows(folder: Path) -> list[dict]:
     zfs_dirs = sorted(folder.rglob("ZFS_hyp")) + sorted(folder.rglob("ZFS_occup"))
     for zfs_dir in zfs_dirs:
         defect_root = zfs_dir.parent
-        defect = defect_root.name.split("_")[0]
+        defect = infer_defect(defect_root)
         orientation = infer_orientation(defect_root)
         zfs_name = zfs_dir.name
         column = "contaminated" if zfs_name == "ZFS_hyp" else "corrected"
@@ -146,28 +166,47 @@ def merge_rows(rows: list[dict]) -> list[dict]:
             "cell": row["cell"],
             "corrected": None,
             "contaminated": None,
+            "sources": {},
         })
-        entry[row["column"]] = row["d_mhz"]
+        column = row["column"]
+        previous = entry[column]
+        if previous is None:
+            entry[column] = row["d_mhz"]
+            entry["sources"][column] = row["source"]
+        elif abs(previous - row["d_mhz"]) > CONFLICT_TOL_MHZ:
+            # first source wins (OUTCARs are collected before packaged npz files)
+            print(
+                f"warning: conflicting {column} D for {' '.join(filter(None, key))}: "
+                f"{previous:.3f} MHz ({entry['sources'][column]}) vs {row['d_mhz']:.3f} MHz "
+                f"({row['source']}); keeping the first",
+                file=sys.stderr,
+            )
     return list(merged.values())
 
 
-def assign_letters(merged: list[dict]) -> dict[str, dict[str, str]]:
-    """Map each defect to {cell -> letter}, letters ordered by cell size."""
-    letters: dict[str, dict[str, str]] = {}
-    for defect in sorted({row["defect"] for row in merged}):
-        cells = sorted({row["cell"] for row in merged if row["defect"] == defect},
-                       key=lambda c: (len(c), c))
-        letters[defect] = {c: chr(ord("a") + i) for i, c in enumerate(cells)}
-    return letters
+def assign_letters(merged: list[dict]) -> dict[str, str]:
+    """Map each cell size to one letter for the whole table, ordered by cell size.
+
+    Letters are shared across defects so the caption footnote is unambiguous.
+    """
+    cells = sorted({row["cell"] for row in merged if row["cell"]}, key=int)
+    return {c: chr(ord("a") + i) for i, c in enumerate(cells)}
+
+
+def tex_defect(defect: str, configuration: str) -> str:
+    """LaTeX label: V_Si -> V$_\\mathrm{Si}$, with the configuration appended to the subscript."""
+    base, _, sub = defect.partition("_")
+    subs = ", ".join(part for part in (sub.replace("_", r"\_"), configuration) if part)
+    return f"{base}$_\\mathrm{{{subs}}}$" if subs else base
 
 
 def render_tex(merged: list[dict], unit: str) -> str:
     letters = assign_letters(merged)
 
-    def fmt(value: float | None, cell: str, defect: str) -> str:
+    def fmt(value: float | None, cell: str) -> str:
         if value is None:
             return "---"
-        letter = letters[defect].get(cell, "")
+        letter = letters.get(cell, "")
         sup = rf"$^{{({letter})}}$" if letter else ""
         return f"{value:.3f}{sup}"
 
@@ -176,8 +215,8 @@ def render_tex(merged: list[dict], unit: str) -> str:
     for row in merged:
         g = grouped.setdefault((row["defect"], row["configuration"]), {
             "corrected": [], "contaminated": []})
-        g["corrected"].append(fmt(row["corrected"], row["cell"], row["defect"]))
-        g["contaminated"].append(fmt(row["contaminated"], row["cell"], row["defect"]))
+        g["corrected"].append(fmt(row["corrected"], row["cell"]))
+        g["contaminated"].append(fmt(row["contaminated"], row["cell"]))
 
     lines = [
         r"% generated by scripts/cluster/generate_d_table.py",
@@ -192,16 +231,12 @@ def render_tex(merged: list[dict], unit: str) -> str:
     ]
     for (defect, configuration) in sorted(grouped):
         g = grouped[(defect, configuration)]
-        defect_label = f"{defect}$_\\mathrm{{{configuration}}}$" if configuration else defect
+        defect_label = tex_defect(defect, configuration)
         lines.append(
             f"    {defect_label} & {configuration or '---'} & --- & "
             f"{', '.join(g['corrected'])} & {', '.join(g['contaminated'])} \\\\"
         )
-    footnote = "; ".join(
-        f"({letter}) cell size {cell}"
-        for defect in letters
-        for cell, letter in sorted(letters[defect].items(), key=lambda kv: kv[1])
-    )
+    footnote = "; ".join(f"({letter}) cell size {cell}" for cell, letter in letters.items())
     lines += [
         r"    \bottomrule",
         r"  \end{tabular}",
