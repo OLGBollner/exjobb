@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from beyblade.models import PhononSpectrum, ZFSTensor
+from beyblade.models import PhononSpectrum, RawZFSData, ZFSTensor
 from beyblade.parsers import (
     parse_outcar_energy,
     parse_outcar_zfs,
@@ -308,3 +308,76 @@ class TestParsers:
         (sim_dir_no_relaxed / "defect_band_approx" / "runs" / "1").mkdir(parents=True, exist_ok=True)
         with pytest.raises(ValueError, match="Relaxed ZFS tensor not found"):
             parse_zfs_simulation_dataset(sim_dir_no_relaxed, calc_method="approx")
+
+
+class TestSpinCorrectionOnLoad:
+    """The 3/2 spin-correction scaling lives in RawZFSData.load, not ZFSManager."""
+
+    @staticmethod
+    def _make_raw(calc_method: str) -> RawZFSData:
+        from beyblade.models import PerturbationEntry
+
+        unit = "MHz"
+        gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]).astype(float), unit=unit)
+        first = {
+            1060: PerturbationEntry(
+                order=1,
+                mode_indices=(1060,),
+                amplitude=0.1,
+                zfs_tensor=ZFSTensor(matrix=np.diag([-990.0, -990.0, 1980.0]).astype(float), unit=unit),
+            )
+        }
+        return RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.025,
+            calc_method=calc_method,
+            order=1,
+            ground_state_zfs=gs,
+            first_order=first,
+        )
+
+    def _save(self, raw: RawZFSData, tmp_path: Path) -> Path:
+        out = tmp_path / f"test_{raw.calc_method}.npz"
+        raw.save(out)
+        return out
+
+    def test_approx_tensors_scaled_by_three_halves_once(self, tmp_path, capsys):
+        raw = self._make_raw("defect_band_approx")
+        out = self._save(raw, tmp_path)
+
+        # Stored file is unscaled
+        with np.load(str(out), allow_pickle=True) as npz:
+            assert npz["ground_state_zfs_matrix"][2, 2] == pytest.approx(2000.0)
+            assert not npz.get("spin_correction_applied", False)
+
+        loaded = RawZFSData.load(out)
+        h = 6.62607015e-34
+        assert loaded.spin_correction_applied is True
+        assert loaded.ground_state_zfs.unit == "J"
+        assert loaded.ground_state_zfs.matrix[2, 2] == pytest.approx(3000.0e6 * h)
+        assert loaded.ground_state_zfs.matrix[0, 0] == pytest.approx(-1500.0e6 * h)
+        entry = loaded.first_order[1060]
+        assert entry["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+        assert "Applied spin correction scaling: 1.5" in capsys.readouterr().out
+
+        # Saving the corrected object persists the flag; re-loading must not rescale
+        out2 = tmp_path / "resaved.npz"
+        loaded.save(out2)
+        reloaded = RawZFSData.load(out2)
+        assert reloaded.ground_state_zfs.matrix[2, 2] == pytest.approx(3000.0e6 * h)
+
+    def test_apply_corrections_false_leaves_raw_tensors(self, tmp_path):
+        out = self._save(self._make_raw("defect_band_approx"), tmp_path)
+        raw = RawZFSData.load(out, apply_corrections=False)
+        h = 6.62607015e-34
+        assert raw.spin_correction_applied is False
+        assert raw.ground_state_zfs.matrix[2, 2] == pytest.approx(2000.0e6 * h)
+        assert raw.first_order[1060]["tensor"][2, 2] == pytest.approx(1980.0e6 * h)
+
+    def test_all_bands_is_never_scaled(self, tmp_path, capsys):
+        out = self._save(self._make_raw("all_bands"), tmp_path)
+        loaded = RawZFSData.load(out)
+        assert loaded.spin_correction_applied is False
+        assert loaded.ground_state_zfs.matrix[2, 2] == pytest.approx(2000.0e6 * 6.62607015e-34)
+        assert capsys.readouterr().out == ""
