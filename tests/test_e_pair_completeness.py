@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from beyblade.models import PhononSpectrum
-from beyblade.zfs_manager import ZFSManager
+from spinlabs.models import PhononSpectrum
+from spinlabs.zfs_manager import ZFSManager
 
 
 def test_e_pair_completeness_flagging():
@@ -52,7 +52,8 @@ def test_zfs_manager_rejects_incomplete_spectrum():
 
 
 def test_clv_128_lonely_e_modes_expansion():
-    # Synthetic spectrum mimicking the lonely Ex mode case (e.g. 2 atoms -> 6 total modes, 4 present: 2 A1 + 2 lonely Ex)
+    # Synthetic spectrum mimicking the lonely Ex mode case
+    # (e.g. 2 atoms -> 6 total modes, 4 present: 2 A1 + 2 lonely Ex)
     n_atoms = 3
     # 3 atoms -> 3 * 3 = 9 modes total.
     # Suppose we have 2 A1 modes and 2 Ex modes without Ey partners (total 4 modes present)
@@ -110,8 +111,8 @@ def test_filter_reduced_spectrum_keeps_original_indices_valid():
     original_indices against the full pre-reduction size, not the reduced
     size. classify_and_pair finds no degeneracies on this stub, so nothing
     is dropped -- but the index check would previously raise."""
-    from beyblade.models import PhononSpectrum
-    from beyblade.symmetry import filter_degenerate_partners
+    from spinlabs.models import PhononSpectrum
+    from spinlabs.symmetry import filter_degenerate_partners
 
     reduced = PhononSpectrum(
         frequencies_mev=np.array([10.0, 20.0]),

@@ -2,11 +2,11 @@ import numpy as np
 from scipy import constants as Cn
 from typing import Tuple
 
-class MathUtils:
 
+class MathUtils:
     @staticmethod
     def broad_delta(omega, omega_p, sigma):
-        delta = np.exp(-0.5 * (omega_p - omega)**2 / (sigma**2)) * 1 / (np.sqrt(2*Cn.pi)*sigma)**omega.ndim
+        delta = np.exp(-0.5 * (omega_p - omega) ** 2 / (sigma**2)) * 1 / (np.sqrt(2 * Cn.pi) * sigma) ** omega.ndim
         s = delta.sum()
         if s > 0:
             delta /= s
@@ -33,7 +33,7 @@ class MathUtils:
         x_grid, y_dense = MathUtils.expand_data(freqs, values, res, sigma)
 
         x_kernel = np.arange(-4 * sigma, 4 * sigma + res, res)
-        kernel = np.exp(-0.5 * (x_kernel / sigma)**2) / (sigma * np.sqrt(2 * Cn.pi))
+        kernel = np.exp(-0.5 * (x_kernel / sigma) ** 2) / (sigma * np.sqrt(2 * Cn.pi))
 
         y_smooth = np.convolve(y_dense, kernel, mode="same")
         if len(y_smooth) > len(x_grid):
@@ -69,8 +69,7 @@ class MathUtils:
         idx_x = np.round(freq_x_flat / res).astype(int)
         idx_y = np.round(freq_y_flat / res).astype(int)
 
-        mask = (idx_x >= 0) & (idx_x < len(x_array)) & \
-               (idx_y >= 0) & (idx_y < len(y_array))
+        mask = (idx_x >= 0) & (idx_x < len(x_array)) & (idx_y >= 0) & (idx_y < len(y_array))
 
         np.add.at(dense_values, (idx_x[mask], idx_y[mask]), values[mask])
 
@@ -117,11 +116,13 @@ class MathUtils:
         sin_a = np.sin(angle)
         omc = 1 - cos_a  # 1 - cos(angle)
 
-        R = np.array([
-            [cos_a + x*x*omc,      x*y*omc - z*sin_a,   x*z*omc + y*sin_a],
-            [y*x*omc + z*sin_a,    cos_a + y*y*omc,     y*z*omc - x*sin_a],
-            [z*x*omc - y*sin_a,    z*y*omc + x*sin_a,   cos_a + z*z*omc]
-        ])
+        R = np.array(
+            [
+                [cos_a + x * x * omc, x * y * omc - z * sin_a, x * z * omc + y * sin_a],
+                [y * x * omc + z * sin_a, cos_a + y * y * omc, y * z * omc - x * sin_a],
+                [z * x * omc - y * sin_a, z * y * omc + x * sin_a, cos_a + z * z * omc],
+            ]
+        )
         return R
 
     @staticmethod
@@ -234,8 +235,8 @@ class MathUtils:
 
         within = cart_dist < radius
 
-        disp_sq = np.sum(eigs**2, axis=-1)          # (n_modes, n_atoms)
-        disp_total = np.sum(disp_sq, axis=-1)        # (n_modes,)
+        disp_sq = np.sum(eigs**2, axis=-1)  # (n_modes, n_atoms)
+        disp_total = np.sum(disp_sq, axis=-1)  # (n_modes,)
         disp_local = np.sum(disp_sq[:, within], axis=-1)
 
         return disp_local / disp_total
@@ -254,7 +255,7 @@ class MathUtils:
     @staticmethod
     def calc_symmetry(sym_a: str, sym_b: str) -> list[str]:
         """Calculate resulting symmetry irreps for the C3v point group."""
-        
+
         def parse_irrep(sym: str) -> str:
             sym_upper = sym.upper()
             if sym_upper in ("EX", "EY"):
@@ -275,14 +276,13 @@ class MathUtils:
             ("E", "A2"): ["E"],
             ("E", "E"): ["A1", "A2", "E"],
         }
-        
+
         pair = (a_parsed, b_parsed)
         if pair in product_table:
             return product_table[pair]
-            
+
         reverse_pair = (b_parsed, a_parsed)
         if reverse_pair in product_table:
             return product_table[reverse_pair]
-            
-        raise ValueError(f"Direct product for irreps {sym_a} and {sym_b} is not defined.")
 
+        raise ValueError(f"Direct product for irreps {sym_a} and {sym_b} is not defined.")

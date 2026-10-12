@@ -4,33 +4,33 @@ Validation strategy: the general pipeline must reproduce the legacy
 C3v hard-coded classification on real NV/ClV phonon data, plus unit
 tests on synthetic structures with known point groups.
 """
+
 from collections import Counter
 from pathlib import Path
 import warnings
 
 import numpy as np
 
-from beyblade.models import check_original_indices
+from spinlabs.models import check_original_indices
 import pytest
 from pymatgen.core import Structure
 
-from beyblade.symmetry import (
+from spinlabs.symmetry import (
     detect_point_group,
     classify_modes,
     _parent_label,
 )
-from beyblade.parsers import parse_phonon_npz
+from spinlabs.parsers import parse_phonon_npz
 
 
 # ---------------------------------------------------------------------------
 # Synthetic structures: known point groups
 # ---------------------------------------------------------------------------
 
+
 def _fcc_si_structure():
     """Primitive Si diamond structure -> space group Fd-3m, point group m-3m (Oh)."""
-    lattice = np.array([[0, 5.43 / 2, 5.43 / 2],
-                        [5.43 / 2, 0, 5.43 / 2],
-                        [5.43 / 2, 5.43 / 2, 0]])
+    lattice = np.array([[0, 5.43 / 2, 5.43 / 2], [5.43 / 2, 0, 5.43 / 2], [5.43 / 2, 5.43 / 2, 0]])
     return Structure(lattice, ["Si", "Si"], [[0, 0, 0], [0.25, 0.25, 0.25]])
 
 
@@ -101,10 +101,12 @@ def test_accidental_degeneracies_do_not_merge():
 # filter_sym_pairs: regression tests for the keep-all-Ex rule
 # ---------------------------------------------------------------------------
 
+
 def _tiny_spectrum(freqs, syms):
     """Minimal PhononSpectrum with preset labels (bypasses classification)."""
     import numpy as _np
-    from beyblade.models import PhononSpectrum
+    from spinlabs.models import PhononSpectrum
+
     n = len(freqs)
     spec = PhononSpectrum(
         frequencies_mev=_np.asarray(freqs, dtype=float),
@@ -161,7 +163,8 @@ def test_filter_group_theory_invariant_on_synthetic_c3v():
 
 
 def test_filter_rejects_broken_original_indices():
-    from beyblade.models import check_original_indices
+    from spinlabs.models import check_original_indices
+
     with pytest.raises(ValueError):
         check_original_indices(np.array([0, 0, 2]), n_modes=3)
     with pytest.raises(ValueError):
@@ -188,17 +191,19 @@ def test_filter_original_indices_valid_on_real_data():
 # Symmetrization of accidentally mixed near-degenerate modes
 # ---------------------------------------------------------------------------
 
+
 def test_symmetrize_mixed_a1_e_pair_on_nv512():
     """NV_512 modes 313/314/315: Ex pure, Ey~A1 mixed (accidental degeneracy).
 
     After symmetrization every group member must have characters matching
     its label's class characters exactly.
     """
-    from beyblade.symmetry import (
+    from spinlabs.symmetry import (
         symmetrize_degenerate_groups,
         defect_frame_operations,
         _mode_characters,
     )
+
     spec = parse_phonon_npz(NV_PATH)
     labels = [str(s) for s in spec.symmetries]
     assert labels[313] == "Ey" and labels[314] == "Ex" and labels[315] == "A1"
@@ -223,19 +228,22 @@ def test_symmetrize_mixed_a1_e_pair_on_nv512():
 
 
 def test_symmetrize_is_fixpoint_on_pure_groups():
-    from beyblade.symmetry import symmetrize_degenerate_groups
+    from spinlabs.symmetry import symmetrize_degenerate_groups
+
     spec = parse_phonon_npz(CLV_PATH)
     sym = symmetrize_degenerate_groups(spec)
     # every vector either unchanged or reassigned within its group; total
     # label multiset must be preserved
     from collections import Counter
+
     assert Counter(map(str, sym.symmetries)) == Counter(map(str, spec.symmetries))
 
 
 def test_symmetrize_recover_artificial_mixing():
     """Rotate a known-pure A1/Ey pair by theta, symmetrize, check recovery."""
-    from beyblade.symmetry import symmetrize_degenerate_groups
+    from spinlabs.symmetry import symmetrize_degenerate_groups
     import dataclasses
+
     spec = parse_phonon_npz(NV_PATH)
     pure = symmetrize_degenerate_groups(spec)  # ground-truth pure states
     ia, ie = 315, 313  # A1 and Ey slots
@@ -258,13 +266,12 @@ def test_symmetrize_recover_artificial_mixing():
 # sym_check_summary: wrapper-facing one-liner for the verify report
 # ---------------------------------------------------------------------------
 
+
 def test_sym_check_summary_variants():
-    from beyblade.symmetry import sym_check_summary
+    from spinlabs.symmetry import sym_check_summary
 
     assert sym_check_summary(None) == ""
     assert sym_check_summary({"ok": True, "failures": [], "unpaired": []}) == "ok"
-    assert sym_check_summary(
-        {"ok": True, "failures": [], "unpaired": [1, 2]}
-    ) == "ok (2 unpaired)"
+    assert sym_check_summary({"ok": True, "failures": [], "unpaired": [1, 2]}) == "ok (2 unpaired)"
     msg = sym_check_summary({"ok": False, "failures": [(3, [10, 11], [2.0, -1.0], [1.9, -0.8])], "unpaired": []})
     assert "FAILED" in msg and "1" in msg and "group 3" in msg

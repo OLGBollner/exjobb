@@ -3,7 +3,7 @@ import pytest
 import yaml
 from pymatgen.core import Structure
 
-from beyblade.parsers import parse_phonopy_yaml, prepare_phonopy_yaml
+from spinlabs.parsers import parse_phonopy_yaml, prepare_phonopy_yaml
 
 
 def _write_yaml(path, lattice):
@@ -84,14 +84,13 @@ def test_missing_structure_warns(tmp_path):
 def test_duplicate_qpoint_deduplicated(tmp_path, recwarn):
     """phonons.yaml with the same Gamma block twice: keep only the first."""
     n = 2
-    bands = [
-        {"frequency": 1.0 + i * 0.1, "eigenvector": [[[1.0, 0.0, 0.0]] for _ in range(n)]}
-        for i in range(3 * n)
-    ]
-    doc = {"phonon": [
-        {"q-position": [0.0, 0.0, 0.0], "band": bands},
-        {"q-position": [0.0, 0.0, 0.0], "band": bands},
-    ]}
+    bands = [{"frequency": 1.0 + i * 0.1, "eigenvector": [[[1.0, 0.0, 0.0]] for _ in range(n)]} for i in range(3 * n)]
+    doc = {
+        "phonon": [
+            {"q-position": [0.0, 0.0, 0.0], "band": bands},
+            {"q-position": [0.0, 0.0, 0.0], "band": bands},
+        ]
+    }
     yaml_path = tmp_path / "phonons.yaml"
     yaml_path.write_text(yaml.safe_dump(doc))
 

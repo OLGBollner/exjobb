@@ -8,21 +8,29 @@ from typing import Any
 
 import numpy as np
 
-from beyblade.constants import CONSTANTS
-from beyblade.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
-from beyblade.parsers import (
+from spinlabs.constants import CONSTANTS
+from spinlabs.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
+from spinlabs.parsers import (
     parse_phonon_data,
     parse_zfs_dataset_npz,
     parse_zfs_simulation_dataset,
 )
-from beyblade.plotter import (
+from spinlabs.plotter import (
     plot_1d_spectral_functions,
-    plot_t1_relaxation,
+    plot_t1,
     plot_transition_rates_stacked,
 )
-from beyblade.relaxation_dynamics import RelaxationDynamics
-from beyblade.transition_rate import TransitionRate
-from beyblade.zfs_manager import ZFSManager
+from spinlabs.relaxation_dynamics import RelaxationDynamics
+from spinlabs.runs_index import append_row, index_path
+from spinlabs.transition_rate import TransitionRate
+from spinlabs.zfs_manager import ZFSManager
+
+
+def _pert_dir_name(pert_scale: float | None) -> str:
+    """Folder name for a perturbation scale, e.g. 'pert_1.0' or 'pert_none'."""
+    if pert_scale is None:
+        return "pert_none"
+    return f"pert_{pert_scale:g}"
 
 
 def get_unique_run_dir(
@@ -31,15 +39,19 @@ def get_unique_run_dir(
     cell_size: str | int = "",
     calc_method: str = "all_bands",
     order: int = 1,
+    pert_scale: float | None = None,
     run_name: str | None = None,
 ) -> Path:
     """
     Creates a unique run directory so prior results are never overwritten.
+
+    Layout: <output_root>/<defect>_<cell>/<method>/<pert>_<scale>/<YYYYmmdd_HHMMSS>
+    With --run-name, <output_root>/<run_name>[_N] is used instead.
     """
     base = Path(output_root)
-    base.mkdir(parents=True, exist_ok=True)
 
     if run_name:
+        base.mkdir(parents=True, exist_ok=True)
         candidate = base / run_name
         if not candidate.exists():
             candidate.mkdir(parents=True, exist_ok=True)
@@ -52,16 +64,18 @@ def get_unique_run_dir(
         return final_dir
 
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dir_name = f"{defect}_{cell_size}_{calc_method}_{order}d_{now_str}"
-    candidate = base / dir_name
-    if not candidate.exists():
-        candidate.mkdir(parents=True, exist_ok=True)
-        return candidate
+    leaf = (
+        base / f"{defect}_{cell_size}" / calc_method
+        / _pert_dir_name(pert_scale) / now_str
+    )
+    if not leaf.exists():
+        leaf.mkdir(parents=True, exist_ok=True)
+        return leaf
 
     idx = 1
-    while (base / f"{dir_name}_{idx}").exists():
+    while (leaf.parent / f"{now_str}_{idx}").exists():
         idx += 1
-    final_dir = base / f"{dir_name}_{idx}"
+    final_dir = leaf.parent / f"{now_str}_{idx}"
     final_dir.mkdir(parents=True, exist_ok=True)
     return final_dir
 
@@ -254,12 +268,18 @@ def run_full_pipeline(
             order = 1
 
     # ── 3. Create Unique Run Folder ──────────────────────────────────────────
+    pert_eff = (
+        pert_scale
+        if pert_scale is not None
+        else (raw_data.pert_scale if raw_data else coupling_data.pert_scale)
+    )
     run_dir = get_unique_run_dir(
         output_root=output_root,
         defect=str(defect),
         cell_size=cell_size,
         calc_method=calc_method,
         order=order,
+        pert_scale=pert_eff,
         run_name=run_name,
     )
     print("\n========================================================")
@@ -327,14 +347,17 @@ def run_full_pipeline(
     omega_zfs = calculator.data["zfs"] / CONSTANTS["meV2J"]
 
     rate_results = {
-        "first_order":  {"0_1": [], "1_-1": []},
+        "first_order": {"0_1": [], "1_-1": []},
         "second_order": {"0_1": [], "1_-1": []},
-        "two_phonon":   {"0_1": [], "1_-1": []},
+        "two_phonon": {"0_1": [], "1_-1": []},
     }
     directional_results = {
-        "0_to_1": [], "0_to_-1": [],
-        "1_to_0": [], "-1_to_0": [],
-        "1_to_-1": [], "-1_to_1": [],
+        "0_to_1": [],
+        "0_to_-1": [],
+        "1_to_0": [],
+        "-1_to_0": [],
+        "1_to_-1": [],
+        "-1_to_1": [],
     }
     valid_temps = []
 
@@ -451,6 +474,29 @@ def run_full_pipeline(
     with open(info_path, "w") as f:
         json.dump(run_info, f, indent=2)
 
+    # ── 8b. Runs Index ────────────────────────────────────────────────────────
+    dims: list[int] = []
+    if raw_data is not None:
+        if len(raw_data.second_order) > 0:
+            dims.append(2)
+        if len(raw_data.first_order) > 0:
+            dims.append(1)
+    append_row(
+        output_root,
+        defect=str(defect),
+        cell=cell_size,
+        method=calc_method,
+        order=order,
+        pert=pert_eff,
+        n_dims=dims,
+        temp_min=float(np.min(valid_temps_arr)),
+        temp_max=float(np.max(valid_temps_arr)),
+        n_temps=len(valid_temps_arr),
+        npz_files=[p.name for p in sorted(run_dir.glob("*.npz"))],
+        run_dir=run_dir,
+    )
+    print(f"      Indexed run in {index_path(output_root)}")
+
     # ── 9. Optional Plotting ─────────────────────────────────────────────────
     figures_saved = []
     if save_plots:
@@ -461,7 +507,7 @@ def run_full_pipeline(
         # Coupling plots (1D and 2D diagonal)
         try:
             coupling_display = coupling_data.to_unit("MHz").frequencies_to_unit("meV")
-            
+
             # 1D coupling plot
             fig_c1, _, _ = plot_1d_spectral_functions(
                 frequencies_mev=coupling_display.frequencies,
@@ -486,8 +532,16 @@ def run_full_pipeline(
                 v2_0pm = coupling_display.V2_0_pm
 
                 v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
-                v2_pm_diag = np.diag(v2_pm) if (v2_pm is not None and v2_pm.ndim == 2) else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
-                v2_0pm_diag = np.diag(v2_0pm) if (v2_0pm is not None and v2_0pm.ndim == 2) else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+                v2_pm_diag = (
+                    np.diag(v2_pm)
+                    if (v2_pm is not None and v2_pm.ndim == 2)
+                    else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
+                )
+                v2_0pm_diag = (
+                    np.diag(v2_0pm)
+                    if (v2_0pm is not None and v2_0pm.ndim == 2)
+                    else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+                )
 
                 fig_c2, _, _ = plot_1d_spectral_functions(
                     frequencies_mev=coupling_display.frequencies,
@@ -514,7 +568,7 @@ def run_full_pipeline(
         # T1 plot
         try:
             ft1_path = fig_dir / "t1_vs_temperature.png"
-            plot_t1_relaxation(t1_path, output_path=ft1_path, plain_name=True)
+            plot_t1([t1_path], output_path=ft1_path, plain_name=True)
             figures_saved.append(ft1_path)
         except Exception as e:
             print(f"Warning: could not generate T1 plot: {e}")

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import numpy as np
 
-from beyblade.parsers import parse_phonon_data, save_phonon_npz
-from beyblade.symmetry import classify_and_pair, filter_degenerate_partners, symmetrize_degenerate_groups
+from spinlabs.parsers import parse_phonon_data, save_phonon_npz
+from spinlabs.symmetry import classify_and_pair, filter_degenerate_partners, symmetrize_degenerate_groups
 
 RUN_STAGES = ("relaxation_data", "ZFS_hyp", "ZFS_occup")
 
@@ -344,8 +344,7 @@ def prepare_basis(
         text = replace_sbatch(text, "-a", f"0-{n_array_jobs - 1}")
 
     (dst / script_name).write_text(text)
-    shutil.copy2(scripts_dir / "verify_perturbation_setup.py",
-                 dst / "verify_perturbation_setup.py")
+    shutil.copy2(scripts_dir / "verify_perturbation_setup.py", dst / "verify_perturbation_setup.py")
 
     if per_sim is not None:
         print(

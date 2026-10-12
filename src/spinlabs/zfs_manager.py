@@ -5,14 +5,14 @@ from pathlib import Path
 from typing import Any, Optional, Union
 import numpy as np
 
-from beyblade.constants import CONSTANTS
-from beyblade.symmetry import twin_of, _build_groups_from_labels
-from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
-from beyblade.parsers import (
+from spinlabs.constants import CONSTANTS
+from spinlabs.symmetry import twin_of, _build_groups_from_labels
+from spinlabs.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, _normalize_calc_method
+from spinlabs.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
 )
-from beyblade.utils import MathUtils
+from spinlabs.utils import MathUtils
 
 
 class ZFSManager:
@@ -37,6 +37,7 @@ class ZFSManager:
             # test fixtures with all atoms at the origin), fall back to the
             # stored labels rather than failing the whole pipeline.
             from .symmetry import SymmetryDetectionError, classify_and_pair
+
             stored_syms = list(spectrum.symmetries) if spectrum.symmetries is not None else None
             try:
                 fresh_labels, deg_groups = classify_and_pair(spectrum, force=True)
@@ -48,8 +49,7 @@ class ZFSManager:
                 if stored_syms is None:
                     raise
                 warnings.warn(
-                    f"Fresh symmetry classification failed ({exc}); "
-                    "falling back to stored labels.",
+                    f"Fresh symmetry classification failed ({exc}); falling back to stored labels.",
                     RuntimeWarning,
                     stacklevel=2,
                 )
@@ -75,8 +75,7 @@ class ZFSManager:
             if spectrum.e_pair_complete is None:
                 spectrum.check_e_pair_completeness()
             incomplete = [
-                i for i, ok in enumerate(spectrum.e_pair_complete or [])
-                if not ok and fresh_labels[i] in ("Ex", "Ey")
+                i for i, ok in enumerate(spectrum.e_pair_complete or []) if not ok and fresh_labels[i] in ("Ex", "Ey")
             ]
             if incomplete:
                 raise ValueError(
@@ -98,15 +97,13 @@ class ZFSManager:
         self.cell_size: Optional[int] = raw_data.cell_size if raw_data else None
         self.pert_scale: Optional[float] = raw_data.pert_scale if raw_data else None
         self.calc_method: Optional[str] = (
-            raw_data.calc_method or raw_data.metadata.get("calc_method")
-            if raw_data
-            else None
+            raw_data.calc_method or raw_data.metadata.get("calc_method") if raw_data else None
         )
 
         # Processed ZFS data in defect principal frame
-        self.zfs_relaxed: Optional[np.ndarray] = None          # Shape (3, 3) in J
-        self.eigen_rotation: Optional[np.ndarray] = None        # Shape (3, 3)
-        self.first_order: dict[int, dict[str, Any]] = {}        # 1D perturbations
+        self.zfs_relaxed: Optional[np.ndarray] = None  # Shape (3, 3) in J
+        self.eigen_rotation: Optional[np.ndarray] = None  # Shape (3, 3)
+        self.first_order: dict[int, dict[str, Any]] = {}  # 1D perturbations
         self.second_order: dict[tuple[int, int], dict[str, Any]] = {}  # 2D perturbations
         self.treated_modes: set[int] = set()
 
@@ -160,8 +157,6 @@ class ZFSManager:
             D_xx, D_yy, D_zz, R = raw.ground_state_zfs.principal_components()
             self.eigen_rotation = R
             self.zfs_relaxed = np.diag([D_xx, D_yy, D_zz])
-            if "approx" in self.calc_method:
-                self.zfs_relaxed *= 1.5
 
         # eigen_rotation columns are the ground-state principal-frame eigenvectors,
         # so rotating into that frame is R.T @ tensor @ R (NOT R @ tensor @ R.T).
@@ -190,9 +185,7 @@ class ZFSManager:
             and (spectrum.original_indices is None or identity)
         ):
             pert_amps = {}
-            for idx, entry in list(raw.first_order.items()) + list(
-                (k[0], v) for k, v in raw.second_order.items()
-            ):
+            for idx, entry in list(raw.first_order.items()) + list((k[0], v) for k, v in raw.second_order.items()):
                 pert = entry.get("pert") if isinstance(entry, dict) else None
                 if pert is None:
                     continue
@@ -228,8 +221,6 @@ class ZFSManager:
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
-                    if "approx" in self.calc_method:
-                        tensor_j *= 1.5
                     self.first_order[sp] = {
                         "tensor": tensor_j,
                         "symmetry": phonon_pert["sym"][sp] if phonon_pert else None,
@@ -245,8 +236,6 @@ class ZFSManager:
                     enriched = dict(entry)
                     tensor = np.asarray(enriched.get("tensor"), dtype=float)
                     rotated = eigen_rot_t @ tensor @ eigen_rot if self.eigen_rotation is not None else tensor
-                    if "approx" in self.calc_method:
-                        rotated *= 1.5
                     enriched["tensor"] = rotated
                     # When phonon data is available, always update symmetry/pert/ipr
                     # so that mode-dependent SI displacements q_i = q0 * sqrt(2*omega/hbar)
@@ -271,8 +260,6 @@ class ZFSManager:
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
-                    if "approx" in self.calc_method:
-                        tensor_j *= 1.5
                     self.second_order[(si, sj)] = {
                         "tensor": tensor_j,
                         "symmetry": (phonon_pert["sym"][si], phonon_pert["sym"][sj]) if phonon_pert else None,
@@ -287,15 +274,25 @@ class ZFSManager:
                     enriched = dict(entry)
                     tensor = np.asarray(enriched.get("tensor"), dtype=float)
                     rotated = eigen_rot_t @ tensor @ eigen_rot if self.eigen_rotation is not None else tensor
-                    if "approx" in self.calc_method:
-                        rotated *= 1.5
                     enriched["tensor"] = rotated
                     if phonon_pert is not None:
-                        if phonon_pert.get("sym") is not None and si < len(phonon_pert["sym"]) and sj < len(phonon_pert["sym"]):
+                        if (
+                            phonon_pert.get("sym") is not None
+                            and si < len(phonon_pert["sym"])
+                            and sj < len(phonon_pert["sym"])
+                        ):
                             enriched["symmetry"] = (phonon_pert["sym"][si], phonon_pert["sym"][sj])
-                        if phonon_pert.get("disp") is not None and si < len(phonon_pert["disp"]) and sj < len(phonon_pert["disp"]):
+                        if (
+                            phonon_pert.get("disp") is not None
+                            and si < len(phonon_pert["disp"])
+                            and sj < len(phonon_pert["disp"])
+                        ):
                             enriched["pert"] = (phonon_pert["disp"][si], phonon_pert["disp"][sj])
-                        if phonon_pert.get("ipr") is not None and si < len(phonon_pert["ipr"]) and sj < len(phonon_pert["ipr"]):
+                        if (
+                            phonon_pert.get("ipr") is not None
+                            and si < len(phonon_pert["ipr"])
+                            and sj < len(phonon_pert["ipr"])
+                        ):
                             enriched["ipr"] = (phonon_pert["ipr"][si], phonon_pert["ipr"][sj])
                     enriched["original_index"] = (i, j)
                     self.second_order[(si, sj)] = enriched
@@ -323,7 +320,11 @@ class ZFSManager:
                 continue
             pert = entry.get("pert")
             if pert is None:
-                pert = getattr(self.raw_data.first_order.get(int(oas[sp]), None), "pert", None) if hasattr(self, "raw_data") else None
+                pert = (
+                    getattr(self.raw_data.first_order.get(int(oas[sp]), None), "pert", None)
+                    if hasattr(self, "raw_data")
+                    else None
+                )
             if pert is None:
                 continue
             amp = pert[0] if isinstance(pert, (list, tuple, np.ndarray)) else pert
@@ -385,6 +386,12 @@ class ZFSManager:
         # Ex/Ey ordering convention of the eigenvectors does not affect them;
         # no per-defect/cell-size switch is needed.
 
+        inherit_coefficients = False
+        spectrum = self.spectrum
+        if len(self.treated_modes) < n_modes and spectrum is not None:
+            inherit_coefficients = True
+            print("Degenerate modes inherit coefficients")
+
         for i, item in sorted(self.zfs_tensors.items()):
             if i not in self.treated_modes:
                 continue
@@ -420,17 +427,13 @@ class ZFSManager:
                 # V_+- = 0.5 * sqrt((dD_xx - dD_yy)^2 + 4 * dD_xy^2)
                 # V_0+- = sqrt(dD_xz^2 + dD_yz^2) / sqrt(2)
                 V_p_m[i] = 0.5 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
-                V_0_pm[i] = np.sqrt(dD_dq[0, 2]**2 + dD_dq[1, 2]**2) / np.sqrt(2)
+                V_0_pm[i] = np.sqrt(dD_dq[0, 2] ** 2 + dD_dq[1, 2] ** 2) / np.sqrt(2)
 
             # Inherit V-coefficients for the degenerate twin via pair_id.
             # The spectrum owns the pairing (strict involution); no frequency guessing.
             # Fill-only: never overwrite a twin's own non-zero coefficients (Ex
             # yields V_pm, Ey yields V_0pm; both are real data on a complete file).
-            spectrum = self.spectrum
-            if (
-                len(self.treated_modes) < n_modes
-                and spectrum is not None
-            ):
+            if inherit_coefficients:
                 twin = twin_of(spectrum.deg_groups, i)
                 if twin is not None and twin != i:
                     V_0_pm[twin] = np.where(V_0_pm[twin] == 0, V_0_pm[i], V_0_pm[twin])
@@ -501,14 +504,14 @@ class ZFSManager:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
             elif {sym_i, sym_j} == {"Ex"}:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
-                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
+                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2] ** 2 + d2D_dqidqj[1, 2] ** 2) / (2.0 * np.sqrt(2))
                 V_p_m_2nd[i, j] = 0.25 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
             elif {sym_i, sym_j} == {"Ey"}:
                 V_0_0_2nd[i, j] = np.abs(d2D_dqidqj[2, 2] - 0.5 * trace_in_plane) / 3.0
-                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
+                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2] ** 2 + d2D_dqidqj[1, 2] ** 2) / (2.0 * np.sqrt(2))
                 V_p_m_2nd[i, j] = 0.25 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
             elif {sym_i, sym_j} == {"Ex", "Ey"}:
-                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2]**2 + d2D_dqidqj[1, 2]**2) / (2.0 * np.sqrt(2))
+                V_0_pm_2nd[i, j] = np.sqrt(d2D_dqidqj[0, 2] ** 2 + d2D_dqidqj[1, 2] ** 2) / (2.0 * np.sqrt(2))
                 V_p_m_2nd[i, j] = 0.5 * np.sqrt(diff_in_plane**2 + 4.0 * off_diag_in_plane**2)
 
             if len(self.treated_modes) < n_modes and len(phonon_energies) == n_modes and i == j:
@@ -559,7 +562,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_{self.calc_method}_{self.pert_scale}_.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coefficients_"
+            f"{self.calc_method}_{self.pert_scale}_.npz"
         )
 
         save_path = self.save_data(
@@ -598,7 +602,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_{self.calc_method}_{self.pert_scale}_.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_"
+            f"{self.calc_method}_{self.pert_scale}_.npz"
         )
         save_path = self.save_data(
             save_name,
@@ -643,9 +648,7 @@ class ZFSManager:
             )
 
         # 1) First order
-        zfs_derivs, V_0_0, V_p_m, V_0_pm = self.calculate_first_order_derivatives(
-            ipr_thresh=ipr_thresh_first
-        )
+        zfs_derivs, V_0_0, V_p_m, V_0_pm = self.calculate_first_order_derivatives(ipr_thresh=ipr_thresh_first)
 
         # 2) Second order (needs 1d derivs)
         zfs_2nd_derivs, V2_0_0, V2_p_m, V2_0_pm = self.calculate_second_order_derivatives(
@@ -655,7 +658,8 @@ class ZFSManager:
         save_name = (
             f"{output_filename}.npz"
             if output_filename
-            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coupling_{self.calc_method}_{self.pert_scale}_both.npz"
+            else f"derivatives/{self.defect}_{self.cell_size}_zfs_coupling_"
+            f"{self.calc_method}_{self.pert_scale}_both.npz"
         )
         save_path = self.save_data(
             save_name,
@@ -723,6 +727,9 @@ class ZFSManager:
                 cell_size=self.cell_size,
                 pert_scale=self.pert_scale,
                 calc_method=self.calc_method,
+                # Tensors stored on the manager were ingested via parse/load,
+                # which apply the 3/2 correction for approx data at intake.
+                spin_correction_applied=_normalize_calc_method(self.calc_method) == "defect_band_approx",
                 order=kwargs.get("order", 1 if first is not None else 2),
                 ground_state_zfs=gs_tensor,
                 eigen_rotation=self.eigen_rotation,
@@ -746,9 +753,7 @@ class ZFSManager:
 
     @staticmethod
     def _check_symmetry(d_tensor: np.ndarray, symmetry: Union[str, tuple[str, str]], idx: Any) -> None:
-        sym_prod = (
-            MathUtils.calc_symmetry(*symmetry) if isinstance(symmetry, tuple) else [symmetry]
-        )
+        sym_prod = MathUtils.calc_symmetry(*symmetry) if isinstance(symmetry, tuple) else [symmetry]
         if sym_prod == ["A1"]:
             diag = np.diag(d_tensor)
             d_xx, d_yy, d_zz = diag

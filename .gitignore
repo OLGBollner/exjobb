@@ -18,3 +18,6 @@ Notes/
 # build artifacts and vendored clones
 build/
 httk-sym/
+
+# Packaged raw data
+/data/

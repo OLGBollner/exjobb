@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """relax_to_zfs.py -- pipeline step: relaxation output -> ZFS run directory.
 
-Thin CLI wrapper; the logic lives in beyblade.vasp (prepare_relax_to_zfs).
+Thin CLI wrapper; the logic lives in spinlabs.vasp (prepare_relax_to_zfs).
 """
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from beyblade.vasp import prepare_relax_to_zfs
+from spinlabs.vasp import prepare_relax_to_zfs
 
 
 def main() -> int:

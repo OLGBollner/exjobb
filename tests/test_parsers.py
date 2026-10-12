@@ -2,16 +2,19 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import copy
+
 import pytest
 
-from beyblade.models import PhononSpectrum, ZFSTensor
-from beyblade.parsers import (
+from spinlabs.models import PhononSpectrum, RawZFSData, ZFSTensor
+from spinlabs.parsers import (
     parse_outcar_energy,
     parse_outcar_zfs,
     parse_phonon_npz,
     parse_zfs_dataset_npz,
     parse_zfs_simulation_dataset,
     save_phonon_npz,
+    split_defect_folder_name,
 )
 
 
@@ -65,7 +68,7 @@ class TestParsers:
 
     def test_raw_zfs_npz_roundtrip_units_in_joule(self):
         """Verifies that saved npz tensors are in Joules and correctly converted."""
-        from beyblade.constants import CONSTANTS
+        from spinlabs.constants import CONSTANTS
 
         # Create dummy 1D and 2D npz archives matching ZFSManager.save_data
         gs_mhz = np.diag([-1000.0, -1000.0, 2000.0])
@@ -89,8 +92,10 @@ class TestParsers:
             }
         }
 
-        with tempfile.NamedTemporaryFile(suffix="_1d.npz", delete=False) as f1, \
-             tempfile.NamedTemporaryFile(suffix="_2d.npz", delete=False) as f2:
+        with (
+            tempfile.NamedTemporaryFile(suffix="_1d.npz", delete=False) as f1,
+            tempfile.NamedTemporaryFile(suffix="_2d.npz", delete=False) as f2,
+        ):
             path_1d = Path(f1.name)
             path_2d = Path(f2.name)
 
@@ -140,7 +145,7 @@ class TestParsers:
 
     def test_raw_zfs_saves_with_latest_naming_convention(self):
         """Verifies that saving RawZFSData uses latest keys (first_order/second_order), not legacy keys."""
-        from beyblade.models import RawZFSData, ZFSTensor
+        from spinlabs.models import RawZFSData, ZFSTensor
 
         gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
         first = {0: {"tensor": np.eye(3), "pert": 0.01}}
@@ -225,7 +230,9 @@ class TestParsers:
         assert raw_data.calc_method == "defect_band_approx"
         assert raw_data.order == 1
         assert raw_data.ground_state_zfs is not None
-        assert np.isclose(raw_data.ground_state_zfs.matrix[2, 2], 2000.0)
+        assert raw_data.spin_correction_applied is True
+        # parser applies the 3/2 spin correction for defect_band_approx at intake
+        assert np.isclose(raw_data.ground_state_zfs.matrix[2, 2], 3000.0)
 
         assert 1059 in raw_data.first_order
         assert 1306 in raw_data.first_order
@@ -233,7 +240,7 @@ class TestParsers:
         assert entry_1060.order == 1
         assert entry_1060.mode_indices == (1059,)
         assert entry_1060.amplitude == pytest.approx(0.1)
-        assert np.isclose(entry_1060.zfs_tensor.matrix[2, 2], 1980.0)
+        assert np.isclose(entry_1060.zfs_tensor.matrix[2, 2], 2970.0)
         assert entry_1060.energy == pytest.approx(-510.5, abs=1e-3)
 
     def test_parse_zfs_simulation_dataset_2d(self, tmp_path):
@@ -306,3 +313,140 @@ class TestParsers:
         (sim_dir_no_relaxed / "defect_band_approx" / "runs" / "1").mkdir(parents=True, exist_ok=True)
         with pytest.raises(ValueError, match="Relaxed ZFS tensor not found"):
             parse_zfs_simulation_dataset(sim_dir_no_relaxed, calc_method="approx")
+
+
+class TestSpinCorrectionOnLoad:
+    """The 3/2 spin-correction scaling lives in RawZFSData.load, not ZFSManager."""
+
+    @staticmethod
+    def _make_raw(calc_method: str) -> RawZFSData:
+        from spinlabs.models import PerturbationEntry
+
+        unit = "MHz"
+        gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]).astype(float), unit=unit)
+        first = {
+            1060: PerturbationEntry(
+                order=1,
+                mode_indices=(1060,),
+                amplitude=0.1,
+                zfs_tensor=ZFSTensor(matrix=np.diag([-990.0, -990.0, 1980.0]).astype(float), unit=unit),
+            )
+        }
+        return RawZFSData(
+            defect="NV",
+            cell_size=512,
+            pert_scale=0.025,
+            calc_method=calc_method,
+            order=1,
+            ground_state_zfs=gs,
+            first_order=first,
+        )
+
+    def _save(self, raw: RawZFSData, tmp_path: Path) -> Path:
+        out = tmp_path / f"test_{raw.calc_method}.npz"
+        raw.save(out)
+        return out
+
+    def test_approx_tensors_scaled_by_three_halves_once(self, tmp_path, capsys):
+        raw = self._make_raw("defect_band_approx")
+        out = self._save(raw, tmp_path)
+
+        # Stored file is unscaled
+        with np.load(str(out), allow_pickle=True) as npz:
+            assert npz["ground_state_zfs_matrix"][2, 2] == pytest.approx(2000.0)
+            assert not npz.get("spin_correction_applied", False)
+
+        loaded = RawZFSData.load(out)
+        h = 6.62607015e-34
+        assert loaded.spin_correction_applied is True
+        assert loaded.ground_state_zfs.unit == "J"
+        assert loaded.ground_state_zfs.matrix[2, 2] == pytest.approx(3000.0e6 * h)
+        assert loaded.ground_state_zfs.matrix[0, 0] == pytest.approx(-1500.0e6 * h)
+        entry = loaded.first_order[1060]
+        assert entry["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+        assert "Applied spin correction scaling: 1.5" in capsys.readouterr().out
+
+        # Saving the corrected object persists the flag; re-loading must not rescale
+        out2 = tmp_path / "resaved.npz"
+        loaded.save(out2)
+        reloaded = RawZFSData.load(out2)
+        assert reloaded.ground_state_zfs.matrix[2, 2] == pytest.approx(3000.0e6 * h)
+
+    def test_load_with_mixed_flags_scales_only_uncorrected_files(self, tmp_path):
+        legacy = self._save(self._make_raw("defect_band_approx"), tmp_path)
+        # Build an already-corrected companion file with a DIFFERENT mode key,
+        # so both files' tensors are visible in the merge and can be checked.
+        corrected = RawZFSData.load(legacy)
+        corrected.first_order = {2061: dict(corrected.first_order[1060])}
+        corrected.first_order[2061]["mode_indices"] = (2061,)
+        out2 = tmp_path / "already_corrected.npz"
+        corrected.save(out2)
+
+        h = 6.62607015e-34
+        merged = RawZFSData.load([legacy, out2])
+        assert merged.spin_correction_applied is True
+        # Legacy file scaled exactly once; corrected file untouched (no double-scale)
+        assert merged.ground_state_zfs.matrix[2, 2] == pytest.approx(3000.0e6 * h)
+        assert merged.first_order[1060]["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+        assert merged.first_order[2061]["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+        # Reversed order: same result
+        merged_rev = RawZFSData.load([out2, legacy])
+        assert merged_rev.first_order[1060]["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+        assert merged_rev.first_order[2061]["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+
+    def test_apply_corrections_false_leaves_raw_tensors(self, tmp_path):
+        # also: merged flag is all(), not any()
+        legacy = self._save(self._make_raw("defect_band_approx"), tmp_path)
+        corrected = RawZFSData.load(legacy)
+        out2 = tmp_path / "already_corrected.npz"
+        corrected.save(out2)
+        merged = RawZFSData.load([legacy, out2], apply_corrections=False)
+        assert merged.spin_correction_applied is False
+        out = self._save(self._make_raw("defect_band_approx"), tmp_path)
+        raw = RawZFSData.load(out, apply_corrections=False)
+        h = 6.62607015e-34
+        assert raw.spin_correction_applied is False
+        assert raw.ground_state_zfs.matrix[2, 2] == pytest.approx(2000.0e6 * h)
+        assert raw.first_order[1060]["tensor"][2, 2] == pytest.approx(1980.0e6 * h)
+
+    def test_all_bands_is_never_scaled(self, tmp_path, capsys):
+        out = self._save(self._make_raw("all_bands"), tmp_path)
+        loaded = RawZFSData.load(out)
+        assert loaded.spin_correction_applied is False
+        assert loaded.ground_state_zfs.matrix[2, 2] == pytest.approx(2000.0e6 * 6.62607015e-34)
+        assert capsys.readouterr().out == ""
+
+
+def test_combine_flag_mismatch_raises():
+    raw = TestSpinCorrectionOnLoad._make_raw("defect_band_approx")
+    legacy = copy.deepcopy(raw)
+    corrected = copy.deepcopy(raw)
+    corrected.spin_correction_applied = True
+    with pytest.raises(ValueError, match="spin-correction"):
+        legacy + corrected
+
+
+def test_combine_all_corrected_flag_is_true(tmp_path):
+    raw = TestSpinCorrectionOnLoad._make_raw("defect_band_approx")
+    out = tmp_path / "a.npz"
+    raw.save(out)
+    loaded = RawZFSData.load(out)
+    out2 = tmp_path / "b.npz"
+    loaded.save(out2)
+    merged = RawZFSData.load([out, out2])
+    assert merged.spin_correction_applied is True
+
+
+class TestSplitDefectFolderName:
+    def test_simple(self):
+        assert split_defect_folder_name("NV_512") == ("NV", 512)
+
+    def test_multi_part(self):
+        assert split_defect_folder_name("V_Si_128") == ("V_Si", 128)
+
+    def test_orientation_suffix(self):
+        assert split_defect_folder_name("ClV_576_hk") == ("ClV", 576)
+
+    def test_no_cell_size(self):
+        assert split_defect_folder_name("weirdname") == ("weirdname", None)
+
