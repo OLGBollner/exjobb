@@ -4,7 +4,7 @@ Inputs are defect folders (searched recursively for *_raw_zfs_data_*.npz) or
 npz files produced by ``spinlabs package``.
 
     Defect | Configuration | D_experiment | D_corrected | D_contaminated
-    (grouped under \multicolumn base-crystal headers: diamond, 4H-SiC)
+    (grouped under multi-column base-crystal headers: diamond, 4H-SiC)
 
 D_corrected  comes from the defect-band (ZFS_occup) data.
 D_contaminated comes from the all-bands (ZFS_hyp) data.
