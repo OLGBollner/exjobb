@@ -157,8 +157,6 @@ class ZFSManager:
             D_xx, D_yy, D_zz, R = raw.ground_state_zfs.principal_components()
             self.eigen_rotation = R
             self.zfs_relaxed = np.diag([D_xx, D_yy, D_zz])
-            if "approx" in self.calc_method:
-                self.zfs_relaxed *= 1.5
 
             # Pin every tensor's axis assignment to the relaxed structure: the
             # relaxed tensor is the reference frame, so near-degenerate
@@ -233,8 +231,6 @@ class ZFSManager:
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
-                    if "approx" in self.calc_method:
-                        tensor_j *= 1.5
                     self.first_order[sp] = {
                         "tensor": tensor_j,
                         "symmetry": phonon_pert["sym"][sp] if phonon_pert else None,
@@ -250,8 +246,6 @@ class ZFSManager:
                     enriched = dict(entry)
                     tensor = np.asarray(enriched.get("tensor"), dtype=float)
                     rotated = eigen_rot_t @ tensor @ eigen_rot if self.eigen_rotation is not None else tensor
-                    if "approx" in self.calc_method:
-                        rotated *= 1.5
                     enriched["tensor"] = rotated
                     # When phonon data is available, always update symmetry/pert/ipr
                     # so that mode-dependent SI displacements q_i = q0 * sqrt(2*omega/hbar)
@@ -276,8 +270,6 @@ class ZFSManager:
                     tensor_mhz = entry.zfs_tensor.matrix
                     rotated = eigen_rot_t @ tensor_mhz @ eigen_rot if self.eigen_rotation is not None else tensor_mhz
                     tensor_j = rotated
-                    if "approx" in self.calc_method:
-                        tensor_j *= 1.5
                     self.second_order[(si, sj)] = {
                         "tensor": tensor_j,
                         "symmetry": (phonon_pert["sym"][si], phonon_pert["sym"][sj]) if phonon_pert else None,
@@ -292,8 +284,6 @@ class ZFSManager:
                     enriched = dict(entry)
                     tensor = np.asarray(enriched.get("tensor"), dtype=float)
                     rotated = eigen_rot_t @ tensor @ eigen_rot if self.eigen_rotation is not None else tensor
-                    if "approx" in self.calc_method:
-                        rotated *= 1.5
                     enriched["tensor"] = rotated
                     if phonon_pert is not None:
                         if (
@@ -747,6 +737,7 @@ class ZFSManager:
                 cell_size=self.cell_size,
                 pert_scale=self.pert_scale,
                 calc_method=self.calc_method,
+                spin_correction_applied=True,
                 order=kwargs.get("order", 1 if first is not None else 2),
                 ground_state_zfs=gs_tensor,
                 eigen_rotation=self.eigen_rotation,
