@@ -114,6 +114,7 @@ def collect_outcar_rows(folder: Path) -> list[dict]:
             print(f"warning: no ZFS block in {outcar}, skipping", file=sys.stderr)
             continue
         if scale != 1.0:
+            print(f"Applied spin correction scaling: {scale}")
             zfs = ZFSTensor(matrix=zfs.matrix * scale, unit=zfs.unit)
         rows.append({
             "defect": defect,
