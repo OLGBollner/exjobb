@@ -1,9 +1,10 @@
 """Generate a LaTeX table of ground-state D values from packaged ZFS data.
 
 Inputs are defect folders (searched recursively for *_raw_zfs_data_*.npz) or
-npz files produced by ``beyblade package``.
+npz files produced by ``spinlabs package``.
 
-    Defect | Base crystal | Configuration | D_experiment | D_corrected | D_contaminated
+    Defect | Configuration | D_experiment | D_corrected | D_contaminated
+    (grouped under \multicolumn base-crystal headers: diamond, 4H-SiC)
 
 D_corrected  comes from the defect-band (ZFS_occup) data.
 D_contaminated comes from the all-bands (ZFS_hyp) data.
@@ -20,8 +21,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from beyblade.models import SPIN_CORRECTION_SCALE, RawZFSData, ZFSTensor, _normalize_calc_method  # noqa: E402
-from beyblade.parsers import parse_outcar_zfs  # noqa: E402
+from spinlabs.models import SPIN_CORRECTION_SCALE, RawZFSData, ZFSTensor, _normalize_calc_method  # noqa: E402
+from spinlabs.parsers import parse_outcar_zfs  # noqa: E402
 
 # Method name fragments in the packaged npz filenames -> table columns.
 METHOD_COLUMN = {
@@ -241,14 +242,14 @@ def render_tex(merged: list[dict], unit: str) -> str:
         r"% requires \usepackage{booktabs} and \usepackage{siunitx}",
         r"\begin{table}[htbp]",
         r"  \centering",
-        r"  \begin{tabular}{lllccc}",
+        r"  \begin{tabular}{llccc}",
         r"    \toprule",
-        r"    Defect & Base crystal & Configuration & $D_\text{experiment}$ & $D_\text{corrected}$ & $D_\text{contaminated}$ \\",
+        r"    Defect & Configuration & $D_\text{experiment}$ & $D_\text{corrected}$ & $D_\text{contaminated}$ \\",
         r"         &             &              & (\si{\mega\hertz})            & (\si{\mega\hertz})         & (\si{\mega\hertz})             \\",
         r"    \midrule",
     ]
     last_base = None
-    n_cols = 6
+    n_cols = 5
     for (defect, configuration) in sorted(grouped):
         base = base_crystal_of(defect)
         if base != last_base:
@@ -258,7 +259,7 @@ def render_tex(merged: list[dict], unit: str) -> str:
         g = grouped[(defect, configuration)]
         defect_label = tex_defect(defect, configuration)
         lines.append(
-            f"    {defect_label} & {base} & {configuration or '---'} & --- & "
+            f"    {defect_label} & {configuration or '---'} & --- & "
             f"{', '.join(g['corrected'])} & {', '.join(g['contaminated'])} \\\\"
         )
     footnote = "; ".join(f"({letter}) cell size {cell}" for cell, letter in letters.items())
