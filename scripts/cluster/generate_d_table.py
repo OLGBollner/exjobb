@@ -18,7 +18,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from beyblade.models import RawZFSData, ZFSTensor  # noqa: E402
+from beyblade.models import SPIN_CORRECTION_SCALE, RawZFSData, ZFSTensor  # noqa: E402
+from beyblade.parsers import parse_outcar_zfs  # noqa: E402
 
 # Method name fragments in the packaged npz filenames -> table columns.
 METHOD_COLUMN = {
@@ -48,9 +49,12 @@ def method_of(npz_path: Path) -> str | None:
 
 
 def collect_rows(paths: list[Path]) -> list[dict]:
-    """Build one row per npz file (folder inputs are expanded to their npz files)."""
+    """Build one row per data source: packaged npz files and/or relaxed-structure
+    ground-state folders containing ZFS_hyp/OUTCAR and/or ZFS_occup/OUTCAR."""
     rows: list[dict] = []
     for path in paths:
+        if path.is_dir():
+            rows += collect_outcar_rows(path)
         npz_files = find_npz(path) if path.is_dir() else [path]
         for npz_path in npz_files:
             try:
@@ -75,6 +79,49 @@ def collect_rows(paths: list[Path]) -> list[dict]:
                 "d_mhz": zfs.to_unit("MHz").D,
                 "source": npz_path,
             })
+    return rows
+
+
+def collect_outcar_rows(folder: Path) -> list[dict]:
+    """Read ground-state ZFS straight from relaxed-structure folders.
+
+    ``folder`` is either the defect folder itself (containing ZFS_hyp/ and
+    ZFS_occup/) or a parent folder containing defect folders; ZFS_* dirs are
+    found recursively. ZFS_hyp/OUTCAR is the contaminated (all-electron bands)
+    ground state, ZFS_occup/OUTCAR the corrected one (defect-band approx),
+    which gets the spin-correction scaling applied here, matching
+    RawZFSData.load's behaviour for packaged approx data.
+    """
+    rows: list[dict] = []
+    zfs_dirs = sorted(folder.rglob("ZFS_hyp")) + sorted(folder.rglob("ZFS_occup"))
+    for zfs_dir in zfs_dirs:
+        defect_root = zfs_dir.parent
+        defect = defect_root.name.split("_")[0]
+        orientation = infer_orientation(defect_root)
+        zfs_name = zfs_dir.name
+        column = "contaminated" if zfs_name == "ZFS_hyp" else "corrected"
+        scale = 1.0 if zfs_name == "ZFS_hyp" else SPIN_CORRECTION_SCALE
+        outcar = zfs_dir / "OUTCAR"
+        if not outcar.is_file():
+            continue
+        try:
+            zfs = parse_outcar_zfs(outcar)
+        except Exception as error:
+            print(f"warning: cannot parse {outcar} ({error.__class__.__name__}), skipping",
+                  file=sys.stderr)
+            continue
+        if zfs is None:
+            print(f"warning: no ZFS block in {outcar}, skipping", file=sys.stderr)
+            continue
+        if scale != 1.0:
+            zfs = ZFSTensor(matrix=zfs.matrix * scale, unit=zfs.unit)
+        rows.append({
+            "defect": defect,
+            "configuration": orientation,
+            "column": column,
+            "d_mhz": zfs.to_unit("MHz").D,
+            "source": outcar,
+        })
     return rows
 
 
