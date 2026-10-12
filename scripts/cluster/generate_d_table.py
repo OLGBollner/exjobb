@@ -198,11 +198,16 @@ def merge_rows(rows: list[dict]) -> list[dict]:
 
 
 def assign_letters(merged: list[dict]) -> dict[str, str]:
-    """Map each cell size to one letter for the whole table, ordered by cell size.
+    """Map each cell size to one letter for the whole table, in order of first
+    occurrence in the table (rows already sorted by defect, then cell).
 
     Letters are shared across defects so the caption footnote is unambiguous.
     """
-    cells = sorted({row["cell"] for row in merged if row["cell"]}, key=int)
+    cells: list[str] = []
+    for row in merged:
+        cell = row["cell"]
+        if cell and cell not in cells:
+            cells.append(cell)
     return {c: chr(ord("a") + i) for i, c in enumerate(cells)}
 
 
