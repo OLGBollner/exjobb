@@ -6,8 +6,8 @@ import copy
 
 import pytest
 
-from beyblade.models import PhononSpectrum, RawZFSData, ZFSTensor
-from beyblade.parsers import (
+from spinlabs.models import PhononSpectrum, RawZFSData, ZFSTensor
+from spinlabs.parsers import (
     parse_outcar_energy,
     parse_outcar_zfs,
     parse_phonon_npz,
@@ -68,7 +68,7 @@ class TestParsers:
 
     def test_raw_zfs_npz_roundtrip_units_in_joule(self):
         """Verifies that saved npz tensors are in Joules and correctly converted."""
-        from beyblade.constants import CONSTANTS
+        from spinlabs.constants import CONSTANTS
 
         # Create dummy 1D and 2D npz archives matching ZFSManager.save_data
         gs_mhz = np.diag([-1000.0, -1000.0, 2000.0])
@@ -145,7 +145,7 @@ class TestParsers:
 
     def test_raw_zfs_saves_with_latest_naming_convention(self):
         """Verifies that saving RawZFSData uses latest keys (first_order/second_order), not legacy keys."""
-        from beyblade.models import RawZFSData, ZFSTensor
+        from spinlabs.models import RawZFSData, ZFSTensor
 
         gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
         first = {0: {"tensor": np.eye(3), "pert": 0.01}}
@@ -320,7 +320,7 @@ class TestSpinCorrectionOnLoad:
 
     @staticmethod
     def _make_raw(calc_method: str) -> RawZFSData:
-        from beyblade.models import PerturbationEntry
+        from spinlabs.models import PerturbationEntry
 
         unit = "MHz"
         gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]).astype(float), unit=unit)

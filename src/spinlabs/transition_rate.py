@@ -3,8 +3,8 @@ import numpy as np
 from scipy import constants as Cn
 from pathlib import Path
 
-from beyblade.utils import MathUtils
-from beyblade.constants import CONSTANTS
+from spinlabs.utils import MathUtils
+from spinlabs.constants import CONSTANTS
 
 # (sign_l, sign_lp) for energy conservation: omega_spin = s*omega_l + s'*omega_lp
 PHONON_PROCESSES = {
@@ -65,7 +65,7 @@ class TransitionRate:
         self.data_2ph = np.load(str(filename), allow_pickle=True)
 
     def load_data(self, filename: Union[str, Path]) -> None:
-        from beyblade.models import SpinPhononCouplingData
+        from spinlabs.models import SpinPhononCouplingData
 
         if isinstance(filename, SpinPhononCouplingData):
             # Export to dictionary representation matching npz format

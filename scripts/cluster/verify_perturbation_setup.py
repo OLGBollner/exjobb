@@ -13,7 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from beyblade.vasp.verify import verify_setup
+from spinlabs.vasp.verify import verify_setup
 
 
 def main() -> int:

@@ -2,7 +2,7 @@
 
 Loads the .npz written by pack_perturbation_runs.py, rotates each ZFS
 tensor into the ground-state principal frame (fixed rotation built once
-from the Q=0 tensor, as in beyblade's ZFSManager), and plots the diagonal
+from the Q=0 tensor, as in spinlabs's ZFSManager), and plots the diagonal
 components against the perturbation scale together with the residuals
 from a linear fit.
 
@@ -29,11 +29,11 @@ import sys
 
 import numpy as np
 
-from beyblade.models import ZFSTensor
+from spinlabs.models import ZFSTensor
 
 
 def principal_frame(D0: np.ndarray) -> np.ndarray:
-    """Ground-state principal-axis rotation R, via beyblade.ZFSTensor.
+    """Ground-state principal-axis rotation R, via spinlabs.ZFSTensor.
 
     ZFSTensor(D0).principal_components() returns (D_xx, D_yy, D_zz, R)
     in EPR convention (|D_zz| >= |D_yy| >= |D_xx|, traceless), with R's

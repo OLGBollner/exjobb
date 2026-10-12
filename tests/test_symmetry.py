@@ -11,16 +11,16 @@ import warnings
 
 import numpy as np
 
-from beyblade.models import check_original_indices
+from spinlabs.models import check_original_indices
 import pytest
 from pymatgen.core import Structure
 
-from beyblade.symmetry import (
+from spinlabs.symmetry import (
     detect_point_group,
     classify_modes,
     _parent_label,
 )
-from beyblade.parsers import parse_phonon_npz
+from spinlabs.parsers import parse_phonon_npz
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ def test_accidental_degeneracies_do_not_merge():
 def _tiny_spectrum(freqs, syms):
     """Minimal PhononSpectrum with preset labels (bypasses classification)."""
     import numpy as _np
-    from beyblade.models import PhononSpectrum
+    from spinlabs.models import PhononSpectrum
 
     n = len(freqs)
     spec = PhononSpectrum(
@@ -163,7 +163,7 @@ def test_filter_group_theory_invariant_on_synthetic_c3v():
 
 
 def test_filter_rejects_broken_original_indices():
-    from beyblade.models import check_original_indices
+    from spinlabs.models import check_original_indices
 
     with pytest.raises(ValueError):
         check_original_indices(np.array([0, 0, 2]), n_modes=3)
@@ -198,7 +198,7 @@ def test_symmetrize_mixed_a1_e_pair_on_nv512():
     After symmetrization every group member must have characters matching
     its label's class characters exactly.
     """
-    from beyblade.symmetry import (
+    from spinlabs.symmetry import (
         symmetrize_degenerate_groups,
         defect_frame_operations,
         _mode_characters,
@@ -228,7 +228,7 @@ def test_symmetrize_mixed_a1_e_pair_on_nv512():
 
 
 def test_symmetrize_is_fixpoint_on_pure_groups():
-    from beyblade.symmetry import symmetrize_degenerate_groups
+    from spinlabs.symmetry import symmetrize_degenerate_groups
 
     spec = parse_phonon_npz(CLV_PATH)
     sym = symmetrize_degenerate_groups(spec)
@@ -241,7 +241,7 @@ def test_symmetrize_is_fixpoint_on_pure_groups():
 
 def test_symmetrize_recover_artificial_mixing():
     """Rotate a known-pure A1/Ey pair by theta, symmetrize, check recovery."""
-    from beyblade.symmetry import symmetrize_degenerate_groups
+    from spinlabs.symmetry import symmetrize_degenerate_groups
     import dataclasses
 
     spec = parse_phonon_npz(NV_PATH)
@@ -268,7 +268,7 @@ def test_symmetrize_recover_artificial_mixing():
 
 
 def test_sym_check_summary_variants():
-    from beyblade.symmetry import sym_check_summary
+    from spinlabs.symmetry import sym_check_summary
 
     assert sym_check_summary(None) == ""
     assert sym_check_summary({"ok": True, "failures": [], "unpaired": []}) == "ok"

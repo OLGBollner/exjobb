@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from beyblade.constants import CONSTANTS
-from beyblade.models import PhononSpectrum, RawZFSData, ZFSTensor
-from beyblade.zfs_manager import ZFSManager
+from spinlabs.constants import CONSTANTS
+from spinlabs.models import PhononSpectrum, RawZFSData, ZFSTensor
+from spinlabs.zfs_manager import ZFSManager
 
 
 class TestZFSManager:

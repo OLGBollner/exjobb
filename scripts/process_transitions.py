@@ -168,11 +168,11 @@ def compute_rates(data_path, two_phonon_path, t_start, t_end, t_step):
     together with metadata and temperature array.
     """
     try:
-        from beyblade.transition_rate import TransitionRate
-        from beyblade.constants import CONSTANTS
+        from spinlabs.transition_rate import TransitionRate
+        from spinlabs.constants import CONSTANTS
     except ImportError as exc:
         raise ImportError(
-            "Could not import TransitionRate or CONSTANTS. Ensure the beyblade package is in the Python path."
+            "Could not import TransitionRate or CONSTANTS. Ensure the spinlabs package is in the Python path."
         ) from exc
 
     calculator = TransitionRate(str(data_path), two_phonon_path)

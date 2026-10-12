@@ -8,22 +8,22 @@ from typing import Any
 
 import numpy as np
 
-from beyblade.constants import CONSTANTS
-from beyblade.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
-from beyblade.parsers import (
+from spinlabs.constants import CONSTANTS
+from spinlabs.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
+from spinlabs.parsers import (
     parse_phonon_data,
     parse_zfs_dataset_npz,
     parse_zfs_simulation_dataset,
 )
-from beyblade.plotter import (
+from spinlabs.plotter import (
     plot_1d_spectral_functions,
     plot_t1,
     plot_transition_rates_stacked,
 )
-from beyblade.relaxation_dynamics import RelaxationDynamics
-from beyblade.runs_index import append_row, index_path
-from beyblade.transition_rate import TransitionRate
-from beyblade.zfs_manager import ZFSManager
+from spinlabs.relaxation_dynamics import RelaxationDynamics
+from spinlabs.runs_index import append_row, index_path
+from spinlabs.transition_rate import TransitionRate
+from spinlabs.zfs_manager import ZFSManager
 
 
 def _pert_dir_name(pert_scale: float | None) -> str:

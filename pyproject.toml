@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "beyblade"
+name = "spinlabs"
 version = "2026.09.01"
 license = "GPL-3.0-or-later"
 requires-python = ">= 3.10"
@@ -37,4 +37,4 @@ testpaths = ["tests"]
 where = ["src"]
 
 [project.scripts]
-beyblade = "beyblade.cli:main"
+spinlabs = "spinlabs.cli:main"

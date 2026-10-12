@@ -1,8 +1,8 @@
-"""Tests for the beyblade CLI."""
+"""Tests for the spinlabs CLI."""
 
 import numpy as np
 
-from beyblade.cli import build_parser
+from spinlabs.cli import build_parser
 
 
 def _make_t1_npz(path, defect="NV", cell=2, method="pbe", state="ms0"):

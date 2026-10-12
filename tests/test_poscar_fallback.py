@@ -3,7 +3,7 @@ import pytest
 import yaml
 from pymatgen.core import Structure
 
-from beyblade.parsers import parse_phonopy_yaml, prepare_phonopy_yaml
+from spinlabs.parsers import parse_phonopy_yaml, prepare_phonopy_yaml
 
 
 def _write_yaml(path, lattice):

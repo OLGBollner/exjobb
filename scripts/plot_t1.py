@@ -4,7 +4,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from beyblade.relaxation_dynamics import RelaxationDynamics
+from spinlabs.relaxation_dynamics import RelaxationDynamics
 
 plt.rcParams.update({"axes.labelsize": 16, "xtick.labelsize": 12, "ytick.labelsize": 12, "legend.fontsize": 14})
 

@@ -7,9 +7,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from beyblade.constants import CONSTANTS
-from beyblade.models import SpinPhononCouplingData
-from beyblade.utils import MathUtils
+from spinlabs.constants import CONSTANTS
+from spinlabs.models import SpinPhononCouplingData
+from spinlabs.utils import MathUtils
 
 
 def plot_vlines_sorted_by_magnitude(

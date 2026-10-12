@@ -7,8 +7,8 @@ import warnings
 from datetime import date
 from pathlib import Path
 
-from beyblade.pack_convergence import pack_convergence
-from beyblade.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
+from spinlabs.pack_convergence import pack_convergence
+from spinlabs.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
 
 
 def build_package_parser(parser: argparse.ArgumentParser) -> None:

@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from beyblade.plotter import (
+from spinlabs.plotter import (
     plot_t1,
     plot_run_coupling,
     plot_run_rates,

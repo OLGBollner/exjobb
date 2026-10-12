@@ -16,8 +16,8 @@ except ImportError:
 
 from pymatgen.core import Structure
 
-from beyblade.constants import CONSTANTS
-from beyblade.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor, _normalize_calc_method
+from spinlabs.constants import CONSTANTS
+from spinlabs.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor, _normalize_calc_method
 
 ZFS_REGEX = re.compile(
     r"Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*"

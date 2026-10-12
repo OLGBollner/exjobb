@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from beyblade.plotter import (
+from spinlabs.plotter import (
     plot_t1,
     plot_1d_spectral_functions,
     plot_ipr_spectrum,
@@ -160,9 +160,9 @@ class TestPlotter:
     def test_zfs_plotter_with_spin_phonon_coupling_data(self, tmp_path, monkeypatch):
         """Tests that ZFSPlotter accepts SpinPhononCouplingData directly and converts units seamlessly."""
         from types import SimpleNamespace
-        from beyblade.models import SpinPhononCouplingData, ZFSTensor
-        from beyblade.plotter import ZFSPlotter
-        from beyblade.constants import CONSTANTS
+        from spinlabs.models import SpinPhononCouplingData, ZFSTensor
+        from spinlabs.plotter import ZFSPlotter
+        from spinlabs.constants import CONSTANTS
 
         # Data in Joules
         freqs_j = np.array([20.0, 40.0, 60.0]) * CONSTANTS["meV2J"]

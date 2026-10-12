@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from beyblade.parsers import parse_outcar_energy, parse_outcar_zfs
+from spinlabs.parsers import parse_outcar_energy, parse_outcar_zfs
 
 
 def discover_runs(run_root: Path) -> list[tuple[int, float, Path]]:

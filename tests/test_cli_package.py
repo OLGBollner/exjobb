@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from beyblade.cli.package import _run, _run_conv
-from beyblade.models import PerturbationEntry, RawZFSData, ZFSTensor
+from spinlabs.cli.package import _run, _run_conv
+from spinlabs.models import PerturbationEntry, RawZFSData, ZFSTensor
 
 
 def _raw(order=1, pert=0.025, **_kw):
@@ -50,7 +50,7 @@ def _tree(tmp_path, orders=("first", "second"), perts=(0.025,)):
 
 
 def _patch(side_effect=_raw):
-    return patch("beyblade.cli.package.parse_zfs_simulation_dataset", side_effect=side_effect)
+    return patch("spinlabs.cli.package.parse_zfs_simulation_dataset", side_effect=side_effect)
 
 
 def test_default_combines_orders_into_one_file(tmp_path):

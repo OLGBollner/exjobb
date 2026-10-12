@@ -1,4 +1,4 @@
-"""Generic npz save/load for the beyblade dataclasses.
+"""Generic npz save/load for the spinlabs dataclasses.
 
 Each dataclass declares a SCHEMA: a list of FieldSpec entries describing
 its fields (kind, optional npz key, symbolic shape, optionality, legacy
@@ -244,7 +244,7 @@ def _fields_from_npz(
 
         if spec.kind == "zfstensor":
             if "zfs_relaxed" in present and mk not in present:
-                from beyblade.models import ZFSTensor  # lazy: models imports this module
+                from spinlabs.models import ZFSTensor  # lazy: models imports this module
 
                 value = ZFSTensor(matrix=data["zfs_relaxed"], unit="J")  # legacy: Joules
             else:
