@@ -39,7 +39,7 @@ def split_defect_folder_name(name: str) -> tuple[str, int | None]:
     ``V_Si_128`` keep their full label (``V_Si``) instead of truncating to
     ``V``.
     """
-    match = re.match(r"^(?P<defect>.+?)_(?P<cell>\d+)$", name)
+    match = re.match(r"^(?P<defect>.+?)_(?P<cell>\d+)(?:_.*)?$", name)
     if match:
         return match.group("defect"), int(match.group("cell"))
     return name, None

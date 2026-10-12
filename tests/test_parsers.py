@@ -12,6 +12,7 @@ from beyblade.parsers import (
     parse_zfs_dataset_npz,
     parse_zfs_simulation_dataset,
     save_phonon_npz,
+    split_defect_folder_name,
 )
 
 
@@ -412,3 +413,40 @@ class TestSpinCorrectionOnLoad:
         assert loaded.spin_correction_applied is False
         assert loaded.ground_state_zfs.matrix[2, 2] == pytest.approx(2000.0e6 * 6.62607015e-34)
         assert capsys.readouterr().out == ""
+
+
+def test_combine_flag_mismatch_raises(tmp_path):
+    raw = _make_raw("defect_band_approx")
+    out = tmp_path / "legacy.npz"
+    raw.save(out)
+    corrected = RawZFSData.load(out)
+    out2 = tmp_path / "corrected.npz"
+    corrected.save(out2)
+    with pytest.raises(ValueError, match="spin_correction"):
+        RawZFSData.load([out, out2])
+
+
+def test_combine_all_corrected_flag_is_true(tmp_path):
+    raw = _make_raw("defect_band_approx")
+    out = tmp_path / "a.npz"
+    raw.save(out)
+    loaded = RawZFSData.load(out)
+    out2 = tmp_path / "b.npz"
+    loaded.save(out2)
+    merged = RawZFSData.load([out, out2])
+    assert merged.spin_correction_applied is True
+
+
+class TestSplitDefectFolderName:
+    def test_simple(self):
+        assert split_defect_folder_name("NV_512") == ("NV", 512)
+
+    def test_multi_part(self):
+        assert split_defect_folder_name("V_Si_128") == ("V_Si", 128)
+
+    def test_orientation_suffix(self):
+        assert split_defect_folder_name("ClV_576_hk") == ("ClV", 576)
+
+    def test_no_cell_size(self):
+        assert split_defect_folder_name("weirdname") == ("weirdname", None)
+

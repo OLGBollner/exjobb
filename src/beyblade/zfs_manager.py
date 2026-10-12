@@ -158,25 +158,6 @@ class ZFSManager:
             self.eigen_rotation = R
             self.zfs_relaxed = np.diag([D_xx, D_yy, D_zz])
 
-            # Pin every tensor's axis assignment to the relaxed structure: the
-            # relaxed tensor is the reference frame, so near-degenerate
-            # transverse axes (|D_xx| ~ |D_yy|) can never swap labels between
-            # the ground state and a perturbed run (x/y eigenframe flip bug).
-            raw.ground_state_zfs = raw.ground_state_zfs.with_reference(raw.ground_state_zfs.matrix)
-            ref = raw.ground_state_zfs.matrix
-            for entry in list(raw.first_order.values()) + list(raw.second_order.values()):
-                tensor = entry.zfs_tensor if isinstance(entry, PerturbationEntry) else entry.get("tensor")
-                if tensor is None:
-                    continue
-                if not isinstance(tensor, ZFSTensor):
-                    unit = entry.get("unit", "MHz") if isinstance(entry, dict) else "MHz"
-                    tensor = ZFSTensor(matrix=np.asarray(tensor, dtype=float), unit=unit)
-                pinned = tensor.with_reference(ref)
-                if isinstance(entry, PerturbationEntry):
-                    entry.zfs_tensor = pinned
-                else:
-                    entry["tensor"] = pinned.matrix
-
         # eigen_rotation columns are the ground-state principal-frame eigenvectors,
         # so rotating into that frame is R.T @ tensor @ R (NOT R @ tensor @ R.T).
         eigen_rot = self.eigen_rotation if self.eigen_rotation is not None else np.eye(3)
