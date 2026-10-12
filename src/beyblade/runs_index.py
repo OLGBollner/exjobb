@@ -70,6 +70,14 @@ def append_row(
     path.parent.mkdir(parents=True, exist_ok=True)
     is_new = not path.exists()
 
+    # Store run_dir relative to output_root when possible so the index stays
+    # valid if the output root is moved (Dardel -> laptop copy, etc.).
+    rd = Path(run_dir)
+    try:
+        rd = rd.resolve().relative_to(Path(output_root).resolve())
+    except ValueError:
+        pass  # outside output_root: store the absolute path
+
     row = {
         "timestamp": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "defect": _fmt(defect),
@@ -83,7 +91,7 @@ def append_row(
         "n_temps": _fmt(n_temps),
         "npz_files": ";".join(npz_files) or "-1",
         "git_hash": _git_hash(),
-        "run_dir": str(run_dir),
+        "run_dir": str(rd),
     }
 
     with path.open("a", newline="", encoding="utf-8") as fh:
@@ -129,6 +137,15 @@ def filter_rows(
 
 
 def run_dirs(rows: Iterable[dict], output_root: str | Path) -> list[Path]:
-    """Resolve the run_dir column of each row against output_root."""
+    """Resolve the run_dir column of each row against output_root.
+
+    Rows written by append_row store run_dir relative to output_root; older
+    rows (and rows pointing outside the root) store absolute paths. Both are
+    handled here so an index moved between machines still resolves.
+    """
     root = Path(output_root)
-    return [root / r["run_dir"] for r in rows]
+    resolved = []
+    for r in rows:
+        p = Path(r["run_dir"])
+        resolved.append(p if p.is_absolute() else root / p)
+    return resolved

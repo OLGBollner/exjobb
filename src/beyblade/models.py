@@ -873,6 +873,27 @@ def _decode_order_dict(value: Any, data: Any) -> dict:
 SPIN_CORRECTION_SCALE = 1.5
 
 
+def _scale_correction_fields(fields: dict) -> dict:
+    """Returns a copy of RawZFSData constructor kwargs with approx tensors scaled by 3/2.
+
+    Shared by RawZFSData.load (per-file, before merging) and _apply_spin_correction,
+    so both paths scale identically. Mutates PerturbationEntry objects in place.
+    """
+    out = dict(fields)
+    gs = out.get("ground_state_zfs")
+    if gs is not None:
+        out["ground_state_zfs"] = ZFSTensor(matrix=gs.matrix * SPIN_CORRECTION_SCALE, unit=gs.unit)
+    for name in ("first_order", "second_order"):
+        entries = dict(out.get(name) or {})
+        for key, entry in entries.items():
+            if isinstance(entry, PerturbationEntry):
+                entry.zfs_tensor = ZFSTensor(matrix=entry.zfs_tensor.matrix * SPIN_CORRECTION_SCALE, unit=entry.zfs_tensor.unit)
+            elif isinstance(entry, dict) and entry.get("tensor") is not None:
+                entry["tensor"] = np.asarray(entry["tensor"], dtype=float) * SPIN_CORRECTION_SCALE
+        out[name] = entries
+    return out
+
+
 def _normalize_calc_method(m: Optional[str]) -> Optional[str]:
     """Normalizes calc_method aliases ('approx' -> 'defect_band_approx', etc.)."""
     if not m or m in ("None", ""):
@@ -981,6 +1002,14 @@ class RawZFSData:
         merged_scale = p1 or p2 or 0.0
         merged_method = m1 or m2 or self.calc_method or other.calc_method
         merged_rotation = self.eigen_rotation if self.eigen_rotation is not None else other.eigen_rotation
+        # Never re-scale a merged dataset: if either part already carries the
+        # 3/2 correction, mark the combination as corrected (see _apply_spin_correction).
+        merged_correction = self.spin_correction_applied or other.spin_correction_applied
+        if self.spin_correction_applied != other.spin_correction_applied:
+            print(
+                "warning: combining datasets with inconsistent spin-correction flags; "
+                "merged data is marked as corrected — verify the tensors are consistent."
+            )
 
         merged_metadata = dict(self.metadata)
         for k, v in other.metadata.items():
@@ -1001,6 +1030,7 @@ class RawZFSData:
             cell_size=merged_cell,
             pert_scale=merged_scale,
             calc_method=merged_method,
+            spin_correction_applied=merged_correction,
             order=eff_order,
             ground_state_zfs=gs,
             eigen_rotation=merged_rotation,
@@ -1228,17 +1258,18 @@ class RawZFSData:
             return
         if _normalize_calc_method(self.calc_method) != "defect_band_approx":
             return
-        scale = SPIN_CORRECTION_SCALE
-        if self.ground_state_zfs is not None:
-            self.ground_state_zfs = ZFSTensor(matrix=self.ground_state_zfs.matrix * scale, unit=self.ground_state_zfs.unit)
-        for entries in (self.first_order, self.second_order):
-            for key, entry in entries.items():
-                if isinstance(entry, PerturbationEntry):
-                    entry.zfs_tensor = ZFSTensor(matrix=entry.zfs_tensor.matrix * scale, unit=entry.zfs_tensor.unit)
-                elif isinstance(entry, dict) and entry.get("tensor") is not None:
-                    entry["tensor"] = np.asarray(entry["tensor"], dtype=float) * scale
+        scaled = _scale_correction_fields(
+            {
+                "ground_state_zfs": self.ground_state_zfs,
+                "first_order": self.first_order,
+                "second_order": self.second_order,
+            }
+        )
+        self.ground_state_zfs = scaled["ground_state_zfs"]
+        self.first_order = scaled["first_order"]
+        self.second_order = scaled["second_order"]
         self.spin_correction_applied = True
-        print(f"Applied spin correction scaling: {scale:g} (x3/2)")
+        print(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE:g} (x3/2)")
 
 
 @dataclass

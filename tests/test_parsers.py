@@ -227,7 +227,9 @@ class TestParsers:
         assert raw_data.calc_method == "defect_band_approx"
         assert raw_data.order == 1
         assert raw_data.ground_state_zfs is not None
-        assert np.isclose(raw_data.ground_state_zfs.matrix[2, 2], 2000.0)
+        assert raw_data.spin_correction_applied is True
+        # parser applies the 3/2 spin correction for defect_band_approx at intake
+        assert np.isclose(raw_data.ground_state_zfs.matrix[2, 2], 3000.0)
 
         assert 1059 in raw_data.first_order
         assert 1306 in raw_data.first_order
@@ -235,7 +237,7 @@ class TestParsers:
         assert entry_1060.order == 1
         assert entry_1060.mode_indices == (1059,)
         assert entry_1060.amplitude == pytest.approx(0.1)
-        assert np.isclose(entry_1060.zfs_tensor.matrix[2, 2], 1980.0)
+        assert np.isclose(entry_1060.zfs_tensor.matrix[2, 2], 2970.0)
         assert entry_1060.energy == pytest.approx(-510.5, abs=1e-3)
 
     def test_parse_zfs_simulation_dataset_2d(self, tmp_path):

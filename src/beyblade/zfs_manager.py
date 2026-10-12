@@ -7,7 +7,7 @@ import numpy as np
 
 from beyblade.constants import CONSTANTS
 from beyblade.symmetry import twin_of, _build_groups_from_labels
-from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData
+from beyblade.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, _normalize_calc_method
 from beyblade.parsers import (
     parse_zfs_simulation_dataset,
     parse_zfs_dataset_npz,
@@ -737,7 +737,9 @@ class ZFSManager:
                 cell_size=self.cell_size,
                 pert_scale=self.pert_scale,
                 calc_method=self.calc_method,
-                spin_correction_applied=True,
+                # Tensors stored on the manager were ingested via parse/load,
+                # which apply the 3/2 correction for approx data at intake.
+                spin_correction_applied=_normalize_calc_method(self.calc_method) == "defect_band_approx",
                 order=kwargs.get("order", 1 if first is not None else 2),
                 ground_state_zfs=gs_tensor,
                 eigen_rotation=self.eigen_rotation,

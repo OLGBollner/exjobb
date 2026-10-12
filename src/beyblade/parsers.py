@@ -17,7 +17,7 @@ except ImportError:
 from pymatgen.core import Structure
 
 from beyblade.constants import CONSTANTS
-from beyblade.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor
+from beyblade.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor, _normalize_calc_method
 
 ZFS_REGEX = re.compile(
     r"Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*"
@@ -566,7 +566,7 @@ def parse_zfs_simulation_dataset(
             search_path, order=2, amplitude=(pert_scale, pert_scale), max_workers=max_workers, verbose=verbose
         )
 
-    return RawZFSData(
+    data = RawZFSData(
         defect=defect,
         cell_size=cell_size,
         pert_scale=pert_scale,
@@ -577,6 +577,12 @@ def parse_zfs_simulation_dataset(
         second_order=second_order,
         metadata={"calc_method": calc_method, "sim_path": str(sim_path)},
     )
+    # Apply the spin correction here so every consumer of parsed sim-folder
+    # data sees corrected tensors, matching RawZFSData.load for npz files.
+    if _normalize_calc_method(data.calc_method) == "defect_band_approx":
+        data._apply_spin_correction()
+        data.spin_correction_applied = True
+    return data
 
 
 def parse_zfs_dataset_npz(raw_paths: list[str | Path] | tuple[str | Path, ...]) -> RawZFSData:

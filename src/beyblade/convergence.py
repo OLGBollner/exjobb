@@ -222,6 +222,9 @@ def plot_pert_convergence(
                 file=sys.stderr,
             )
         R = principal_frame(t_all[izero])
+        # reference for --deviation: the Q=0 values BEFORE any drop, so the
+        # subtraction stays correct even when --drop-anchor removes the anchor
+        anchor_vals = np.diag(R.T @ t_all[izero] @ R) if deviation else None
         p_use = p_all
         t_use = t_all
         if drop_anchor:
@@ -234,7 +237,7 @@ def plot_pert_convergence(
         trace = vals.sum(axis=1)
         if deviation:
             # plot D(Q) - D(Q=0) so the response is visible on its own scale
-            vals = vals - vals[izero]
+            vals = vals - anchor_vals
         # plot order: ascending signed value, so lines connect monotonically
         # instead of zigzagging between +Q and -Q
         sgn = np.argsort(p_use)

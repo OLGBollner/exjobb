@@ -142,6 +142,10 @@ def _auto_ground_state(defect_folder: Path, method: str | None) -> Path | None:
 
 
 def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
+    # _run_conv warns when a --conv run passes options that only apply to raw
+    # packaging. These defaults MUST mirror the argparse defaults below; if
+    # one changes, change both, or a matching user value silently skips the
+    # warning.
     defaults = {"orders": "first,second", "pert": None, "method": "all"}
     for opt in ("orders", "pert", "method"):
         if getattr(args, opt, defaults[opt]) != defaults[opt]:
