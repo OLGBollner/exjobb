@@ -72,7 +72,7 @@ def collect_rows(paths: list[Path]) -> list[dict]:
                 "defect": data.defect,
                 "configuration": orientation,
                 "column": column,
-                "d_ghz": zfs.to_unit("GHz").D,
+                "d_mhz": zfs.to_unit("MHz").D,
                 "source": npz_path,
             })
     return rows
@@ -89,7 +89,7 @@ def merge_rows(rows: list[dict]) -> list[dict]:
             "corrected": None,
             "contaminated": None,
         })
-        entry[row["column"]] = row["d_ghz"]
+        entry[row["column"]] = row["d_mhz"]
     return list(merged.values())
 
 
@@ -100,7 +100,7 @@ def render_tex(rows: list[dict], unit: str) -> str:
         r"  \begin{tabular}{llccc}",
         r"    \toprule",
         r"    Defect & Configuration & $D_\text{experiment}$ & $D_\text{corrected}$ & $D_\text{contaminated}$ \\",
-        r"         &              & (\si{\giga\hertz})            & (\si{\giga\hertz})         & (\si{\giga\hertz})             \\",
+        r"         &              & (\si{\mega\hertz})            & (\si{\mega\hertz})         & (\si{\mega\hertz})             \\",
         r"    \midrule",
     ]
     for row in sorted(rows, key=lambda r: (r["defect"], r["configuration"])):
@@ -137,7 +137,7 @@ def main() -> None:
     if not rows:
         sys.exit("error: no packaged ZFS data found in the given inputs")
     merged = merge_rows(rows)
-    args.output.write_text(render_tex(merged, "GHz"))
+    args.output.write_text(render_tex(merged, "MHz"))
     print(f"wrote {args.output} ({len(merged)} row(s))")
 
 
