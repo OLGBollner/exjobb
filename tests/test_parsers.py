@@ -371,17 +371,34 @@ class TestSpinCorrectionOnLoad:
 
     def test_load_with_mixed_flags_scales_only_uncorrected_files(self, tmp_path):
         legacy = self._save(self._make_raw("defect_band_approx"), tmp_path)
-        # Build an already-corrected companion file by round-tripping through load
-        corrected = tmp_path / "already_corrected.npz"
-        RawZFSData.load(legacy).save(corrected)
+        # Build an already-corrected companion file with a DIFFERENT mode key,
+        # so both files' tensors are visible in the merge and can be checked.
+        corrected = RawZFSData.load(legacy)
+        corrected.first_order = {2061: dict(corrected.first_order[1060])}
+        corrected.first_order[2061]["mode_indices"] = (2061,)
+        out2 = tmp_path / "already_corrected.npz"
+        corrected.save(out2)
 
         h = 6.62607015e-34
-        merged = RawZFSData.load([legacy, corrected])
+        merged = RawZFSData.load([legacy, out2])
         assert merged.spin_correction_applied is True
-        # Legacy file scaled exactly once; corrected file untouched
+        # Legacy file scaled exactly once; corrected file untouched (no double-scale)
         assert merged.ground_state_zfs.matrix[2, 2] == pytest.approx(3000.0e6 * h)
+        assert merged.first_order[1060]["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+        assert merged.first_order[2061]["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+        # Reversed order: same result
+        merged_rev = RawZFSData.load([out2, legacy])
+        assert merged_rev.first_order[1060]["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
+        assert merged_rev.first_order[2061]["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
 
     def test_apply_corrections_false_leaves_raw_tensors(self, tmp_path):
+        # also: merged flag is all(), not any()
+        legacy = self._save(self._make_raw("defect_band_approx"), tmp_path)
+        corrected = RawZFSData.load(legacy)
+        out2 = tmp_path / "already_corrected.npz"
+        corrected.save(out2)
+        merged = RawZFSData.load([legacy, out2], apply_corrections=False)
+        assert merged.spin_correction_applied is False
         out = self._save(self._make_raw("defect_band_approx"), tmp_path)
         raw = RawZFSData.load(out, apply_corrections=False)
         h = 6.62607015e-34

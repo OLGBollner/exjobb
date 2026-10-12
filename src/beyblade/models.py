@@ -1221,8 +1221,8 @@ class RawZFSData:
         # Scale EACH file before merging, based on that file's own method and
         # flag. Scaling the merged object once would mis-handle mixed inputs:
         # a corrected file could be scaled again, an uncorrected one missed.
-        def _per_file(npz: np.lib.npyio.NpzFile) -> tuple[dict, bool]:
-            fields = _fields_from_npz(npz, cls, cls.SCHEMA, strict=False)
+        def _per_file(npz: np.lib.npyio.NpzFile, strict: bool) -> tuple[dict, bool]:
+            fields = _fields_from_npz(npz, cls, cls.SCHEMA, strict=strict)
             if fields.get("spin_correction_applied"):
                 fields["spin_correction_applied"] = True
                 return fields, False
@@ -1240,7 +1240,7 @@ class RawZFSData:
             fields["spin_correction_applied"] = True
             return fields, True
 
-        scaled_pairs = [_per_file(d) for d in raw_data]
+        scaled_pairs = [_per_file(d, i == 0) for i, d in enumerate(raw_data)]
         scaled_fields = [f for f, _ in scaled_pairs]
 
         base = scaled_fields[0]
@@ -1264,7 +1264,9 @@ class RawZFSData:
             cell_size=base["cell_size"],
             pert_scale=base["pert_scale"],
             calc_method=base.get("calc_method"),
-            spin_correction_applied=any(f.get("spin_correction_applied") for f in scaled_fields),
+            # all(): if some files are uncorrected (only possible with
+            # apply_corrections=False), never report the merge as corrected.
+            spin_correction_applied=all(f.get("spin_correction_applied") for f in scaled_fields),
             order=order,
             ground_state_zfs=base.get("ground_state_zfs"),
             eigen_rotation=base.get("eigen_rotation"),
