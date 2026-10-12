@@ -3,10 +3,12 @@
 Inputs are defect folders (searched recursively for *_raw_zfs_data_*.npz) or
 npz files produced by ``spinlabs package``.
 
-    Defect | Configuration | D_experiment | D_corrected | D_contaminated
+    Defect | Base crystal | Configuration | D_experiment | D_corrected | D_contaminated
 
 D_corrected  comes from the defect-band (ZFS_occup) data.
 D_contaminated comes from the all-bands (ZFS_hyp) data.
+The base crystal is inferred from the defect: NV (diamond) vs the
+polytype-specific defects in 4H-SiC.
 Experimental values are left blank for manual entry.
 """
 
@@ -32,6 +34,17 @@ METHOD_COLUMN = {
 CONFLICT_TOL_MHZ = 0.01
 
 ORIENTATION_RE = re.compile(r"(?<![A-Za-z])(k{1,2}|hk|kh)(?![A-Za-z])", re.IGNORECASE)
+
+# Base crystal per defect family. NV sits in diamond; the rest of the
+# defects studied here are point defects in the 4H polytype of SiC.
+BASE_CRYSTAL = {
+    "NV": "diamond",
+}
+DEFAULT_BASE_CRYSTAL = "4H-SiC"
+
+
+def base_crystal_of(defect: str) -> str:
+    return BASE_CRYSTAL.get(defect.upper(), DEFAULT_BASE_CRYSTAL)
 
 
 def infer_orientation(path: Path) -> str:
@@ -185,11 +198,16 @@ def merge_rows(rows: list[dict]) -> list[dict]:
 
 
 def assign_letters(merged: list[dict]) -> dict[str, str]:
-    """Map each cell size to one letter for the whole table, ordered by cell size.
+    """Map each cell size to one letter for the whole table, in order of first
+    occurrence in the table (rows already sorted by defect, then cell).
 
     Letters are shared across defects so the caption footnote is unambiguous.
     """
-    cells = sorted({row["cell"] for row in merged if row["cell"]}, key=int)
+    cells: list[str] = []
+    for row in merged:
+        cell = row["cell"]
+        if cell and cell not in cells:
+            cells.append(cell)
     return {c: chr(ord("a") + i) for i, c in enumerate(cells)}
 
 
@@ -223,17 +241,17 @@ def render_tex(merged: list[dict], unit: str) -> str:
         r"% requires \usepackage{booktabs} and \usepackage{siunitx}",
         r"\begin{table}[htbp]",
         r"  \centering",
-        r"  \begin{tabular}{llccc}",
+        r"  \begin{tabular}{lllccc}",
         r"    \toprule",
-        r"    Defect & Configuration & $D_\text{experiment}$ & $D_\text{corrected}$ & $D_\text{contaminated}$ \\",
-        r"         &              & (\si{\mega\hertz})            & (\si{\mega\hertz})         & (\si{\mega\hertz})             \\",
+        r"    Defect & Base crystal & Configuration & $D_\text{experiment}$ & $D_\text{corrected}$ & $D_\text{contaminated}$ \\",
+        r"         &             &              & (\si{\mega\hertz})            & (\si{\mega\hertz})         & (\si{\mega\hertz})             \\",
         r"    \midrule",
     ]
     for (defect, configuration) in sorted(grouped):
         g = grouped[(defect, configuration)]
         defect_label = tex_defect(defect, configuration)
         lines.append(
-            f"    {defect_label} & {configuration or '---'} & --- & "
+            f"    {defect_label} & {base_crystal_of(defect)} & {configuration or '---'} & --- & "
             f"{', '.join(g['corrected'])} & {', '.join(g['contaminated'])} \\\\"
         )
     footnote = "; ".join(f"({letter}) cell size {cell}" for cell, letter in letters.items())
