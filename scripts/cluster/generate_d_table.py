@@ -247,11 +247,18 @@ def render_tex(merged: list[dict], unit: str) -> str:
         r"         &             &              & (\si{\mega\hertz})            & (\si{\mega\hertz})         & (\si{\mega\hertz})             \\",
         r"    \midrule",
     ]
+    last_base = None
+    n_cols = 6
     for (defect, configuration) in sorted(grouped):
+        base = base_crystal_of(defect)
+        if base != last_base:
+            lines.append(rf"    \multicolumn{{{n_cols}}}{{c}}{{\textit{{{base}}}}} \\")
+            lines.append(r"    \midrule")
+            last_base = base
         g = grouped[(defect, configuration)]
         defect_label = tex_defect(defect, configuration)
         lines.append(
-            f"    {defect_label} & {base_crystal_of(defect)} & {configuration or '---'} & --- & "
+            f"    {defect_label} & {base} & {configuration or '---'} & --- & "
             f"{', '.join(g['corrected'])} & {', '.join(g['contaminated'])} \\\\"
         )
     footnote = "; ".join(f"({letter}) cell size {cell}" for cell, letter in letters.items())
