@@ -17,8 +17,10 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--defect-folder",
         type=Path,
+        nargs="+",
+        metavar="FOLDER",
         required=True,
-        help="Root folder for one defect, e.g. ../NV_512. With --conv: the folder containing runs/.",
+        help="Root folder(s) for one defect each, e.g. ../NV_512 ../ClV_128. With --conv: exactly one folder containing runs/.",
     )
     parser.add_argument(
         "--conv",
@@ -50,7 +52,14 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Perturbation scale(s) to package. Default: every pert_* folder found.",
     )
-    parser.add_argument("--method", type=str, default="all", help="ZFS calculation method (all or approx).")
+    parser.add_argument(
+        "--method",
+        type=str,
+        nargs="+",
+        default=["all"],
+        metavar="METHOD",
+        help="ZFS calculation method(s) to package: all or approx (default: all).",
+    )
     parser.add_argument(
         "--output-root",
         type=Path,
@@ -66,34 +75,37 @@ _GS_AUTO = Path("__auto__")  # --ground-state given without a path: auto-discove
 
 
 def _run(args: argparse.Namespace) -> None:
-    defect_folder = args.defect_folder.resolve()
-    if not defect_folder.is_dir():
-        raise SystemExit(f"Defect folder not found: {defect_folder}")
+    defect_folders = [f.resolve() for f in args.defect_folder]
+    for f in defect_folders:
+        if not f.is_dir():
+            raise SystemExit(f"Defect folder not found: {f}")
 
     if getattr(args, "conv", False):
-        _run_conv(args, defect_folder)
+        if len(defect_folders) > 1:
+            raise SystemExit("--conv takes exactly one --defect-folder; got " + str(len(defect_folders)))
+        _run_conv(args, defect_folders[0])
         return
 
+    methods = args.method
+    for defect_folder in defect_folders:
+        _run_raw(args, defect_folder, methods)
+
+
+def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) -> None:
     orders = [o.strip().lower() for o in args.orders.split(",") if o.strip()]
     unknown = [o for o in orders if o not in _ORDER_DIRS]
     if unknown:
         raise SystemExit(f"Unknown order(s): {', '.join(unknown)} (expected 'first' and/or 'second')")
 
-    print(f"Defect folder: {defect_folder}")
-    print(f"Orders: {', '.join(orders)} | method: {args.method}")
-
     defect, cell_size = split_defect_folder_name(defect_folder.name)
     if cell_size is None:
         raise SystemExit(f"Cell size not found in defect folder name: {defect_folder.name} (expected e.g. NV_512)")
 
-    calc_method = _normalize_calc_method(args.method)
-    folder = (
-        args.output_root / f"{defect}_{cell_size}" / calc_method / date.today().strftime("%Y%m%d")
-    )
-    folder.mkdir(parents=True, exist_ok=True)
+    print(f"Defect folder: {defect_folder}")
+    date_dir = date.today().strftime("%Y%m%d")
 
     def _collect(order: str) -> dict[float, Path]:
-        """Map pert_scale -> pert folder for one order."""
+        """Map pert_scale -> pert folder for one order, filtered to the requested scales."""
         order_root = defect_folder / _ORDER_DIRS[order]
         if not order_root.is_dir():
             warnings.warn(f"Order folder not found, skipping: {order_root}")
@@ -106,35 +118,47 @@ def _run(args: argparse.Namespace) -> None:
             perts[pert_scale] = pert_dir
         return perts
 
-    datasets = {o: _collect(o) for o in orders}
-    for o in orders:
-        print(f"  {o} order: {len(datasets[o])} perturbation(s) found in {defect_folder / _ORDER_DIRS[o]}")
-    pert_scales = sorted(set().union(*datasets.values()))
-    print(f"Perturbation scales to package: {pert_scales}")
-    for pert_scale in pert_scales:
-        raw = None
+    for method in methods:
+        calc_method = _normalize_calc_method(method)
+        folder = args.output_root / f"{defect}_{cell_size}" / calc_method / date_dir
+        folder.mkdir(parents=True, exist_ok=True)
+
+        datasets = {o: _collect(o) for o in orders}
         for o in orders:
-            if pert_scale not in datasets[o]:
-                continue
-            data = parse_zfs_simulation_dataset(
-                sim_folder=datasets[o][pert_scale], order=_ORDER_NUM[o], calc_method=args.method, verbose=True
+            print(f"  {o} order: {len(datasets[o])} perturbation(s) found in {defect_folder / _ORDER_DIRS[o]}")
+        pert_scales = sorted(set().union(*datasets.values()))
+        if args.pert is not None:
+            missing = [p for p in args.pert if p not in pert_scales]
+            for p in missing:
+                warnings.warn(f"Perturbation scale {p:g} not found in {defect_folder.name}; skipping")
+        if not pert_scales:
+            warnings.warn(f"Nothing to package for {defect_folder.name} ({calc_method}); skipping")
+            continue
+        print(f"Perturbation scales to package: {pert_scales}")
+        for pert_scale in pert_scales:
+            raw = None
+            for o in orders:
+                if pert_scale not in datasets[o]:
+                    continue
+                data = parse_zfs_simulation_dataset(
+                    sim_folder=datasets[o][pert_scale], order=_ORDER_NUM[o], calc_method=method, verbose=True
+                )
+                raw = data if raw is None else raw.combine(data)
+            pert_folder = folder / f"pert_{pert_scale:g}"
+            pert_folder.mkdir(parents=True, exist_ok=True)
+            save_path = raw.save(pert_folder / raw._default_name())
+            append_data_row(
+                args.output_root,
+                defect=defect,
+                cell=cell_size,
+                method=calc_method,
+                order=None if raw.combined_order == 2 else _ORDER_NUM[orders[0]],
+                pert=pert_scale,
+                n_dims=(raw.combined_order, ),
+                npz_files=(Path(save_path).name, ),
+                data_dir=pert_folder,
             )
-            raw = data if raw is None else raw.combine(data)
-        pert_folder = folder / f"pert_{pert_scale:g}"
-        pert_folder.mkdir(parents=True, exist_ok=True)
-        save_path = raw.save(pert_folder / raw._default_name())
-        append_data_row(
-            args.output_root,
-            defect=defect,
-            cell=cell_size,
-            method=calc_method,
-            order=None if raw.combined_order == 2 else _ORDER_NUM[o],
-            pert=pert_scale,
-            n_dims=(raw.combined_order, ),
-            npz_files=(Path(save_path).name, ),
-            data_dir=pert_folder,
-        )
-        print(f"Saved raw data in: {save_path}")
+            print(f"Saved raw data in: {save_path}")
 
 
 def _auto_ground_state(defect_folder: Path, method: str | None) -> Path | None:
@@ -163,7 +187,7 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
     # packaging. These defaults MUST mirror the argparse defaults below; if
     # one changes, change both, or a matching user value silently skips the
     # warning.
-    defaults = {"orders": "first,second", "pert": None, "method": "all"}
+    defaults = {"orders": "first,second", "pert": None, "method": ["all"]}
     for opt in ("orders", "pert", "method"):
         if getattr(args, opt, defaults[opt]) != defaults[opt]:
             print(f"warning: --{opt.replace('_', '-')} is ignored with --conv")

@@ -11,12 +11,12 @@ from spinlabs.cli.package import _run, _run_conv
 from spinlabs.models import PerturbationEntry, RawZFSData, ZFSTensor
 
 
-def _raw(order=1, pert=0.025, **_kw):
+def _raw(order=1, pert=0.025, calc_method=None, **_kw):
     kwargs = dict(
         defect="NV",
         cell_size=512,
         pert_scale=pert,
-        calc_method="all_bands",
+        calc_method={"all": "all_bands", "approx": "defect_band_approx"}.get(calc_method, calc_method or "all_bands"),
         order=order,
     )
     if order == 2:
@@ -35,10 +35,10 @@ def _raw(order=1, pert=0.025, **_kw):
 
 def _make_args(tmp_path, orders="first,second", pert=None):
     return argparse.Namespace(
-        defect_folder=tmp_path / "NV_512",
+        defect_folder=[tmp_path / "NV_512"],
         orders=orders,
         pert=pert,
-        method="all",
+        method=["all"],
         output_root=tmp_path / "data",
     )
 
@@ -163,3 +163,33 @@ def test_conv_ground_state_explicit_path(tmp_path):
     out = next((tmp_path / "data").rglob("NV_512_*_conv_*.npz"))
     data = np.load(out, allow_pickle=True)
     assert abs(data["d0"][2, 2] - 5.0) < 1e-9
+
+
+def test_multiple_folders_and_methods(tmp_path):
+    _tree(tmp_path)
+    clv = tmp_path / "ClV_128"
+    clv.mkdir()
+    (clv / "first_order" / "pert_0.025").mkdir(parents=True)
+    args = _make_args(tmp_path)
+    args.defect_folder = [tmp_path / "NV_512", clv]
+    args.method = ["all", "approx"]
+    with _patch(lambda **kw: _raw(order=kw["order"], calc_method=kw["calc_method"])):
+        _run(args)
+    day = date.today().strftime("%Y%m%d")
+    assert (tmp_path / "data" / "NV_512" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_2d.npz").exists()
+    assert (tmp_path / "data" / "NV_512" / "defect_band_approx" / day / "pert_0.025" / "NV_512_raw_zfs_data_defect_band_approx_2d.npz").exists()
+    assert (tmp_path / "data" / "ClV_128" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
+    index = (tmp_path / "data" / "data_index.csv").read_text().strip().splitlines()[1:]
+    assert len(index) == 4
+    assert "ClV,128,all_bands,1,0.025,1" in index[2]
+
+
+def test_missing_pert_warns_and_skips(tmp_path):
+    _tree(tmp_path, perts=(0.025,))
+    args = _make_args(tmp_path)
+    args.pert = [0.025, 0.1]
+    with _patch():
+        with pytest.warns(UserWarning, match="0.1"):
+            _run(args)
+    files = list((tmp_path / "data").rglob("*.npz"))
+    assert len(files) == 1
