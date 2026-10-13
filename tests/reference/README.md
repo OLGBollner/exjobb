@@ -4,8 +4,7 @@ These JSON files pin what the pipeline computes for `NV_64`, `NV_512` and `ClV_1
 back `tests/test_t1_regression.py`, which compares numbers; the rest of the suite only
 checks shapes and finiteness.
 
-They record current behaviour, not correct behaviour. See [Observations](#observations) for
-things that look wrong and were left alone.
+They record current behaviour, not correct behaviour.
 
 ## Provenance
 
@@ -61,7 +60,7 @@ whereas `t1_eigenval` is a closed-form 3×3 eigendecomposition. The remaining he
 covers a different BLAS kernel or CPU on a GitHub runner.
 
 The `1e-30` s⁻¹ floor on rates exists because the `NV_64` one-phonon channel emits values
-around `1e-171` s⁻¹ (see Observations), which no relative tolerance can bound. Rates of
+around `1e-171` s⁻¹, which no relative tolerance can bound. Rates of
 interest are ≥ `1e-8` s⁻¹.
 
 The inf/NaN pattern is compared exactly — it is part of the frozen result.
@@ -84,51 +83,3 @@ The inf/NaN pattern is compared exactly — it is part of the frozen result.
 | 200 | 9.7783e-02 | 2.5747e+01 | 8.5819e-04 |
 | 250 | 4.0919e-02 | 8.3625e+00 | 4.9857e-04 |
 | 300 | 2.2124e-02 | 3.6564e+00 | 3.2720e-04 |
-
-## CI
-
-No workflow change was needed: the existing job checks out with `lfs: true` and runs
-`pytest -q`, and `ruff check src tests scripts` already covers the new files.
-
-The test adds about 27 s warm (suite 50.6 s → 77.2 s; `NV_512` 7–9 s, `NV_64` and
-`ClV_128` ~3 s each) and closer to a minute on the cold cache a fresh runner gets, most of
-it reading LFS payloads. Peak RSS is 0.70 GB for `NV_512`. Cost is dominated by the fixed
-coupling calculation rather than the temperature loop, so a shorter grid would save little;
-running `ClV_128` alone would save roughly 10 s warm. To trim it, narrow
-`EXPECTED_SYSTEMS` in `tests/test_t1_regression.py` — CI then stops guarding the systems
-you drop.
-
-## Observations
-
-Left as they are, per the task constraints; flagged for the physics audit:
-
-1. **`NV_64` one-phonon rates are ~`1e-171` s⁻¹ at every temperature** — numerically zero
-   and essentially constant in T, where `NV_512` gives `1e-7` and `ClV_128` gives `1e0`.
-   Consistent with a Gaussian-broadening tail artefact: the spectral density is evaluated
-   at the ZFS frequency (~0.0119 meV), far below `NV_64`'s lowest phonon mode, so
-   `exp(-x²/2σ²)` underflows.
-
-2. **`NV_64` T1 is `inf` for T ≤ 20 K.** `get_T1_eigenval` discards eigenvalues with
-   `|λ| < 1e-9` (a hard absolute cutoff in s⁻¹) and returns `inf` when none survive, so
-   genuinely slow relaxation (T1 > 10⁹ s) is reported as infinite.
-
-3. **That cutoff is masking a sign error, not just slowness.** Lowering it to `1e-30`
-   turns `NV_64` at 20 K into T1 = `-7.7e+27` s. The near-zero eigenvalues there are noise
-   straddling zero.
-
-4. **`get_time_estimate` computes `t_end = 10 * T1_eigenval + 1/T`**, adding a reciprocal
-   temperature (K⁻¹) to a time (s). Harmless at these magnitudes, but dimensionally wrong.
-
-5. **`t1_fit` is the less stable of the two T1 estimators.** It agrees with `t1_eigenval`
-   to ~5e-8 in the well-behaved regime but diverges to 1.6e-4 relative for `NV_512` at
-   5 K, where `curve_fit` also emits `OptimizeWarning: Covariance of the parameters could
-   not be estimated`. Prefer `t1_eigenval`.
-
-6. **Phonon auto-discovery does not cover the `--raw-zfs-file-1d/2d` input mode.**
-   `find_default_phonon_file_for_raw` is only consulted for `--raw-zfs-file`, so a combined
-   1d+2d run without an explicit `-ph` fails in `process_both_orders` even when
-   `phonon_data.npz` sits next to the inputs.
-
-7. **CI pulls 530 MB of LFS payloads to use about 27 MB.** `scripts/derivatives/` holds
-   452 MB of `NV_512` 2D coefficient files that no test touches. Pre-existing and unchanged
-   here, but it is most of the checkout time.

@@ -45,8 +45,8 @@ RTOL_T1_FIT = 1e-6
 # Absolute floor for transition rates, in s^-1. Below this a rate is numerical
 # noise, not physics: 1e-30 s^-1 is a mean waiting time ~1e12 times the age of
 # the universe. The floor exists because the pipeline currently emits values like
-# 1e-171 s^-1 for the NV_64 one-phonon channel (a Gaussian-tail artefact, see
-# tests/reference/README.md), which no relative tolerance can sensibly bound.
+# 1e-171 s^-1 for the NV_64 one-phonon channel, which no relative tolerance can
+# sensibly bound.
 # Every rate a paper would quote is >= 1e-8 s^-1, far above this floor.
 ATOL_RATE_PER_S = 1e-30
 
