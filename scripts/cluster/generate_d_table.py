@@ -1,25 +1,35 @@
 """Generate a LaTeX table of ground-state D values from packaged ZFS data.
 
 Inputs are defect folders (searched recursively for *_raw_zfs_data_*.npz) or
-npz files produced by ``beyblade package``.
+npz files produced by ``spinlabs package``.
 
-    Defect | Configuration | D_experiment | D_corrected | D_contaminated
+    Defect | Base crystal | Configuration | D_experiment | D_corrected | D_contaminated
+          | T1_experiment | T1_corrected | T1_contaminated
 
 D_corrected  comes from the defect-band (ZFS_occup) data.
 D_contaminated comes from the all-bands (ZFS_hyp) data.
+T1_corrected/T1_contaminated come from the directional transition rates
+(*_directional_rates_*.npz) via RelaxationDynamics at 300 K, initial state ms_0,
+reported in ms. All values are rounded to 3 significant figures.
+The base crystal is inferred from the defect: NV (diamond) vs the
+polytype-specific defects in 4H-SiC.
 Experimental values are left blank for manual entry.
 """
 
 import argparse
+import math
 import re
 import sys
 from pathlib import Path
+
+import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from beyblade.models import SPIN_CORRECTION_SCALE, RawZFSData, ZFSTensor, _normalize_calc_method  # noqa: E402
 from beyblade.parsers import parse_outcar_zfs  # noqa: E402
+from beyblade.relaxation_dynamics import RelaxationDynamics  # noqa: E402
 
 # Method name fragments in the packaged npz filenames -> table columns.
 METHOD_COLUMN = {
@@ -32,6 +42,17 @@ METHOD_COLUMN = {
 CONFLICT_TOL_MHZ = 0.01
 
 ORIENTATION_RE = re.compile(r"(?<![A-Za-z])(k{1,2}|hk|kh)(?![A-Za-z])", re.IGNORECASE)
+
+# Base crystal per defect family. NV sits in diamond; the rest of the
+# defects studied here are point defects in the 4H polytype of SiC.
+BASE_CRYSTAL = {
+    "NV": "diamond",
+}
+DEFAULT_BASE_CRYSTAL = "4H-SiC"
+
+
+def base_crystal_of(defect: str) -> str:
+    return BASE_CRYSTAL.get(defect.upper(), DEFAULT_BASE_CRYSTAL)
 
 
 def infer_orientation(path: Path) -> str:
@@ -109,6 +130,50 @@ def collect_rows(paths: list[Path]) -> list[dict]:
     return rows
 
 
+def sigfig(value: float | None, digits: int = 3) -> str | None:
+    """Round to `digits` significant figures without scientific notation."""
+    if value is None:
+        return None
+    if value == 0:
+        return "0"
+    decimals = digits - 1 - math.floor(math.log10(abs(value)))
+    if decimals < 0:
+        return f"{round(value, decimals):.0f}"
+    return f"{value:.{decimals}f}"
+
+
+def collect_t1_rows(paths: list[Path]) -> dict[tuple[str, str], dict[str, float | None]]:
+    """T1 at 300 K (ms, initial state ms_0) from directional transition rates.
+
+    Returns {(defect, cell): {"corrected": ms, "contaminated": ms}}.
+    """
+    t1: dict[tuple[str, str], dict[str, float | None]] = {}
+    for path in paths:
+        rate_files = sorted(path.rglob("*_directional_rates_*.npz")) if path.is_dir() else (
+            [path] if "_directional_rates_" in path.name else [])
+        for rate_path in rate_files:
+            method = method_of(rate_path)
+            if method is None:
+                print(f"warning: unknown method in {rate_path.name}, skipping", file=sys.stderr)
+                continue
+            try:
+                data = np.load(rate_path, allow_pickle=True)
+            except Exception as error:
+                print(f"warning: cannot load {rate_path} ({error.__class__.__name__}, "
+                      f"possibly a git-lfs pointer stub), skipping", file=sys.stderr)
+                continue
+            defect = str(data["defect"])
+            cell = str(int(data["cell_size"]))
+            temperatures = np.asarray(data["temperatures"], dtype=float)
+            temp_index = int(np.argmin(np.abs(temperatures - 300.0)))
+            simulator = RelaxationDynamics(init_state=[0.0, 1.0, 0.0], rates_data=str(rate_path))
+            t1_seconds = simulator.get_T1_fit(temp_index=temp_index)
+            t1_ms = None if not np.isfinite(t1_seconds) else float(t1_seconds) * 1e3
+            entry = t1.setdefault((defect, cell), {"corrected": None, "contaminated": None})
+            entry[method] = t1_ms
+    return t1
+
+
 def collect_outcar_rows(folder: Path) -> list[dict]:
     """Read ground-state ZFS straight from relaxed-structure folders.
 
@@ -154,6 +219,15 @@ def collect_outcar_rows(folder: Path) -> list[dict]:
     return rows
 
 
+def attach_t1(merged: list[dict], t1: dict[tuple[str, str], dict[str, float | None]]) -> list[dict]:
+    """Attach T1 values (per defect+cell) onto the merged D rows."""
+    for row in merged:
+        values = t1.get((row["defect"], row["cell"]), {})
+        row["t1_corrected"] = values.get("corrected")
+        row["t1_contaminated"] = values.get("contaminated")
+    return merged
+
+
 def merge_rows(rows: list[dict]) -> list[dict]:
     """Merge corrected/contaminated values into one entry per
     defect+orientation+cell; group cells per defect for lettering."""
@@ -185,11 +259,16 @@ def merge_rows(rows: list[dict]) -> list[dict]:
 
 
 def assign_letters(merged: list[dict]) -> dict[str, str]:
-    """Map each cell size to one letter for the whole table, ordered by cell size.
+    """Map each cell size to one letter for the whole table, in order of first
+    occurrence in the table (rows already sorted by defect, then cell).
 
     Letters are shared across defects so the caption footnote is unambiguous.
     """
-    cells = sorted({row["cell"] for row in merged if row["cell"]}, key=int)
+    cells: list[str] = []
+    for row in merged:
+        cell = row["cell"]
+        if cell and cell not in cells:
+            cells.append(cell)
     return {c: chr(ord("a") + i) for i, c in enumerate(cells)}
 
 
@@ -203,44 +282,53 @@ def tex_defect(defect: str, configuration: str) -> str:
 def render_tex(merged: list[dict], unit: str) -> str:
     letters = assign_letters(merged)
 
-    def fmt(value: float | None, cell: str) -> str:
+    def fmt(value: float | None, cell: str, digits: int = 3, unit_scale: float = 1.0) -> str:
         if value is None:
             return "---"
         letter = letters.get(cell, "")
         sup = rf"$^{{({letter})}}$" if letter else ""
-        return f"{value:.3f}{sup}"
+        return f"{sigfig(value * unit_scale, digits)}{sup}"
 
     # one row per defect+orientation, values from all cells comma-separated
     grouped: dict[tuple[str, str], dict] = {}
     for row in merged:
         g = grouped.setdefault((row["defect"], row["configuration"]), {
-            "corrected": [], "contaminated": []})
+            "corrected": [], "contaminated": [],
+            "t1_corrected": [], "t1_contaminated": []})
         g["corrected"].append(fmt(row["corrected"], row["cell"]))
         g["contaminated"].append(fmt(row["contaminated"], row["cell"]))
+        g["t1_corrected"].append(fmt(row.get("t1_corrected"), row["cell"]))
+        g["t1_contaminated"].append(fmt(row.get("t1_contaminated"), row["cell"]))
 
     lines = [
         r"% generated by scripts/cluster/generate_d_table.py",
         r"% requires \usepackage{booktabs} and \usepackage{siunitx}",
         r"\begin{table}[htbp]",
         r"  \centering",
-        r"  \begin{tabular}{llccc}",
+        r"  \begin{tabular}{lllcccccc}",
         r"    \toprule",
-        r"    Defect & Configuration & $D_\text{experiment}$ & $D_\text{corrected}$ & $D_\text{contaminated}$ \\",
-        r"         &              & (\si{\mega\hertz})            & (\si{\mega\hertz})         & (\si{\mega\hertz})             \\",
+        r"    \multicolumn{3}{c}{} & \multicolumn{3}{c}{$D$} & \multicolumn{3}{c}{$T_1$} \\",
+        r"    \cmidrule(lr){4-6} \cmidrule(lr){7-9}",
+        r"    Defect & Base crystal & Configuration & $D_\text{experiment}$ & $D_\text{corrected}$ & $D_\text{contaminated}$ "
+        r"& $T_{1,\text{experiment}}$ & $T_{1,\text{corrected}}$ & $T_{1,\text{contaminated}}$ \\",
+        r"         &             &              & (\si{\mega\hertz})            & (\si{\mega\hertz})         & (\si{\mega\hertz}) "
+        r"             & (\si{\milli\second}) & (\si{\milli\second}) & (\si{\milli\second}) \\",
         r"    \midrule",
     ]
     for (defect, configuration) in sorted(grouped):
         g = grouped[(defect, configuration)]
         defect_label = tex_defect(defect, configuration)
         lines.append(
-            f"    {defect_label} & {configuration or '---'} & --- & "
-            f"{', '.join(g['corrected'])} & {', '.join(g['contaminated'])} \\\\"
+            f"    {defect_label} & {base_crystal_of(defect)} & {configuration or '---'} & --- & "
+            f"{', '.join(g['corrected'])} & {', '.join(g['contaminated'])} & "
+            f"--- & {', '.join(g['t1_corrected'])} & {', '.join(g['t1_contaminated'])} \\\\"
         )
     footnote = "; ".join(f"({letter}) cell size {cell}" for cell, letter in letters.items())
     lines += [
         r"    \bottomrule",
         r"  \end{tabular}",
-        rf"  \caption{{Zero-field splitting parameter $D$ ({unit}). "
+        rf"  \caption{{Zero-field splitting parameter $D$ ({unit}) and $T_1$ at 300\,K "
+        r"(initial state $m_s=0$, from the directional transition rates). "
         r"Corrected: defect-band approximation (ZFS\_occup); contaminated: all-electron bands (ZFS\_hyp). "
         + footnote + ".}",
         r"  \label{tab:zfs_d}",
@@ -262,7 +350,7 @@ def main() -> None:
     rows = collect_rows(args.inputs)
     if not rows:
         sys.exit("error: no packaged ZFS data found in the given inputs")
-    merged = merge_rows(rows)
+    merged = attach_t1(merge_rows(rows), collect_t1_rows(args.inputs))
     args.output.write_text(render_tex(merged, "MHz"))
     print(f"wrote {args.output} ({len(merged)} row(s))")
 
