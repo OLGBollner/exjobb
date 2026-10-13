@@ -7,6 +7,8 @@ import warnings
 from datetime import date
 from pathlib import Path
 
+from spinlabs.data_index import append_row as append_data_row
+from spinlabs.models import _normalize_calc_method
 from spinlabs.pack_convergence import pack_convergence
 from spinlabs.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
 
@@ -84,7 +86,10 @@ def _run(args: argparse.Namespace) -> None:
     if cell_size is None:
         raise SystemExit(f"Cell size not found in defect folder name: {defect_folder.name} (expected e.g. NV_512)")
 
-    folder = args.output_root / f"{defect}_{cell_size}_{date.today():%Y%m%d}"
+    calc_method = _normalize_calc_method(args.method)
+    folder = (
+        args.output_root / f"{defect}_{cell_size}" / calc_method / date.today().strftime("%Y%m%d")
+    )
     folder.mkdir(parents=True, exist_ok=True)
 
     def _collect(order: str) -> dict[float, Path]:
@@ -118,6 +123,17 @@ def _run(args: argparse.Namespace) -> None:
         pert_folder = folder / f"pert_{pert_scale:g}"
         pert_folder.mkdir(parents=True, exist_ok=True)
         save_path = raw.save(pert_folder / raw._default_name())
+        append_data_row(
+            args.output_root,
+            defect=defect,
+            cell=cell_size,
+            method=calc_method,
+            order=None if raw.combined_order == 2 else _ORDER_NUM[o],
+            pert=pert_scale,
+            n_dims=(raw.combined_order, ),
+            npz_files=(Path(save_path).name, ),
+            data_dir=pert_folder,
+        )
         print(f"Saved raw data in: {save_path}")
 
 
@@ -161,11 +177,23 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
         method = next((v for k, v in method_map.items() if k in suffix), None)
         defect, cell = split_defect_folder_name(defect_folder.name)
         stem = f"{defect}_{cell}_{date.today():%Y%m%d}_conv_{suffix}"
-        output = args.output_root / f"{stem}.npz"
-        args.output_root.mkdir(parents=True, exist_ok=True)
+        calc_method = _normalize_calc_method(method) if method else method
+        date_dir = date.today().strftime("%Y%m%d")
+        leaf = args.output_root / f"{defect}_{cell}" / (calc_method or "conv") / date_dir
+        leaf.mkdir(parents=True, exist_ok=True)
+        output = leaf / f"{stem}.npz"
         ground_state = args.ground_state
         if ground_state == _GS_AUTO:
             ground_state = _auto_ground_state(defect_folder, method)
         pack_convergence(
             root, output, ground_state=ground_state, defect=defect, cell=cell, method=method, method_key=suffix
+        )
+        append_data_row(
+            args.output_root,
+            defect=defect,
+            cell=cell,
+            method=calc_method or "conv",
+            n_dims=(1, 2),
+            npz_files=(output.name, ),
+            data_dir=leaf,
         )
