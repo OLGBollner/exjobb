@@ -1,7 +1,7 @@
 """Generate a LaTeX table of ground-state D values from packaged ZFS data.
 
 Inputs are defect folders (searched recursively for *_raw_zfs_data_*.npz) or
-npz files produced by ``spinlabs package``.
+npz files produced by ``beyblade package``.
 
     Defect | Base crystal | Configuration | D_experiment | D_corrected | D_contaminated
           | T1_experiment | T1_corrected | T1_contaminated
@@ -315,13 +315,17 @@ def render_tex(merged: list[dict], unit: str) -> str:
         r"             & (\si{\milli\second}) & (\si{\milli\second}) & (\si{\milli\second}) \\",
         r"    \midrule",
     ]
+    def join_cell(entries: list[str]) -> str:
+        """Comma-join cell values; collapse all-empty entries to a single "---"."""
+        return "---" if all(e == "---" for e in entries) else ", ".join(entries)
+
     for (defect, configuration) in sorted(grouped):
         g = grouped[(defect, configuration)]
         defect_label = tex_defect(defect, configuration)
         lines.append(
             f"    {defect_label} & {base_crystal_of(defect)} & {configuration or '---'} & --- & "
             f"{', '.join(g['corrected'])} & {', '.join(g['contaminated'])} & "
-            f"--- & {', '.join(g['t1_corrected'])} & {', '.join(g['t1_contaminated'])} \\\\"
+            f"--- & {join_cell(g['t1_corrected'])} & {join_cell(g['t1_contaminated'])} \\\\"
         )
     footnote = "; ".join(f"({letter}) cell size {cell}" for cell, letter in letters.items())
     lines += [
@@ -350,7 +354,13 @@ def main() -> None:
     rows = collect_rows(args.inputs)
     if not rows:
         sys.exit("error: no packaged ZFS data found in the given inputs")
-    merged = attach_t1(merge_rows(rows), collect_t1_rows(args.inputs))
+    t1_paths: list[Path] = list(args.inputs)
+    if not any(p.is_dir() and any(p.rglob("*_directional_rates_*.npz")) or p.is_file() and "_directional_rates_" in p.name for p in t1_paths):
+        default_rates = REPO_ROOT / "scripts" / "rates"
+        if default_rates.is_dir():
+            print(f"no directional rates in inputs; falling back to {default_rates}")
+            t1_paths.append(default_rates)
+    merged = attach_t1(merge_rows(rows), collect_t1_rows(t1_paths))
     args.output.write_text(render_tex(merged, "MHz"))
     print(f"wrote {args.output} ({len(merged)} row(s))")
 
