@@ -6,8 +6,7 @@ compares T1(T) and the first/second/two-phonon rate breakdown against the frozen
 fixtures in ``tests/reference/``.
 
 Regenerate the fixtures with ``python scripts/regenerate_t1_reference.py``; see
-``tests/reference/README.md`` for provenance and for how the tolerances below were
-measured.
+``tests/reference/README.md`` for provenance and for the tolerances below.
 """
 
 from __future__ import annotations
@@ -28,9 +27,9 @@ REFERENCE_DIR = Path(__file__).parent / "reference"
 EXPECTED_SYSTEMS = {"NV_64", "NV_512", "ClV_128"}
 
 # ── Tolerances ───────────────────────────────────────────────────────────────
-# Measured, not guessed. The same sweep was run under CPython 3.10 (numpy 2.2.6,
-# scipy 1.15.3), 3.12 and 3.13 (numpy 2.5.4, scipy 1.18.1). Worst relative
-# deviation across versions, over all three systems and all 12 temperatures:
+# The same sweep was run under CPython 3.10 (numpy 2.2.6, scipy 1.15.3), 3.12
+# and 3.13 (numpy 2.5.4, scipy 1.18.1). Worst relative deviation across
+# versions, over all three systems and all 12 temperatures:
 #
 #   transition rates   4.7e-16   (pure array arithmetic; machine precision)
 #   t1_eigenval        8.5e-16   (3x3 eigendecomposition; machine precision)
