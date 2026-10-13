@@ -8,9 +8,8 @@ npz files produced by ``beyblade package``.
 
 D_corrected  comes from the defect-band (ZFS_occup) data.
 D_contaminated comes from the all-bands (ZFS_hyp) data.
-T1_corrected/T1_contaminated come from the directional transition rates
-(*_directional_rates_*.npz) via RelaxationDynamics at 300 K, initial state ms_0,
-reported in ms. All values are rounded to 3 significant figures.
+T1_corrected/T1_contaminated come from the t1_relaxation npz files
+(t1_fit interpolated to 300 K), reported in ms. All values are rounded to 3 significant figures.
 The base crystal is inferred from the defect: NV (diamond) vs the
 polytype-specific defects in 4H-SiC.
 Experimental values are left blank for manual entry.
@@ -29,7 +28,6 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from beyblade.models import SPIN_CORRECTION_SCALE, RawZFSData, ZFSTensor, _normalize_calc_method  # noqa: E402
 from beyblade.parsers import parse_outcar_zfs  # noqa: E402
-from beyblade.relaxation_dynamics import RelaxationDynamics  # noqa: E402
 
 # Method name fragments in the packaged npz filenames -> table columns.
 METHOD_COLUMN = {
@@ -143,32 +141,31 @@ def sigfig(value: float | None, digits: int = 3) -> str | None:
 
 
 def collect_t1_rows(paths: list[Path]) -> dict[tuple[str, str], dict[str, float | None]]:
-    """T1 at 300 K (ms, initial state ms_0) from directional transition rates.
+    """T1 at 300 K (ms) from t1_relaxation npz files.
 
     Returns {(defect, cell): {"corrected": ms, "contaminated": ms}}.
     """
     t1: dict[tuple[str, str], dict[str, float | None]] = {}
     for path in paths:
-        rate_files = sorted(path.rglob("*_directional_rates_*.npz")) if path.is_dir() else (
-            [path] if "_directional_rates_" in path.name else [])
+        rate_files = sorted(path.rglob("*t1_relaxation*.npz")) if path.is_dir() else (
+            [path] if "t1_relaxation" in path.name else [])
         for rate_path in rate_files:
-            method = method_of(rate_path)
-            if method is None:
-                print(f"warning: unknown method in {rate_path.name}, skipping", file=sys.stderr)
-                continue
             try:
                 data = np.load(rate_path, allow_pickle=True)
             except Exception as error:
                 print(f"warning: cannot load {rate_path} ({error.__class__.__name__}, "
                       f"possibly a git-lfs pointer stub), skipping", file=sys.stderr)
                 continue
+            method = method_of(rate_path, str(data["calc_method"]))
+            if method is None:
+                print(f"warning: unknown method in {rate_path.name}, skipping", file=sys.stderr)
+                continue
             defect = str(data["defect"])
             cell = str(int(data["cell_size"]))
             temperatures = np.asarray(data["temperatures"], dtype=float)
-            temp_index = int(np.argmin(np.abs(temperatures - 300.0)))
-            simulator = RelaxationDynamics(init_state=[0.0, 1.0, 0.0], rates_data=str(rate_path))
-            t1_seconds = simulator.get_T1_fit(temp_index=temp_index)
-            t1_ms = None if not np.isfinite(t1_seconds) else float(t1_seconds) * 1e3
+            t1_fit = np.asarray(data["t1_fit"], dtype=float)
+            t1_seconds = float(np.interp(300.0, temperatures, t1_fit))
+            t1_ms = None if not np.isfinite(t1_seconds) else t1_seconds * 1e3
             entry = t1.setdefault((defect, cell), {"corrected": None, "contaminated": None})
             entry[method] = t1_ms
     return t1
@@ -332,7 +329,7 @@ def render_tex(merged: list[dict], unit: str) -> str:
         r"    \bottomrule",
         r"  \end{tabular}",
         rf"  \caption{{Zero-field splitting parameter $D$ ({unit}) and $T_1$ at 300\,K "
-        r"(initial state $m_s=0$, from the directional transition rates). "
+        r"(from the t1_relaxation npz files). "
         r"Corrected: defect-band approximation (ZFS\_occup); contaminated: all-electron bands (ZFS\_hyp). "
         + footnote + ".}",
         r"  \label{tab:zfs_d}",
@@ -355,10 +352,10 @@ def main() -> None:
     if not rows:
         sys.exit("error: no packaged ZFS data found in the given inputs")
     t1_paths: list[Path] = list(args.inputs)
-    if not any(p.is_dir() and any(p.rglob("*_directional_rates_*.npz")) or p.is_file() and "_directional_rates_" in p.name for p in t1_paths):
-        default_rates = REPO_ROOT / "scripts" / "rates"
+    if not any(p.is_dir() and any(p.rglob("*t1_relaxation*.npz")) or p.is_file() and "t1_relaxation" in p.name for p in t1_paths):
+        default_rates = REPO_ROOT / "runs"
         if default_rates.is_dir():
-            print(f"no directional rates in inputs; falling back to {default_rates}")
+            print(f"no t1_relaxation npz in inputs; falling back to {default_rates}")
             t1_paths.append(default_rates)
     merged = attach_t1(merge_rows(rows), collect_t1_rows(t1_paths))
     args.output.write_text(render_tex(merged, "MHz"))
