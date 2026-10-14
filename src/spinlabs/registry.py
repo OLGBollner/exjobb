@@ -293,8 +293,10 @@ def find_runs(
     ``output_root`` by name when the stored path does not exist.
     """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
-    numeric = {"cell", "order", "pert", "temp_min", "temp_max", "n_temps"}
-    list_like = {"n_dims", "npz_files"}
+    numeric = {"cell", "pert", "temp_min", "temp_max", "n_temps"}
+    # 'order' is an SQL reserved word AND stored as a JSON list string, so it
+    # is matched as a list field like n_dims/npz_files.
+    list_like = {"n_dims", "npz_files", "order"}
     sql = "SELECT run_dir FROM runs WHERE status = 'done'"
     params: list[object] = []
     for field, value in filters:
@@ -306,16 +308,17 @@ def find_runs(
             )
         if column in list_like:
             # Match like the CSV did: n_dims as '1+2', npz_files per name.
-            wanted = value.strip().lower()
+            # Match like the CSV did: n_dims/order as '1+2', npz_files per name.
+            wanted = str(value).strip().lower()
             keep = []
             for (raw,) in conn.execute(
-                f"SELECT DISTINCT {column} FROM runs WHERE status = 'done'"
+                f'SELECT DISTINCT "{column}" FROM runs WHERE status = \'done\''
             ):
                 try:
                     items = json.loads(raw) if raw else []
                 except (TypeError, json.JSONDecodeError):
                     items = []
-                if column == "n_dims":
+                if column in ("n_dims", "order"):
                     text = "+".join(str(i) for i in items)
                 else:
                     text = "".join(str(i) for i in items)
@@ -324,10 +327,11 @@ def find_runs(
             if not keep:
                 sql += " AND 0"  # nothing matches this filter
             else:
-                sql += f" AND {column} IN ({', '.join('?' * len(keep))})"
+                placeholders = ", ".join("?" * len(keep))
+                sql += f' AND "{column}" IN ({placeholders})'
                 params.extend(keep)
             continue
-        sql += f" AND {column} = ?"
+        sql += f' AND "{column}" = ?'
         if column in numeric:
             try:
                 number = float(value)

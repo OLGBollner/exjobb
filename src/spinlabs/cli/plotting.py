@@ -31,11 +31,22 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
 
     t1 = subparsers.add_parser("t1", help="Plot T1 curves from one or more npz files or run directories in one figure")
     t1.add_argument("inputs", nargs="*", type=Path)
-    t1.add_argument("-r", "--output-root", default="runs", help="Root folder holding run directories (default: runs); used to resolve runs filtered from the registry")
-    t1.add_argument("--filter", action="append", metavar="FIELD=VALUE",
-                    help="Resolve runs from the registry, e.g. --filter method=all_bands,pert=1.0. "
-                         "Repeatable; comma-separated values allowed.")
-    t1.add_argument("--latest", action="store_true", help="With --filter, use only the most recent matching run")
+    t1.add_argument("-r", "--output-root", default="runs", help="Root folder holding run directories (default: runs); used to resolve runs queried from the registry")
+    t1.add_argument(
+        "--query",
+        action="store_true",
+        help="Plot the completed runs in the registry matching the filters "
+        "(--defect/--cell-size/--method/--order/--pert-scale). Same syntax as 'run --query'. "
+        "Each matching run's t1_relaxation.npz goes into one figure",
+    )
+    t1.add_argument("--defect", help="Filter by defect name (e.g. NV, ClV)")
+    t1.add_argument("--cell-size", type=int, help="Filter by supercell size (e.g. 64, 128)")
+    t1.add_argument(
+        "--method", choices=["all", "approx"], help="Filter by calculation method: 'all' for all_bands, 'approx' for defect_band_approx"
+    )
+    t1.add_argument("--order", type=int, choices=[1, 2, 12], help="Filter by perturbation order (1, 2 or 12)")
+    t1.add_argument("--pert-scale", type=float, help="Filter by perturbation scale (e.g. 0.025)")
+    t1.add_argument("--latest", action="store_true", help="With --query, use only the most recent matching run")
     t1.add_argument("--plain-name", action="store_true", help="Do not append metadata to the output filename")
     _add_output_args(t1)
     t1.set_defaults(func=_run_t1)
@@ -114,35 +125,40 @@ def _run_rates(args: argparse.Namespace) -> None:
     plot_run_rates(args.run_dir, out_dir, args.fmt, args.dpi, args.show)
 
 
+def _query_filters(args: argparse.Namespace) -> list[tuple[str, str]]:
+    """--query flag values as (column, value) filters for registry.find_runs."""
+    out = []
+    if args.defect is not None:
+        out.append(("defect", args.defect))
+    if args.cell_size is not None:
+        out.append(("cell", args.cell_size))
+    if args.method is not None:
+        out.append(("method", {"all": "all_bands", "approx": "defect_band_approx"}[args.method]))
+    if args.order is not None:
+        out.append(("order", args.order))
+    if args.pert_scale is not None:
+        out.append(("pert", args.pert_scale))
+    return out
+
+
 def _run_t1(args: argparse.Namespace) -> None:
-    if args.filter:
+    if args.query:
         if args.inputs:
-            raise SystemExit("error: pass either explicit run paths or --filter, not both")
+            raise SystemExit("error: pass either explicit run paths or --query, not both")
         conn = ensure_db()
-        dirs = find_runs(conn, _parse_filters(args.filter), latest=args.latest, output_root=args.output_root)
+        dirs = find_runs(conn, _query_filters(args), latest=args.latest, output_root=args.output_root)
         if not dirs:
-            raise SystemExit("error: no completed runs in the registry match the given filters")
+            raise SystemExit("error: no completed runs in the registry match the query")
         inputs = [d / "t1_relaxation.npz" for d in dirs]
         missing = [i for i in inputs if not i.exists()]
         if missing:
             raise SystemExit(f"error: missing t1_relaxation.npz in: {', '.join(str(m) for m in missing)}")
     else:
         if not args.inputs:
-            raise SystemExit("error: provide npz/run paths, or use --filter to select indexed runs")
+            raise SystemExit("error: provide npz/run paths, or use --query to select registry runs")
         inputs = args.inputs
     out = args.output or _default_output(args, "t1", "t1")
     plot_t1(inputs, output_path=out, show=args.show, plain_name=args.plain_name)
 
 
-def _parse_filters(pairs: list[str]) -> list[tuple[str, str]]:
-    out = []
-    for pair in pairs:
-        for part in pair.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            if "=" not in part:
-                raise SystemExit(f"error: --filter expects FIELD=VALUE, got '{part}'")
-            field, _, value = part.partition("=")
-            out.append((field, value))
-    return out
+
