@@ -158,13 +158,30 @@ def _run_query(args: argparse.Namespace) -> None:
     if not files:
         print("No unanalyzed packaged data matching the query.")
         return
-    for path in files:
+    # With multiple matched datasets, disambiguate the run-name so each
+    # dataset lands in its own <run_name>_<stem> directory instead of
+    # silently sharing/creating duplicate <run_name>_1, _2, ... folders.
+    for i, path in enumerate(files):
         print(f"Running: {path}")
         method = _infer_method_from_file(Path(path))
+        if args.run_name and len(files) > 1:
+            run_name = f"{args.run_name}_{Path(path).stem}"
+        else:
+            run_name = args.run_name
         run_full_pipeline(
             raw_zfs_file=str(path),
             calc_method=_METHOD_MAP[method][0],
             zfs_folder=_METHOD_MAP[method][1],
+            order=args.order,
+            pert_scale=args.pert_scale,
+            t_start=args.t_start,
+            t_end=args.t_end,
+            t_step=args.t_step,
+            temperatures=args.temperatures,
+            init_state=args.init_state,
+            two_phonon_file=args.two_phonon,
+            run_name=run_name,
+            save_plots=args.plot,
             output_root=args.output_root if args.output_root else "runs",
             debug=args.debug,
         )
