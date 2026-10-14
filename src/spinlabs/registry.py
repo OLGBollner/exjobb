@@ -22,11 +22,11 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY,
     path TEXT UNIQUE NOT NULL,
-    kind TEXT NOT NULL,              -- raw_zfs | packaged_zfs | phonon | coupling | two_phonon
+    kind TEXT NOT NULL,              -- raw_zfs | packaged_zfs | phonon | coupling | two_phonon | convergence
     defect TEXT,
     cell_size INTEGER,
     calc_method TEXT,
-    pert_order INTEGER,
+    pert_order TEXT,                 -- JSON list of orders, e.g. '[1, 2]' for combined data
     pert_scale REAL,
     sha256 TEXT,
     registered_at TEXT NOT NULL
@@ -54,11 +54,14 @@ def ensure_db() -> sqlite3.Connection:
     conn = sqlite3.connect(REGISTRY_PATH)
     conn.executescript(_SCHEMA)
     # Old rows: combined files had pert_order=NULL (before the 12 convention),
-    # then 12. Both map to the unified list [1, 2].
-    cur = conn.execute("SELECT COUNT(*) FROM files WHERE kind = 'packaged_zfs' AND (pert_order IS NULL OR pert_order NOT LIKE '[%')")
+    # then the integer 12. Legacy integer 1/2 rows are left alone — they were
+    # registered as single-order data and rewriting them to [1, 2] would be wrong.
+    cur = conn.execute(
+        "SELECT COUNT(*) FROM files WHERE kind = 'packaged_zfs' AND (pert_order IS NULL OR pert_order = '12')"
+    )
     if cur.fetchone()[0]:
         conn.execute(
-            "UPDATE files SET pert_order = '[1, 2]' WHERE kind = 'packaged_zfs' AND (pert_order IS NULL OR pert_order NOT LIKE '[%')",
+            "UPDATE files SET pert_order = '[1, 2]' WHERE kind = 'packaged_zfs' AND (pert_order IS NULL OR pert_order = '12')",
         )
         conn.commit()
     return conn
@@ -197,12 +200,23 @@ def find_packaged(
         sql += " AND pert_scale = ?"
         params.append(pert_scale)
     if pert_order is not None:
-        wanted = sorted(_normalize_orders(pert_order))
-        sql += " AND (" + " AND ".join(f"instr(pert_order, '{o}')" for o in wanted) + ")"
+        wanted = set(_normalize_orders(pert_order))
     if exclude_run:
         sql += " AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.status = 'done' AND runs.zfs_files LIKE '%' || files.path || '%')"
     cur = conn.execute(sql, params)  # type: ignore[arg-type]
-    return [Path(p_) for (p_,) in cur.fetchall() if Path(p_).exists()]
+    results = []
+    for (p_, stored,) in cur.fetchall():
+        if pert_order is not None:
+            # Exact set membership on the stored JSON list, not substring matching.
+            try:
+                stored_orders = set(json.loads(stored)) if stored else set()
+            except (TypeError, json.JSONDecodeError):
+                stored_orders = set()
+            if not wanted.issubset(stored_orders):
+                continue
+        if Path(p_).exists():
+            results.append(Path(p_))
+    return results
 
 
 def find_phonon(

@@ -547,97 +547,105 @@ def run_full_pipeline(
     reg.commit()
     print("      Registered run in ~/.spinlabs/registry.db")
 
-    # ── 9. Optional Plotting ─────────────────────────────────────────────────
-    figures_saved = []
-    if save_plots:
-        fig_dir = run_dir / "figures"
-        fig_dir.mkdir(exist_ok=True)
-        print(f"[5/5] Generating figures in {fig_dir.name}/ ...")
+    # Mark the run failed on any unhandled error so queries don't skip
+    # files that were never fully analyzed.
+    try:
+        # ── 9. Optional Plotting ─────────────────────────────────────────────────
+        figures_saved = []
+        if save_plots:
+            fig_dir = run_dir / "figures"
+            fig_dir.mkdir(exist_ok=True)
+            print(f"[5/5] Generating figures in {fig_dir.name}/ ...")
 
-        # Coupling plots (1D and 2D diagonal)
-        try:
-            coupling_display = coupling_data.to_unit("MHz").frequencies_to_unit("meV")
+            # Coupling plots (1D and 2D diagonal)
+            try:
+                coupling_display = coupling_data.to_unit("MHz").frequencies_to_unit("meV")
 
-            # 1D coupling plot
-            fig_c1, _, _ = plot_1d_spectral_functions(
-                frequencies_mev=coupling_display.frequencies,
-                V_0_0=coupling_display.V_0_0,
-                V_p_m=coupling_display.V_p_m,
-                V_0_pm=coupling_display.V_0_pm,
-                order=1,
-            )
-            fc1_path = fig_dir / "coupling_spectral_1d.png"
-            fig_c1.savefig(fc1_path, dpi=300)
-            figures_saved.append(fc1_path)
-
-            # Also save alias coupling_spectral.png for backward compatibility
-            fc_path = fig_dir / "coupling_spectral.png"
-            fig_c1.savefig(fc_path, dpi=300)
-            figures_saved.append(fc_path)
-
-            # 2D coupling plot (diagonal phonons i == j)
-            if coupling_display.V2_0_0 is not None:
-                v2_00 = coupling_display.V2_0_0
-                v2_pm = coupling_display.V2_p_m
-                v2_0pm = coupling_display.V2_0_pm
-
-                v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
-                v2_pm_diag = (
-                    np.diag(v2_pm)
-                    if (v2_pm is not None and v2_pm.ndim == 2)
-                    else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
-                )
-                v2_0pm_diag = (
-                    np.diag(v2_0pm)
-                    if (v2_0pm is not None and v2_0pm.ndim == 2)
-                    else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
-                )
-
-                fig_c2, _, _ = plot_1d_spectral_functions(
+                # 1D coupling plot
+                fig_c1, _, _ = plot_1d_spectral_functions(
                     frequencies_mev=coupling_display.frequencies,
-                    V_0_0=v2_00_diag,
-                    V_p_m=v2_pm_diag,
-                    V_0_pm=v2_0pm_diag,
-                    order=2,
+                    V_0_0=coupling_display.V_0_0,
+                    V_p_m=coupling_display.V_p_m,
+                    V_0_pm=coupling_display.V_0_pm,
+                    order=1,
                 )
-                fc2_path = fig_dir / "coupling_spectral_2d.png"
-                fig_c2.savefig(fc2_path, dpi=300)
-                figures_saved.append(fc2_path)
-        except Exception as e:
-            print(f"Warning: could not generate coupling plot: {e}")
+                fc1_path = fig_dir / "coupling_spectral_1d.png"
+                fig_c1.savefig(fc1_path, dpi=300)
+                figures_saved.append(fc1_path)
 
-        # Transition rate stacked plots
-        try:
-            fr_path = fig_dir / "transition_rates.png"
-            plot_transition_rates_stacked(rates_path, output_path=fr_path)
-            figures_saved.append(fig_dir / "transition_rates_0_1.png")
-            figures_saved.append(fig_dir / "transition_rates_1_-1.png")
-        except Exception as e:
-            print(f"Warning: could not generate rate plots: {e}")
+                # Also save alias coupling_spectral.png for backward compatibility
+                fc_path = fig_dir / "coupling_spectral.png"
+                fig_c1.savefig(fc_path, dpi=300)
+                figures_saved.append(fc_path)
 
-        # T1 plot
-        try:
-            ft1_path = fig_dir / "t1_vs_temperature.png"
-            plot_t1([t1_path], output_path=ft1_path, plain_name=True)
-            figures_saved.append(ft1_path)
-        except Exception as e:
-            print(f"Warning: could not generate T1 plot: {e}")
+                # 2D coupling plot (diagonal phonons i == j)
+                if coupling_display.V2_0_0 is not None:
+                    v2_00 = coupling_display.V2_0_0
+                    v2_pm = coupling_display.V2_p_m
+                    v2_0pm = coupling_display.V2_0_pm
 
-    print("\n========================================================")
-    print("  Run successfully completed!")
-    print(f"  All results stored in: {run_dir}")
-    print("========================================================\n")
+                    v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
+                    v2_pm_diag = (
+                        np.diag(v2_pm)
+                        if (v2_pm is not None and v2_pm.ndim == 2)
+                        else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
+                    )
+                    v2_0pm_diag = (
+                        np.diag(v2_0pm)
+                        if (v2_0pm is not None and v2_0pm.ndim == 2)
+                        else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+                    )
 
-    finish_run(reg, run_id, "done")
-    reg.commit()
+                    fig_c2, _, _ = plot_1d_spectral_functions(
+                        frequencies_mev=coupling_display.frequencies,
+                        V_0_0=v2_00_diag,
+                        V_p_m=v2_pm_diag,
+                        V_0_pm=v2_0pm_diag,
+                        order=2,
+                    )
+                    fc2_path = fig_dir / "coupling_spectral_2d.png"
+                    fig_c2.savefig(fc2_path, dpi=300)
+                    figures_saved.append(fc2_path)
+            except Exception as e:
+                print(f"Warning: could not generate coupling plot: {e}")
 
-    return {
-        "run_dir": run_dir,
-        "run_info": run_info,
-        "raw_zfs_path": raw_path if raw_data else None,
-        "coupling_path": coupling_path,
-        "rates_path": rates_path,
-        "directional_rates_path": dir_rates_path,
-        "t1_path": t1_path,
-        "figures": figures_saved,
-    }
+            # Transition rate stacked plots
+            try:
+                fr_path = fig_dir / "transition_rates.png"
+                plot_transition_rates_stacked(rates_path, output_path=fr_path)
+                figures_saved.append(fig_dir / "transition_rates_0_1.png")
+                figures_saved.append(fig_dir / "transition_rates_1_-1.png")
+            except Exception as e:
+                print(f"Warning: could not generate rate plots: {e}")
+
+            # T1 plot
+            try:
+                ft1_path = fig_dir / "t1_vs_temperature.png"
+                plot_t1([t1_path], output_path=ft1_path, plain_name=True)
+                figures_saved.append(ft1_path)
+            except Exception as e:
+                print(f"Warning: could not generate T1 plot: {e}")
+
+        print("\n========================================================")
+        print("  Run successfully completed!")
+        print(f"  All results stored in: {run_dir}")
+        print("========================================================\n")
+
+        finish_run(reg, run_id, "done")
+        reg.commit()
+
+        return {
+            "run_dir": run_dir,
+            "run_info": run_info,
+            "raw_zfs_path": raw_path if raw_data else None,
+            "coupling_path": coupling_path,
+            "rates_path": rates_path,
+            "directional_rates_path": dir_rates_path,
+            "t1_path": t1_path,
+            "figures": figures_saved,
+        }
+    except Exception:
+        finish_run(reg, run_id, 'failed')
+        reg.commit()
+        raise
+

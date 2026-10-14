@@ -37,7 +37,7 @@ def append_row(
     defect: str,
     cell: str | int,
     method: str,
-    order: int | None = None,
+    order: int | str | None = None,
     pert: float | None = None,
     n_dims: Sequence[int] = (),
     npz_files: Iterable[str] = (),

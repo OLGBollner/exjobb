@@ -4,6 +4,8 @@ import argparse
 import re
 import sys
 import warnings
+
+import numpy as np
 from datetime import date
 from pathlib import Path
 
@@ -167,7 +169,7 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
                 defect=defect,
                 cell_size=cell_size,
                 calc_method=calc_method,
-                pert_order=([1, 2] if raw.has_first_order and raw.has_second_order else [_ORDER_NUM[orders[0]]]),
+                pert_order=([1] if raw.has_first_order else []) + ([2] if raw.has_second_order else []),
                 pert_scale=pert_scale,
             )
             append_data_row(
@@ -175,13 +177,39 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
                 defect=defect,
                 cell=cell_size,
                 method=calc_method,
-                order=None if raw.combined_order == 2 else _ORDER_NUM[orders[0]],
+                order=(
+                    "1+2"
+                    if raw.has_first_order and raw.has_second_order
+                    else (1 if raw.has_first_order else 2)
+                ),
                 pert=pert_scale,
-                n_dims=(raw.combined_order, ),
+                n_dims=([1] if raw.has_first_order else []) + ([2] if raw.has_second_order else []),
                 npz_files=(Path(save_path).name, ),
                 data_dir=pert_folder,
             )
             print(f"Saved raw data in: {save_path}")
+
+
+_DICT_ORDER_SUFFIXES = {
+    "12d": [1, 2],
+    "1d": [1],
+    "2d": [2],
+}
+
+
+def _dict_nonempty(data: np.lib.npyio.NpzFile, key: str) -> bool:
+    """True when the npz holds a non-empty pickled dict under ``key``."""
+    if key not in data.files:
+        return False
+    val = data[key]
+    if val is None:
+        return False
+    if isinstance(val, np.ndarray) and val.shape == () and val.dtype == object:
+        val = val.item()
+    try:
+        return len(val) > 0
+    except TypeError:
+        return False
 
 
 def _register_only(data_path: Path) -> None:
@@ -217,29 +245,12 @@ def _register_only(data_path: Path) -> None:
                 # first_order / second_order mapping means that perturbation
                 # order is present in the file. Fall back to the filename
                 # suffix only when the order keys are missing or unreadable.
-                def _dict_nonempty(key: str) -> bool:
-                    if key not in keys:
-                        return False
-                    val = data[key]
-                    if val is None:
-                        return False
-                    if isinstance(val, np.ndarray) and val.shape == () and val.dtype == object:
-                        val = val.item()
-                    try:
-                        return len(val) > 0
-                    except TypeError:
-                        return False
-
-                if _dict_nonempty("first_order") or _dict_nonempty("second_order"):
-                    orders = ([1] if _dict_nonempty("first_order") else []) + (
-                        [2] if _dict_nonempty("second_order") else []
+                if _dict_nonempty(data, "first_order") or _dict_nonempty(data, "second_order"):
+                    orders = ([1] if _dict_nonempty(data, "first_order") else []) + (
+                        [2] if _dict_nonempty(data, "second_order") else []
                     )
                 else:
-                    suffix_orders = {
-                        "12d": [1, 2],
-                        "1d": [1],
-                        "2d": [2],
-                    }.get(npz_path.stem.rsplit("_", 1)[-1])
+                    suffix_orders = _DICT_ORDER_SUFFIXES.get(npz_path.stem.rsplit("_", 1)[-1])
                     if suffix_orders is None:
                         warnings.warn(
                             f"{npz_path.name}: no order data and no recognizable "

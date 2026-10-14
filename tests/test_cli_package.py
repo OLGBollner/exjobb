@@ -22,13 +22,22 @@ def _raw(order=1, pert=0.025, calc_method=None, **_kw):
         order=order,
     )
     if order == 2:
-        # Non-empty second order so combined_order() resolves to 2,
+        # Non-empty second order so content-derived orders resolve to [2],
         # matching real second-order data.
         kwargs["second_order"] = {
             (0, 0): PerturbationEntry(
                 order=2,
                 mode_indices=(0, 0),
                 amplitude=(0.025, 0.025),
+                zfs_tensor=ZFSTensor(matrix=np.zeros((3, 3))),
+            )
+        }
+    else:
+        kwargs["first_order"] = {
+            0: PerturbationEntry(
+                order=1,
+                mode_indices=(0,),
+                amplitude=(0.025, 0.0),
                 zfs_tensor=ZFSTensor(matrix=np.zeros((3, 3))),
             )
         }
@@ -63,9 +72,9 @@ def test_default_combines_orders_into_one_file(tmp_path):
     run_dir = (
         tmp_path / "data" / "NV_512" / "all_bands" / date.today().strftime("%Y%m%d")
     )
-    assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_2d.npz"]
+    assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz"]
     index = (tmp_path / "data" / "data_index.csv").read_text()
-    assert "NV,512,all_bands,-1,0.025,2" in index
+    assert "NV,512,all_bands,1+2,0.025,1+2" in index
 
 
 def test_single_order_saves_separate_file(tmp_path):
@@ -178,8 +187,8 @@ def test_multiple_folders_and_methods(tmp_path):
     with _patch(lambda **kw: _raw(order=kw["order"], calc_method=kw["calc_method"])):
         _run(args)
     day = date.today().strftime("%Y%m%d")
-    assert (tmp_path / "data" / "NV_512" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_2d.npz").exists()
-    assert (tmp_path / "data" / "NV_512" / "defect_band_approx" / day / "pert_0.025" / "NV_512_raw_zfs_data_defect_band_approx_2d.npz").exists()
+    assert (tmp_path / "data" / "NV_512" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz").exists()
+    assert (tmp_path / "data" / "NV_512" / "defect_band_approx" / day / "pert_0.025" / "NV_512_raw_zfs_data_defect_band_approx_12d.npz").exists()
     assert (tmp_path / "data" / "ClV_128" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
     index = (tmp_path / "data" / "data_index.csv").read_text().strip().splitlines()[1:]
     assert len(index) == 4
@@ -195,6 +204,38 @@ def test_missing_pert_warns_and_skips(tmp_path):
             _run(args)
     files = list((tmp_path / "data").rglob("*.npz"))
     assert len(files) == 1
+
+
+def _order_dicts(n_modes=2, *, first=True, second=True, pert_si=1e10):
+    """Build (first_order, second_order) dicts for RawZFSData tests."""
+    fo = (
+        {
+            i: {
+                "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+                "pert": pert_si,
+                "symmetry": "A1",
+                "ipr": 0.5,
+            }
+            for i in range(n_modes)
+        }
+        if first
+        else {}
+    )
+    so = (
+        {
+            (i, j): {
+                "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+                "pert": (pert_si, pert_si),
+                "symmetry": ("A1", "A1") if i == j else ("A1", "Ex"),
+                "ipr": (0.5, 0.5),
+            }
+            for i in range(n_modes)
+            for j in range(i, n_modes)
+        }
+        if second
+        else {}
+    )
+    return fo, so
 
 
 def test_register_only(tmp_path):
@@ -232,28 +273,8 @@ def test_register_only_stale_combined_metadata(tmp_path, monkeypatch):
     from spinlabs.registry import ensure_db
 
     monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "reg"))
-    n_modes = 2
     gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
-    pert_si = 1e10
-    first_order = {
-        i: {
-            "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
-            "pert": pert_si,
-            "symmetry": "A1",
-            "ipr": 0.5,
-        }
-        for i in range(n_modes)
-    }
-    second_order = {
-        (i, j): {
-            "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
-            "pert": (pert_si, pert_si),
-            "symmetry": ("A1", "A1") if i == j else ("A1", "Ex"),
-            "ipr": (0.5, 0.5),
-        }
-        for i in range(n_modes)
-        for j in range(i, n_modes)
-    }
+    first_order, second_order = _order_dicts()
     raw = RawZFSData(
         defect="ClV",
         cell_size=128,
@@ -283,19 +304,8 @@ def test_register_only_orders_from_content(tmp_path, monkeypatch):
     from spinlabs.registry import ensure_db
 
     monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "reg"))
-    n_modes = 2
     gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
-    pert_si = 1e10
-    second_order = {
-        (i, j): {
-            "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
-            "pert": (pert_si, pert_si),
-            "symmetry": ("A1", "A1") if i == j else ("A1", "Ex"),
-            "ipr": (0.5, 0.5),
-        }
-        for i in range(n_modes)
-        for j in range(i, n_modes)
-    }
+    first_order, second_order = _order_dicts(first=False)
     raw = RawZFSData(
         defect="ClV",
         cell_size=128,
