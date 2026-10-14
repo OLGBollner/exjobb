@@ -9,7 +9,6 @@ import numpy as np
 from datetime import date
 from pathlib import Path
 
-from spinlabs.data_index import append_row as append_data_row
 from spinlabs.models import _normalize_calc_method
 from spinlabs.registry import ensure_db, register_file
 from spinlabs.pack_convergence import pack_convergence
@@ -173,21 +172,6 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
                 pert_order=([1] if raw.has_first_order else []) + ([2] if raw.has_second_order else []),
                 pert_scale=pert_scale,
             )
-            append_data_row(
-                args.output_root,
-                defect=defect,
-                cell=cell_size,
-                method=calc_method,
-                order=(
-                    "1+2"
-                    if raw.has_first_order and raw.has_second_order
-                    else (1 if raw.has_first_order else 2)
-                ),
-                pert=pert_scale,
-                n_dims=([1] if raw.has_first_order else []) + ([2] if raw.has_second_order else []),
-                npz_files=(Path(save_path).name, ),
-                data_dir=pert_folder,
-            )
             print(f"Saved raw data in: {save_path}")
 
 
@@ -330,13 +314,4 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
         )
         register_file(
             ensure_db(), output, "convergence", defect=defect, cell_size=cell, calc_method=calc_method
-        )
-        append_data_row(
-            args.output_root,
-            defect=defect,
-            cell=cell,
-            method=calc_method or "conv",
-            n_dims=(1, 2),
-            npz_files=(output.name, ),
-            data_dir=leaf,
         )

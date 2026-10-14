@@ -7,6 +7,7 @@ so there is nothing to set up by hand.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 import hashlib
 import json
 import os
@@ -41,7 +42,17 @@ CREATE TABLE IF NOT EXISTS runs (
     phonon_file TEXT,
     method TEXT,
     init_state TEXT,
-    command TEXT
+    command TEXT,
+    defect TEXT,
+    cell INTEGER,
+    "order" INTEGER,
+    pert REAL,
+    n_dims TEXT,                              -- JSON list, e.g. '[1, 2]'
+    temp_min REAL,
+    temp_max REAL,
+    n_temps INTEGER,
+    npz_files TEXT,                           -- JSON list of npz names
+    git_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_defect ON files(defect, cell_size, calc_method);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
@@ -64,6 +75,16 @@ def ensure_db() -> sqlite3.Connection:
             "UPDATE files SET pert_order = '[1, 2]' WHERE kind = 'packaged_zfs' AND (pert_order IS NULL OR pert_order = '12')",
         )
         conn.commit()
+    # Migration: registrys created before the runs table grew the analysis-
+    # index columns (replacing runs_index.csv) need the columns added.
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    for column in (
+        "defect", "cell", '"order"', "pert", "n_dims",
+        "temp_min", "temp_max", "n_temps", "npz_files", "git_hash",
+    ):
+        if column.strip('"') not in existing:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {column}")
+    conn.commit()
     return conn
 
 
@@ -141,11 +162,27 @@ def register_run(
     method: str | None = None,
     init_state: str | None = None,
     command: str | None = None,
+    defect: str | None = None,
+    cell: int | None = None,
+    order: int | None = None,
+    pert: float | None = None,
+    n_dims: Sequence[int] = (),
+    temp_min: float | None = None,
+    temp_max: float | None = None,
+    n_temps: int | None = None,
+    npz_files: Sequence[str | Path] = (),
+    git_hash: str | None = None,
 ) -> int:
-    """Start a run row; returns its id for :func:`finish_run`."""
-    cur = conn.execute(
-        """INSERT INTO runs (run_dir, started_at, status, zfs_files, phonon_file, method, init_state, command)
-           VALUES (?, ?, 'running', ?, ?, ?, ?, ?)""",
+    """Start a run row; returns its id for :func:`finish_run`.
+
+    The analysis metadata (defect, cell, order, pert, temperatures, outputs)
+    replaces what used to be appended to ``runs_index.csv``; it makes the
+    ``runs`` table the single source of truth for analysis runs.
+    """
+    conn.execute(
+        """INSERT INTO runs (run_dir, started_at, status, zfs_files, phonon_file, method, init_state, command,
+                            defect, cell, "order", pert, n_dims, temp_min, temp_max, n_temps, npz_files, git_hash)
+           VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             str(Path(run_dir).resolve()) if run_dir else None,
             _now(),
@@ -154,10 +191,20 @@ def register_run(
             method,
             init_state,
             command,
+            defect,
+            cell,
+            order,
+            pert,
+            json.dumps(sorted(set(n_dims))) if n_dims else None,
+            temp_min,
+            temp_max,
+            n_temps,
+            json.dumps([Path(p).name for p in npz_files]) if npz_files else None,
+            git_hash,
         ),
     )
     conn.commit()
-    return int(cur.lastrowid)
+    return int(conn.execute("SELECT id FROM runs ORDER BY id DESC LIMIT 1").fetchone()[0])
 
 
 def finish_run(conn: sqlite3.Connection, run_id: int, status: str) -> None:
@@ -219,6 +266,91 @@ def find_packaged(
                 continue
         if Path(p_).exists():
             results.append(Path(p_))
+    return results
+
+
+def find_runs(
+    conn: sqlite3.Connection,
+    filters: Iterable[tuple[str, str]] = (),
+    *,
+    latest: bool = False,
+    output_root: str | Path | None = None,
+) -> list[Path]:
+    """Run directories of completed runs matching ``filters``.
+
+    Replaces ``runs_index.csv``: the ``runs`` table is the index. Filter
+    fields are the ``runs`` table columns (``defect``, ``cell``, ``order``,
+    ``pert``, ``n_dims``, ``temp_min``, ``temp_max``, ``n_temps``,
+    ``npz_files``, ``method``, ``init_state``, ``git_hash``, ``run_dir``,
+    plus ``timestamp`` as an alias for ``started_at``); unknown fields raise
+    SystemExit so typos fail loudly. Values match like the old CSV index:
+    exact and case-insensitive, with numeric fields compared numerically and
+    list fields (``n_dims`` as ``1+2``, ``npz_files`` per name) matching any
+    element.
+
+    With ``latest`` only the most recent matching run (by ``started_at``) is
+    returned. Directories stored from another host are resolved against
+    ``output_root`` by name when the stored path does not exist.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    numeric = {"cell", "order", "pert", "temp_min", "temp_max", "n_temps"}
+    list_like = {"n_dims", "npz_files"}
+    sql = "SELECT run_dir FROM runs WHERE status = 'done'"
+    params: list[object] = []
+    for field, value in filters:
+        column = "started_at" if field == "timestamp" else field
+        if column not in columns | {"timestamp"}:
+            raise SystemExit(
+                f"error: unknown run filter '{field}'; valid fields: "
+                + ", ".join(sorted(columns | {"timestamp"}))
+            )
+        if column in list_like:
+            # Match like the CSV did: n_dims as '1+2', npz_files per name.
+            wanted = value.strip().lower()
+            keep = []
+            for (raw,) in conn.execute(
+                f"SELECT DISTINCT {column} FROM runs WHERE status = 'done'"
+            ):
+                try:
+                    items = json.loads(raw) if raw else []
+                except (TypeError, json.JSONDecodeError):
+                    items = []
+                if column == "n_dims":
+                    text = "+".join(str(i) for i in items)
+                else:
+                    text = "".join(str(i) for i in items)
+                if text.lower() == wanted or wanted in [str(i).lower() for i in items]:
+                    keep.append(raw)
+            if not keep:
+                sql += " AND 0"  # nothing matches this filter
+            else:
+                sql += f" AND {column} IN ({', '.join('?' * len(keep))})"
+                params.extend(keep)
+            continue
+        sql += f" AND {column} = ?"
+        if column in numeric:
+            try:
+                number = float(value)
+                if number.is_integer() and column in ("cell", "order", "n_temps"):
+                    number = int(number)
+                value = number
+            except ValueError:
+                pass
+        params.append(value)
+    sql += " ORDER BY started_at, id"
+    if latest:
+        sql += " DESC LIMIT 1"
+    results: list[Path] = []
+    root = Path(output_root).resolve() if output_root else None
+    for (run_dir,) in conn.execute(sql, params):
+        if not run_dir:
+            continue
+        path = Path(run_dir)
+        if not path.exists() and root is not None:
+            candidate = root / path.name
+            if candidate.exists():
+                path = candidate
+        results.append(path)
     return results
 
 

@@ -1,5 +1,6 @@
 import json
 import argparse
+import sqlite3
 from datetime import date
 from pathlib import Path
 
@@ -11,7 +12,6 @@ from spinlabs.cli.package import build_package_parser
 
 from spinlabs.cli.package import _run, _run_conv
 from spinlabs.models import PerturbationEntry, RawZFSData, ZFSTensor
-
 
 def _raw(order=1, pert=0.025, calc_method=None, **_kw):
     kwargs = dict(
@@ -64,8 +64,16 @@ def _patch(side_effect=_raw):
     return patch("spinlabs.cli.package.parse_zfs_simulation_dataset", side_effect=side_effect)
 
 
-def test_default_combines_orders_into_one_file(tmp_path):
+def _registry(monkeypatch, tmp_path):
+    """Point the registry at an isolated sqlite file and return the path."""
+    db = tmp_path / "registry.db"
+    monkeypatch.setattr("spinlabs.registry.REGISTRY_PATH", db)
+    return db
+
+
+def test_default_combines_orders_into_one_file(tmp_path, monkeypatch):
     _tree(tmp_path)
+    db = _registry(monkeypatch, tmp_path)
     with _patch(lambda **kw: _raw(order=kw["order"])):
         _run(_make_args(tmp_path))
     files = list((tmp_path / "data").rglob("*.npz"))
@@ -73,8 +81,9 @@ def test_default_combines_orders_into_one_file(tmp_path):
         tmp_path / "data" / "NV_512" / "all_bands" / date.today().strftime("%Y%m%d")
     )
     assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz"]
-    index = (tmp_path / "data" / "data_index.csv").read_text()
-    assert "NV,512,all_bands,1+2,0.025,1+2" in index
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT defect, cell_size, calc_method, pert_order, pert_scale FROM files").fetchone()
+    assert row == ("NV", 512, "all_bands", "[1, 2]", 0.025)
 
 
 def test_single_order_saves_separate_file(tmp_path):
@@ -134,8 +143,9 @@ def _conv_tree(tmp_path):
     return root
 
 
-def test_conv_ground_state_flag_auto_all(tmp_path, capsys):
+def test_conv_ground_state_flag_auto_all(tmp_path, capsys, monkeypatch):
     _conv_tree(tmp_path)
+    db = _registry(monkeypatch, tmp_path)
     _outcar(tmp_path / "NV_512" / "ZFS_hyp" / "OUTCAR", (1.0, 1.0, 4.0))
     _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
     out = next((tmp_path / "data").rglob("NV_512_*_conv_test_all.npz"))
@@ -143,8 +153,9 @@ def test_conv_ground_state_flag_auto_all(tmp_path, capsys):
     assert data["d0"].shape == (3, 3)
     assert abs(data["d0"][2, 2] - 4.0) < 1e-9
     assert "ground state:" in capsys.readouterr().out
-    index = (tmp_path / "data" / "data_index.csv").read_text()
-    assert "NV,512,all_bands,-1,-1,1+2" in index
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT defect, cell_size, calc_method FROM files").fetchone()
+    assert row == ("NV", 512, "all_bands")
 
 
 def test_conv_ground_state_flag_auto_occup(tmp_path):
@@ -176,8 +187,9 @@ def test_conv_ground_state_explicit_path(tmp_path):
     assert abs(data["d0"][2, 2] - 5.0) < 1e-9
 
 
-def test_multiple_folders_and_methods(tmp_path):
+def test_multiple_folders_and_methods(tmp_path, monkeypatch):
     _tree(tmp_path)
+    db = _registry(monkeypatch, tmp_path)
     clv = tmp_path / "ClV_128"
     clv.mkdir()
     (clv / "first_order" / "pert_0.025").mkdir(parents=True)
@@ -190,9 +202,10 @@ def test_multiple_folders_and_methods(tmp_path):
     assert (tmp_path / "data" / "NV_512" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz").exists()
     assert (tmp_path / "data" / "NV_512" / "defect_band_approx" / day / "pert_0.025" / "NV_512_raw_zfs_data_defect_band_approx_12d.npz").exists()
     assert (tmp_path / "data" / "ClV_128" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
-    index = (tmp_path / "data" / "data_index.csv").read_text().strip().splitlines()[1:]
-    assert len(index) == 4
-    assert "ClV,128,all_bands,1,0.025,1" in index[2]
+    conn = sqlite3.connect(db)
+    rows = conn.execute("SELECT defect, cell_size, calc_method, pert_order, pert_scale FROM files ORDER BY id").fetchall()
+    assert len(rows) == 4
+    assert rows[2] == ("ClV", 128, "all_bands", "[1]", 0.025)
 
 
 def test_missing_pert_warns_and_skips(tmp_path):

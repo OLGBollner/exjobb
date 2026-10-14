@@ -5,7 +5,7 @@ from pathlib import Path
 
 from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
 from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
-from spinlabs.runs_index import filter_rows, read_rows, run_dirs
+from spinlabs.registry import ensure_db, find_runs
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -31,9 +31,9 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
 
     t1 = subparsers.add_parser("t1", help="Plot T1 curves from one or more npz files or run directories in one figure")
     t1.add_argument("inputs", nargs="*", type=Path)
-    t1.add_argument("-r", "--output-root", default="runs", help="Root folder containing runs_index.csv (default: runs)")
+    t1.add_argument("-r", "--output-root", default="runs", help="Root folder holding run directories (default: runs); used to resolve runs filtered from the registry")
     t1.add_argument("--filter", action="append", metavar="FIELD=VALUE",
-                    help="Resolve runs from the index, e.g. --filter method=all_bands,pert=1.0. "
+                    help="Resolve runs from the registry, e.g. --filter method=all_bands,pert=1.0. "
                          "Repeatable; comma-separated values allowed.")
     t1.add_argument("--latest", action="store_true", help="With --filter, use only the most recent matching run")
     t1.add_argument("--plain-name", action="store_true", help="Do not append metadata to the output filename")
@@ -118,11 +118,11 @@ def _run_t1(args: argparse.Namespace) -> None:
     if args.filter:
         if args.inputs:
             raise SystemExit("error: pass either explicit run paths or --filter, not both")
-        rows = filter_rows(read_rows(args.output_root), _parse_filters(args.filter), latest=args.latest)
-        if not rows:
-            raise SystemExit(f"error: no indexed runs match in {args.output_root}/runs_index.csv")
-        run_dirs_list = run_dirs(rows, args.output_root)
-        inputs = [d / "t1_relaxation.npz" for d in run_dirs_list]
+        conn = ensure_db()
+        dirs = find_runs(conn, _parse_filters(args.filter), latest=args.latest, output_root=args.output_root)
+        if not dirs:
+            raise SystemExit("error: no completed runs in the registry match the given filters")
+        inputs = [d / "t1_relaxation.npz" for d in dirs]
         missing = [i for i in inputs if not i.exists()]
         if missing:
             raise SystemExit(f"error: missing t1_relaxation.npz in: {', '.join(str(m) for m in missing)}")

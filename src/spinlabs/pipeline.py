@@ -22,7 +22,6 @@ from spinlabs.plotter import (
     plot_transition_rates_stacked,
 )
 from spinlabs.relaxation_dynamics import RelaxationDynamics
-from spinlabs.runs_index import append_row, index_path
 from spinlabs.transition_rate import TransitionRate
 from spinlabs.zfs_manager import ZFSManager
 
@@ -32,6 +31,23 @@ def _pert_dir_name(pert_scale: float | None) -> str:
     if pert_scale is None:
         return "pert_none"
     return f"pert_{pert_scale:g}"
+
+
+def _git_hash() -> str | None:
+    """Short git hash of the spinlabs repo, or None outside a repo."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=Path(__file__).resolve().parent,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
 
 
 def get_unique_run_dir(
@@ -527,30 +543,15 @@ def run_full_pipeline(
     with open(info_path, "w") as f:
         json.dump(run_info, f, indent=2)
 
-    # ── 8b. Runs Index ────────────────────────────────────────────────────────
+    # ── 8b. Registry ──
+    # The runs table is the only index: one row per analysis run, carrying
+    # the metadata the old runs_index.csv used to hold.
     dims: list[int] = []
     if raw_data is not None:
         if len(raw_data.second_order) > 0:
             dims.append(2)
         if len(raw_data.first_order) > 0:
             dims.append(1)
-    append_row(
-        output_root,
-        defect=str(defect),
-        cell=cell_size,
-        method=calc_method,
-        order=order,
-        pert=pert_eff,
-        n_dims=dims,
-        temp_min=float(np.min(valid_temps_arr)),
-        temp_max=float(np.max(valid_temps_arr)),
-        n_temps=len(valid_temps_arr),
-        npz_files=[p.name for p in sorted(run_dir.glob("*.npz"))],
-        run_dir=run_dir,
-    )
-    print(f"      Indexed run in {index_path(output_root)}")
-
-    # ── 8c. Registry ─────────────────────────────────────────────────────────
     reg = ensure_db()
     run_id = register_run(
         reg,
@@ -559,6 +560,16 @@ def run_full_pipeline(
         phonon_file=ph_path if ph_path is not None else None,
         method=calc_method,
         init_state=init_state,
+        defect=str(defect),
+        cell=cell_size,
+        order=order,
+        pert=pert_eff,
+        n_dims=dims,
+        temp_min=float(np.min(valid_temps_arr)),
+        temp_max=float(np.max(valid_temps_arr)),
+        n_temps=len(valid_temps_arr),
+        npz_files=[p.name for p in sorted(run_dir.glob("*.npz"))],
+        git_hash=_git_hash(),
     )
     reg.commit()
     print("      Registered run in ~/.spinlabs/registry.db")
