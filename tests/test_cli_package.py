@@ -267,12 +267,11 @@ def test_register_only(tmp_path):
     assert path.endswith("NV_512_raw_zfs_data_all_bands_12d.npz")
 
 
-def test_register_only_stale_combined_metadata(tmp_path, monkeypatch):
-    """Old files store combined data with order=2; the filename suffix wins."""
+def test_register_only_stale_combined_metadata(tmp_path):
+    """Old files store combined data with order=2; the npz content wins over that metadata."""
     from spinlabs.models import RawZFSData
     from spinlabs.registry import ensure_db
 
-    monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "reg"))
     gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
     first_order, second_order = _order_dicts()
     raw = RawZFSData(
@@ -299,11 +298,10 @@ def test_register_only_stale_combined_metadata(tmp_path, monkeypatch):
     assert json.loads(rows[0][0]) == [1, 2]
 
 
-def test_register_only_orders_from_content(tmp_path, monkeypatch):
+def test_register_only_orders_from_content(tmp_path):
     """2d-only file: empty first_order -> [2] regardless of stale metadata."""
     from spinlabs.registry import ensure_db
 
-    monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "reg"))
     gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
     first_order, second_order = _order_dicts(first=False)
     raw = RawZFSData(
