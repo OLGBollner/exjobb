@@ -65,6 +65,7 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
         "--method",
         type=str,
         nargs="+",
+        choices=["all", "approx"],
         default=["all"],
         metavar="METHOD",
         help="ZFS calculation method(s) to package: all or approx (default: all).",
@@ -214,8 +215,6 @@ def _dict_nonempty(data: np.lib.npyio.NpzFile, key: str) -> bool:
 
 def _register_only(data_path: Path) -> None:
     """Register already-packaged .npz files under data_path without re-packaging."""
-    import numpy as np
-
     from spinlabs.models import RawZFSData
 
     data_path = data_path.resolve()

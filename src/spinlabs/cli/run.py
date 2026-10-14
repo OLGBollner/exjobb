@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 
+from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
 
 
@@ -150,7 +151,7 @@ def _run_query(args: argparse.Namespace) -> None:
         conn,
         defect=args.defect,
         cell_size=args.cell_size,
-        calc_method=args.method,
+        calc_method=_normalize_calc_method(args.method),
         pert_scale=args.pert_scale,
         pert_order=args.order,
     )
@@ -159,10 +160,11 @@ def _run_query(args: argparse.Namespace) -> None:
         return
     for path in files:
         print(f"Running: {path}")
+        method = _infer_method_from_file(Path(path))
         run_full_pipeline(
             raw_zfs_file=str(path),
-            calc_method=_METHOD_MAP[_infer_method_from_file(Path(path))][0],
-            zfs_folder=_METHOD_MAP[_infer_method_from_file(Path(path))][1],
+            calc_method=_METHOD_MAP[method][0],
+            zfs_folder=_METHOD_MAP[method][1],
             output_root=args.output_root if args.output_root else "runs",
             debug=args.debug,
         )

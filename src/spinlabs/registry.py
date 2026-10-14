@@ -185,7 +185,7 @@ def find_packaged(
     registered against them are skipped, so repeated query runs pick up only
     new data.
     """
-    sql = "SELECT path FROM files WHERE kind = 'packaged_zfs'"
+    sql = "SELECT path, pert_order FROM files WHERE kind = 'packaged_zfs'"
     params: list[object] = []
     if defect is not None:
         sql += " AND defect = ?"
@@ -200,9 +200,12 @@ def find_packaged(
         sql += " AND pert_scale = ?"
         params.append(pert_scale)
     if pert_order is not None:
-        wanted = set(_normalize_orders(pert_order))
+        wanted = set(json.loads(_normalize_orders(pert_order)))
     if exclude_run:
-        sql += " AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.status = 'done' AND runs.zfs_files LIKE '%' || files.path || '%')"
+        sql += """ AND NOT EXISTS (
+            SELECT 1 FROM runs, json_each(COALESCE(runs.zfs_files, '[]')) AS j
+            WHERE runs.status = 'done' AND j.value = files.path
+        )"""
     cur = conn.execute(sql, params)  # type: ignore[arg-type]
     results = []
     for (p_, stored,) in cur.fetchall():

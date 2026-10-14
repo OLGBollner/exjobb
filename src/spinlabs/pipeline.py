@@ -185,7 +185,6 @@ def run_full_pipeline(
     coupling_data: SpinPhononCouplingData | None = None
 
     # ── 2. Ingest Input Data ─────────────────────────────────────────────────
-    spectrum = None
     ph_path = None
     _zfs_paths: list[Path] = []
     if coupling_file is not None:
@@ -278,6 +277,16 @@ def run_full_pipeline(
 
         # Resolve order: explicit user request takes priority; otherwise inspect data
         if user_order is not None:
+            has_2d = (raw_data is not None and len(raw_data.second_order) > 0) or (
+                coupling_data is not None and coupling_data.has_second_order
+            )
+            if user_order in (2, 12) and not has_2d:
+                raise ValueError(
+                    f"--order {user_order} requested, but the input dataset contains no "
+                    "second-order (2d) tensors. Rerun without --order "
+                    f"{user_order} or with input that includes second-order perturbation "
+                    "data."
+                )
             order = user_order
         elif combine_orders or (raw_data is not None and len(raw_data.second_order) > 0):
             order = 2
@@ -296,6 +305,13 @@ def run_full_pipeline(
         _zfs_paths = [Path(raw_zfs_file)]
     _zfs_paths += [Path(p) for p in (raw_zfs_file_1d, raw_zfs_file_2d) if p]
     for p in _zfs_paths:
+        # A packaged file registered by `spinlabs package` keeps its richer
+        # metadata (pert_order/pert_scale/calc_method); don't overwrite it with
+        # a bare 'raw_zfs' row just because the pipeline read the file.
+        cur = reg.execute("SELECT kind FROM files WHERE path = ?", (str(Path(p).resolve()),))
+        row = cur.fetchone()
+        if row is not None and row[0] == "packaged_zfs":
+            continue
         register_file(reg, p, "raw_zfs", defect=str(defect), cell_size=cell_size, calc_method=calc_method)
     if coupling_file is not None:
         register_file(
