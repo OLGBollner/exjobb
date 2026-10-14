@@ -213,8 +213,41 @@ def _register_only(data_path: Path) -> None:
                 cell_size = int(data["cell_size"])
                 pert_scale = float(data["pert_scale"])
                 calc_method = _normalize_calc_method(str(data["calc_method"]))
-                order = int(data["order"])
-                orders = [1, 2] if order == 12 else [order]
+                # Derive orders from the npz content itself: a non-empty
+                # first_order / second_order mapping means that perturbation
+                # order is present in the file. Fall back to the filename
+                # suffix only when the order keys are missing or unreadable.
+                def _dict_nonempty(key: str) -> bool:
+                    if key not in keys:
+                        return False
+                    val = data[key]
+                    if val is None:
+                        return False
+                    if isinstance(val, np.ndarray) and val.shape == () and val.dtype == object:
+                        val = val.item()
+                    try:
+                        return len(val) > 0
+                    except TypeError:
+                        return False
+
+                if _dict_nonempty("first_order") or _dict_nonempty("second_order"):
+                    orders = ([1] if _dict_nonempty("first_order") else []) + (
+                        [2] if _dict_nonempty("second_order") else []
+                    )
+                else:
+                    suffix_orders = {
+                        "12d": [1, 2],
+                        "1d": [1],
+                        "2d": [2],
+                    }.get(npz_path.stem.rsplit("_", 1)[-1])
+                    if suffix_orders is None:
+                        warnings.warn(
+                            f"{npz_path.name}: no order data and no recognizable "
+                            "filename suffix, skipping"
+                        )
+                        skipped += 1
+                        continue
+                    orders = suffix_orders
         except Exception as exc:  # unreadable npz: report and move on
             warnings.warn(f"Could not read {npz_path.name}: {exc}")
             skipped += 1

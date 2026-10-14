@@ -1,3 +1,4 @@
+import json
 import argparse
 from datetime import date
 from pathlib import Path
@@ -6,6 +7,7 @@ import numpy as np
 from unittest.mock import patch
 
 import pytest
+from spinlabs.cli.package import build_package_parser
 
 from spinlabs.cli.package import _run, _run_conv
 from spinlabs.models import PerturbationEntry, RawZFSData, ZFSTensor
@@ -222,3 +224,94 @@ def test_register_only(tmp_path):
     assert kind == "packaged_zfs"
     assert (defect, cell, method, order, pert) == ("NV", 512, "all_bands", "[1, 2]", 0.1)
     assert path.endswith("NV_512_raw_zfs_data_all_bands_12d.npz")
+
+
+def test_register_only_stale_combined_metadata(tmp_path, monkeypatch):
+    """Old files store combined data with order=2; the filename suffix wins."""
+    from spinlabs.models import RawZFSData
+    from spinlabs.registry import ensure_db
+
+    monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "reg"))
+    n_modes = 2
+    gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
+    pert_si = 1e10
+    first_order = {
+        i: {
+            "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+            "pert": pert_si,
+            "symmetry": "A1",
+            "ipr": 0.5,
+        }
+        for i in range(n_modes)
+    }
+    second_order = {
+        (i, j): {
+            "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+            "pert": (pert_si, pert_si),
+            "symmetry": ("A1", "A1") if i == j else ("A1", "Ex"),
+            "ipr": (0.5, 0.5),
+        }
+        for i in range(n_modes)
+        for j in range(i, n_modes)
+    }
+    raw = RawZFSData(
+        defect="ClV",
+        cell_size=128,
+        pert_scale=0.025,
+        calc_method="all_bands",
+        order=2,  # stale metadata from the old packaging code
+        ground_state_zfs=gs,
+        first_order=first_order,
+        second_order=second_order,
+    )
+    out = tmp_path / "ClV_128_raw_zfs_data_all_bands_12d.npz"
+    raw.save(out)
+    conn = ensure_db()
+    parser = argparse.ArgumentParser()
+    build_package_parser(parser)
+    args = parser.parse_args(["--register-only", str(out.parent)])
+    args.func(args)
+
+    rows = conn.execute(
+        "SELECT pert_order FROM files WHERE kind='packaged_zfs'"
+    ).fetchall()
+    assert json.loads(rows[0][0]) == [1, 2]
+
+
+def test_register_only_orders_from_content(tmp_path, monkeypatch):
+    """2d-only file: empty first_order -> [2] regardless of stale metadata."""
+    from spinlabs.registry import ensure_db
+
+    monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "reg"))
+    n_modes = 2
+    gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
+    pert_si = 1e10
+    second_order = {
+        (i, j): {
+            "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+            "pert": (pert_si, pert_si),
+            "symmetry": ("A1", "A1") if i == j else ("A1", "Ex"),
+            "ipr": (0.5, 0.5),
+        }
+        for i in range(n_modes)
+        for j in range(i, n_modes)
+    }
+    raw = RawZFSData(
+        defect="ClV",
+        cell_size=128,
+        pert_scale=0.025,
+        calc_method="all_bands",
+        order=2,
+        ground_state_zfs=gs,
+        first_order={},  # explicitly empty: no 1d data in this file
+        second_order=second_order,
+    )
+    out = tmp_path / "ClV_128_raw_zfs_data_all_bands_2d.npz"
+    raw.save(out)
+    conn = ensure_db()
+    parser = argparse.ArgumentParser()
+    build_package_parser(parser)
+    args = parser.parse_args(["--register-only", str(out.parent)])
+    args.func(args)
+    rows = conn.execute("SELECT pert_order FROM files WHERE kind='packaged_zfs'").fetchall()
+    assert json.loads(rows[0][0]) == [2]
