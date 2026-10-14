@@ -938,6 +938,13 @@ class RawZFSData:
         """Effective order: 2 if second-order data is present, else order or 1."""
         return 2 if self.has_second_order else (self.order or 1)
 
+    @property
+    def order_suffix(self) -> str:
+        """Filename suffix showing which orders are present: '1d', '2d' or '12d' (both)."""
+        if self.has_first_order and self.has_second_order:
+            return "12d"
+        return f"{self.combined_order}d"
+
     def combine(self, other: RawZFSData) -> RawZFSData:
         """
         Combines two RawZFSData containers (e.g. 1D and 2D datasets).
@@ -1148,7 +1155,7 @@ class RawZFSData:
                     entry["ipr"] = (ipr_i, ipr_j)
 
     def _default_name(self):
-        return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.combined_order}d.npz"
+        return f"{self.defect}_{self.cell_size}_raw_zfs_data_{self.calc_method}_{self.order_suffix}.npz"
 
     SCHEMA = [
         FieldSpec("defect", "str"),
@@ -1188,7 +1195,9 @@ class RawZFSData:
 
         # Effective order derived from which perturbation dicts are present
         eff_order = self.order
-        if eff_order is None or eff_order == 1:
+        if self.has_first_order and self.has_second_order:
+            eff_order = 12  # combined 1d+2d data: unified order marker everywhere
+        elif eff_order is None or eff_order == 1:
             if self.second_order:
                 eff_order = 2
             elif self.first_order:

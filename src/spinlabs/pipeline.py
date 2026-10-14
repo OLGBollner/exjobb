@@ -10,6 +10,7 @@ import numpy as np
 
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
+from spinlabs.registry import ensure_db, find_phonon, finish_run, register_file, register_run
 from spinlabs.parsers import (
     parse_phonon_data,
     parse_zfs_dataset_npz,
@@ -21,7 +22,6 @@ from spinlabs.plotter import (
     plot_transition_rates_stacked,
 )
 from spinlabs.relaxation_dynamics import RelaxationDynamics
-from spinlabs.runs_index import append_row, index_path
 from spinlabs.transition_rate import TransitionRate
 from spinlabs.zfs_manager import ZFSManager
 
@@ -31,6 +31,23 @@ def _pert_dir_name(pert_scale: float | None) -> str:
     if pert_scale is None:
         return "pert_none"
     return f"pert_{pert_scale:g}"
+
+
+def _git_hash() -> str | None:
+    """Short git hash of the spinlabs repo, or None outside a repo."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=Path(__file__).resolve().parent,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
 
 
 def get_unique_run_dir(
@@ -184,6 +201,8 @@ def run_full_pipeline(
     coupling_data: SpinPhononCouplingData | None = None
 
     # ── 2. Ingest Input Data ─────────────────────────────────────────────────
+    ph_path = None
+    _zfs_paths: list[Path] = []
     if coupling_file is not None:
         coupling_data = SpinPhononCouplingData.load(coupling_file)
         defect = coupling_data.defect or defect or "defect"
@@ -245,6 +264,23 @@ def run_full_pipeline(
         defect = raw_data.defect or defect or "defect"
         cell_size = raw_data.cell_size or cell_size or 0
 
+        # Registry fallback: resolve phonon by defect/cell when no file found next to the inputs
+        if spectrum is None:
+            reg = ensure_db()
+            reg_hits = find_phonon(reg, str(defect), cell_size)
+            if len(reg_hits) == 1:
+                ph_path = reg_hits[0]
+                spectrum = parse_phonon_data(ph_path)
+                print(f"  Registry: using phonon file {ph_path} for {defect}_{cell_size}")
+            elif len(reg_hits) > 1:
+                print(
+                    f"  Registry: {len(reg_hits)} phonon files match {defect}_{cell_size}; "
+                    "pass --phonon-file to pick one. First match used: "
+                    f"{reg_hits[0]}"
+                )
+                ph_path = reg_hits[0]
+                spectrum = parse_phonon_data(ph_path)
+
         # Resolve calc_method (avoid string "None")
         if calc_method in (None, "None", ""):
             if raw_data.calc_method not in (None, "None", ""):
@@ -257,6 +293,16 @@ def run_full_pipeline(
 
         # Resolve order: explicit user request takes priority; otherwise inspect data
         if user_order is not None:
+            has_2d = (raw_data is not None and len(raw_data.second_order) > 0) or (
+                coupling_data is not None and coupling_data.has_second_order
+            )
+            if user_order in (2, 12) and not has_2d:
+                raise ValueError(
+                    f"--order {user_order} requested, but the input dataset contains no "
+                    "second-order (2d) tensors. Rerun without --order "
+                    f"{user_order} or with input that includes second-order perturbation "
+                    "data."
+                )
             order = user_order
         elif combine_orders or (raw_data is not None and len(raw_data.second_order) > 0):
             order = 2
@@ -266,6 +312,29 @@ def run_full_pipeline(
             order = 2
         elif raw_data is not None and len(raw_data.first_order) > 0:
             order = 1
+
+    # ── 2b. Registry: record input files so future lookups and queries work ──
+    reg = ensure_db()
+    if isinstance(raw_zfs_file, (list, tuple)):
+        _zfs_paths = [Path(p) for p in raw_zfs_file]
+    elif raw_zfs_file:
+        _zfs_paths = [Path(raw_zfs_file)]
+    _zfs_paths += [Path(p) for p in (raw_zfs_file_1d, raw_zfs_file_2d) if p]
+    for p in _zfs_paths:
+        # A packaged file registered by `spinlabs package` keeps its richer
+        # metadata (pert_order/pert_scale/calc_method); don't overwrite it with
+        # a bare 'raw_zfs' row just because the pipeline read the file.
+        cur = reg.execute("SELECT kind FROM files WHERE path = ?", (str(Path(p).resolve()),))
+        row = cur.fetchone()
+        if row is not None and row[0] == "packaged_zfs":
+            continue
+        register_file(reg, p, "raw_zfs", defect=str(defect), cell_size=cell_size, calc_method=calc_method)
+    if coupling_file is not None:
+        register_file(
+            reg, coupling_file, "coupling", defect=str(defect), cell_size=cell_size, calc_method=calc_method
+        )
+    if ph_path is not None and ph_path.exists():
+        register_file(reg, ph_path, "phonon", defect=str(defect), cell_size=cell_size)
 
     # ── 3. Create Unique Run Folder ──────────────────────────────────────────
     pert_eff = (
@@ -305,10 +374,10 @@ def run_full_pipeline(
         out_base = str(run_dir / "spin_phonon_coupling")
         has_both = bool(manager.zfs_tensors_2d and manager.zfs_tensors)
 
-        if (order == 2 or user_order is None) and has_both:
+        if (order in (2, 12) or user_order is None) and has_both:
             # Combined 1d + 2d analysis: compute both and save in one file.
             manager.process_both_orders(output_filename=out_base)
-        elif order == 2 and manager.zfs_tensors_2d:
+        elif order in (2, 12) and manager.zfs_tensors_2d:
             manager.process_second_order_perturbations(output_filename=out_base)
         elif order == 1:
             manager.process_first_order_perturbations(output_filename=out_base)
@@ -474,18 +543,25 @@ def run_full_pipeline(
     with open(info_path, "w") as f:
         json.dump(run_info, f, indent=2)
 
-    # ── 8b. Runs Index ────────────────────────────────────────────────────────
+    # ── 8b. Registry ──
+    # The runs table is the only index: one row per analysis run, carrying
+    # the metadata the old runs_index.csv used to hold.
     dims: list[int] = []
     if raw_data is not None:
         if len(raw_data.second_order) > 0:
             dims.append(2)
         if len(raw_data.first_order) > 0:
             dims.append(1)
-    append_row(
-        output_root,
+    reg = ensure_db()
+    run_id = register_run(
+        reg,
+        run_dir=run_dir,
+        zfs_files=[str(Path(p).resolve()) for p in _zfs_paths] if raw_data is not None else None,
+        phonon_file=ph_path if ph_path is not None else None,
+        method=calc_method,
+        init_state=init_state,
         defect=str(defect),
         cell=cell_size,
-        method=calc_method,
         order=order,
         pert=pert_eff,
         n_dims=dims,
@@ -493,98 +569,110 @@ def run_full_pipeline(
         temp_max=float(np.max(valid_temps_arr)),
         n_temps=len(valid_temps_arr),
         npz_files=[p.name for p in sorted(run_dir.glob("*.npz"))],
-        run_dir=run_dir,
+        git_hash=_git_hash(),
     )
-    print(f"      Indexed run in {index_path(output_root)}")
+    reg.commit()
+    print("      Registered run in ~/.spinlabs/registry.db")
 
-    # ── 9. Optional Plotting ─────────────────────────────────────────────────
-    figures_saved = []
-    if save_plots:
-        fig_dir = run_dir / "figures"
-        fig_dir.mkdir(exist_ok=True)
-        print(f"[5/5] Generating figures in {fig_dir.name}/ ...")
+    # Mark the run failed on any unhandled error so queries don't skip
+    # files that were never fully analyzed.
+    try:
+        # ── 9. Optional Plotting ─────────────────────────────────────────────────
+        figures_saved = []
+        if save_plots:
+            fig_dir = run_dir / "figures"
+            fig_dir.mkdir(exist_ok=True)
+            print(f"[5/5] Generating figures in {fig_dir.name}/ ...")
 
-        # Coupling plots (1D and 2D diagonal)
-        try:
-            coupling_display = coupling_data.to_unit("MHz").frequencies_to_unit("meV")
+            # Coupling plots (1D and 2D diagonal)
+            try:
+                coupling_display = coupling_data.to_unit("MHz").frequencies_to_unit("meV")
 
-            # 1D coupling plot
-            fig_c1, _, _ = plot_1d_spectral_functions(
-                frequencies_mev=coupling_display.frequencies,
-                V_0_0=coupling_display.V_0_0,
-                V_p_m=coupling_display.V_p_m,
-                V_0_pm=coupling_display.V_0_pm,
-                order=1,
-            )
-            fc1_path = fig_dir / "coupling_spectral_1d.png"
-            fig_c1.savefig(fc1_path, dpi=300)
-            figures_saved.append(fc1_path)
-
-            # Also save alias coupling_spectral.png for backward compatibility
-            fc_path = fig_dir / "coupling_spectral.png"
-            fig_c1.savefig(fc_path, dpi=300)
-            figures_saved.append(fc_path)
-
-            # 2D coupling plot (diagonal phonons i == j)
-            if coupling_display.V2_0_0 is not None:
-                v2_00 = coupling_display.V2_0_0
-                v2_pm = coupling_display.V2_p_m
-                v2_0pm = coupling_display.V2_0_pm
-
-                v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
-                v2_pm_diag = (
-                    np.diag(v2_pm)
-                    if (v2_pm is not None and v2_pm.ndim == 2)
-                    else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
-                )
-                v2_0pm_diag = (
-                    np.diag(v2_0pm)
-                    if (v2_0pm is not None and v2_0pm.ndim == 2)
-                    else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
-                )
-
-                fig_c2, _, _ = plot_1d_spectral_functions(
+                # 1D coupling plot
+                fig_c1, _, _ = plot_1d_spectral_functions(
                     frequencies_mev=coupling_display.frequencies,
-                    V_0_0=v2_00_diag,
-                    V_p_m=v2_pm_diag,
-                    V_0_pm=v2_0pm_diag,
-                    order=2,
+                    V_0_0=coupling_display.V_0_0,
+                    V_p_m=coupling_display.V_p_m,
+                    V_0_pm=coupling_display.V_0_pm,
+                    order=1,
                 )
-                fc2_path = fig_dir / "coupling_spectral_2d.png"
-                fig_c2.savefig(fc2_path, dpi=300)
-                figures_saved.append(fc2_path)
-        except Exception as e:
-            print(f"Warning: could not generate coupling plot: {e}")
+                fc1_path = fig_dir / "coupling_spectral_1d.png"
+                fig_c1.savefig(fc1_path, dpi=300)
+                figures_saved.append(fc1_path)
 
-        # Transition rate stacked plots
-        try:
-            fr_path = fig_dir / "transition_rates.png"
-            plot_transition_rates_stacked(rates_path, output_path=fr_path)
-            figures_saved.append(fig_dir / "transition_rates_0_1.png")
-            figures_saved.append(fig_dir / "transition_rates_1_-1.png")
-        except Exception as e:
-            print(f"Warning: could not generate rate plots: {e}")
+                # Also save alias coupling_spectral.png for backward compatibility
+                fc_path = fig_dir / "coupling_spectral.png"
+                fig_c1.savefig(fc_path, dpi=300)
+                figures_saved.append(fc_path)
 
-        # T1 plot
-        try:
-            ft1_path = fig_dir / "t1_vs_temperature.png"
-            plot_t1([t1_path], output_path=ft1_path, plain_name=True)
-            figures_saved.append(ft1_path)
-        except Exception as e:
-            print(f"Warning: could not generate T1 plot: {e}")
+                # 2D coupling plot (diagonal phonons i == j)
+                if coupling_display.V2_0_0 is not None:
+                    v2_00 = coupling_display.V2_0_0
+                    v2_pm = coupling_display.V2_p_m
+                    v2_0pm = coupling_display.V2_0_pm
 
-    print("\n========================================================")
-    print("  Run successfully completed!")
-    print(f"  All results stored in: {run_dir}")
-    print("========================================================\n")
+                    v2_00_diag = np.diag(v2_00) if v2_00.ndim == 2 else v2_00
+                    v2_pm_diag = (
+                        np.diag(v2_pm)
+                        if (v2_pm is not None and v2_pm.ndim == 2)
+                        else (v2_pm if v2_pm is not None else np.zeros_like(v2_00_diag))
+                    )
+                    v2_0pm_diag = (
+                        np.diag(v2_0pm)
+                        if (v2_0pm is not None and v2_0pm.ndim == 2)
+                        else (v2_0pm if v2_0pm is not None else np.zeros_like(v2_00_diag))
+                    )
 
-    return {
-        "run_dir": run_dir,
-        "run_info": run_info,
-        "raw_zfs_path": raw_path if raw_data else None,
-        "coupling_path": coupling_path,
-        "rates_path": rates_path,
-        "directional_rates_path": dir_rates_path,
-        "t1_path": t1_path,
-        "figures": figures_saved,
-    }
+                    fig_c2, _, _ = plot_1d_spectral_functions(
+                        frequencies_mev=coupling_display.frequencies,
+                        V_0_0=v2_00_diag,
+                        V_p_m=v2_pm_diag,
+                        V_0_pm=v2_0pm_diag,
+                        order=2,
+                    )
+                    fc2_path = fig_dir / "coupling_spectral_2d.png"
+                    fig_c2.savefig(fc2_path, dpi=300)
+                    figures_saved.append(fc2_path)
+            except Exception as e:
+                print(f"Warning: could not generate coupling plot: {e}")
+
+            # Transition rate stacked plots
+            try:
+                fr_path = fig_dir / "transition_rates.png"
+                plot_transition_rates_stacked(rates_path, output_path=fr_path)
+                figures_saved.append(fig_dir / "transition_rates_0_1.png")
+                figures_saved.append(fig_dir / "transition_rates_1_-1.png")
+            except Exception as e:
+                print(f"Warning: could not generate rate plots: {e}")
+
+            # T1 plot
+            try:
+                ft1_path = fig_dir / "t1_vs_temperature.png"
+                plot_t1([t1_path], output_path=ft1_path, plain_name=True)
+                figures_saved.append(ft1_path)
+            except Exception as e:
+                print(f"Warning: could not generate T1 plot: {e}")
+
+        print("\n========================================================")
+        print("  Run successfully completed!")
+        print(f"  All results stored in: {run_dir}")
+        print("========================================================\n")
+
+        finish_run(reg, run_id, "done")
+        reg.commit()
+
+        return {
+            "run_dir": run_dir,
+            "run_info": run_info,
+            "raw_zfs_path": raw_path if raw_data else None,
+            "coupling_path": coupling_path,
+            "rates_path": rates_path,
+            "directional_rates_path": dir_rates_path,
+            "t1_path": t1_path,
+            "figures": figures_saved,
+        }
+    except Exception:
+        finish_run(reg, run_id, 'failed')
+        reg.commit()
+        raise
+

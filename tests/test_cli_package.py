@@ -1,4 +1,6 @@
+import json
 import argparse
+import sqlite3
 from datetime import date
 from pathlib import Path
 
@@ -6,21 +8,21 @@ import numpy as np
 from unittest.mock import patch
 
 import pytest
+from spinlabs.cli.package import build_package_parser
 
 from spinlabs.cli.package import _run, _run_conv
 from spinlabs.models import PerturbationEntry, RawZFSData, ZFSTensor
 
-
-def _raw(order=1, pert=0.025, **_kw):
+def _raw(order=1, pert=0.025, calc_method=None, **_kw):
     kwargs = dict(
         defect="NV",
         cell_size=512,
         pert_scale=pert,
-        calc_method="all_bands",
+        calc_method={"all": "all_bands", "approx": "defect_band_approx"}.get(calc_method, calc_method or "all_bands"),
         order=order,
     )
     if order == 2:
-        # Non-empty second order so combined_order() resolves to 2,
+        # Non-empty second order so content-derived orders resolve to [2],
         # matching real second-order data.
         kwargs["second_order"] = {
             (0, 0): PerturbationEntry(
@@ -30,15 +32,24 @@ def _raw(order=1, pert=0.025, **_kw):
                 zfs_tensor=ZFSTensor(matrix=np.zeros((3, 3))),
             )
         }
+    else:
+        kwargs["first_order"] = {
+            0: PerturbationEntry(
+                order=1,
+                mode_indices=(0,),
+                amplitude=(0.025, 0.0),
+                zfs_tensor=ZFSTensor(matrix=np.zeros((3, 3))),
+            )
+        }
     return RawZFSData(**kwargs)
 
 
 def _make_args(tmp_path, orders="first,second", pert=None):
     return argparse.Namespace(
-        defect_folder=tmp_path / "NV_512",
+        defect_folder=[tmp_path / "NV_512"],
         orders=orders,
         pert=pert,
-        method="all",
+        method=["all"],
         output_root=tmp_path / "data",
     )
 
@@ -46,20 +57,35 @@ def _make_args(tmp_path, orders="first,second", pert=None):
 def _tree(tmp_path, orders=("first", "second"), perts=(0.025,)):
     for o in orders:
         for p in perts:
-            (tmp_path / "NV_512" / f"{o}_order" / f"pert_{p:g}").mkdir(parents=True)
+            outcar = tmp_path / "NV_512" / f"{o}_order" / f"pert_{p:g}" / "defect_band_approx" / "OUTCAR"
+            outcar.parent.mkdir(parents=True, exist_ok=True)
+            outcar.touch()
 
 
 def _patch(side_effect=_raw):
     return patch("spinlabs.cli.package.parse_zfs_simulation_dataset", side_effect=side_effect)
 
 
-def test_default_combines_orders_into_one_file(tmp_path):
+def _registry(monkeypatch, tmp_path):
+    """Point the registry at an isolated sqlite file and return the path."""
+    db = tmp_path / "registry.db"
+    monkeypatch.setattr("spinlabs.registry.REGISTRY_PATH", db)
+    return db
+
+
+def test_default_combines_orders_into_one_file(tmp_path, monkeypatch):
     _tree(tmp_path)
+    db = _registry(monkeypatch, tmp_path)
     with _patch(lambda **kw: _raw(order=kw["order"])):
         _run(_make_args(tmp_path))
     files = list((tmp_path / "data").rglob("*.npz"))
-    run_dir = tmp_path / "data" / f"NV_512_{date.today():%Y%m%d}"
-    assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_2d.npz"]
+    run_dir = (
+        tmp_path / "data" / "NV_512" / "all_bands" / date.today().strftime("%Y%m%d")
+    )
+    assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz"]
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT defect, cell_size, calc_method, pert_order, pert_scale FROM files").fetchone()
+    assert row == ("NV", 512, "all_bands", "[1, 2]", 0.025)
 
 
 def test_single_order_saves_separate_file(tmp_path):
@@ -67,7 +93,9 @@ def test_single_order_saves_separate_file(tmp_path):
     with _patch():
         _run(_make_args(tmp_path, orders="first"))
     files = list((tmp_path / "data").rglob("*.npz"))
-    run_dir = tmp_path / "data" / f"NV_512_{date.today():%Y%m%d}"
+    run_dir = (
+        tmp_path / "data" / "NV_512" / "all_bands" / date.today().strftime("%Y%m%d")
+    )
     assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz"]
 
 
@@ -117,15 +145,19 @@ def _conv_tree(tmp_path):
     return root
 
 
-def test_conv_ground_state_flag_auto_all(tmp_path, capsys):
+def test_conv_ground_state_flag_auto_all(tmp_path, capsys, monkeypatch):
     _conv_tree(tmp_path)
+    db = _registry(monkeypatch, tmp_path)
     _outcar(tmp_path / "NV_512" / "ZFS_hyp" / "OUTCAR", (1.0, 1.0, 4.0))
     _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
-    out = next((tmp_path / "data").glob("NV_512_*_conv_test_all.npz"))
+    out = next((tmp_path / "data").rglob("NV_512_*_conv_test_all.npz"))
     data = np.load(out, allow_pickle=True)
     assert data["d0"].shape == (3, 3)
     assert abs(data["d0"][2, 2] - 4.0) < 1e-9
     assert "ground state:" in capsys.readouterr().out
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT defect, cell_size, calc_method FROM files").fetchone()
+    assert row == ("NV", 512, "all_bands")
 
 
 def test_conv_ground_state_flag_auto_occup(tmp_path):
@@ -134,7 +166,7 @@ def test_conv_ground_state_flag_auto_occup(tmp_path):
         _outcar(root / "runs" / f"0_pert_{p:g}" / "OUTCAR", (1.0, 1.0, 2.0))
     _outcar(tmp_path / "NV_512" / "ZFS_occup" / "OUTCAR", (1.0, 1.0, 3.0))
     _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
-    out = next((tmp_path / "data").glob("NV_512_*_conv_test_occup.npz"))
+    out = next((tmp_path / "data").rglob("NV_512_*_conv_test_occup.npz"))
     data = np.load(out, allow_pickle=True)
     assert abs(data["d0"][2, 2] - 3.0) < 1e-9
 
@@ -142,7 +174,7 @@ def test_conv_ground_state_flag_auto_occup(tmp_path):
 def test_conv_ground_state_missing_warns(tmp_path, capsys):
     _conv_tree(tmp_path)
     _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
-    out = next((tmp_path / "data").glob("NV_512_*_conv_*.npz"))
+    out = next((tmp_path / "data").rglob("NV_512_*_conv_*.npz"))
     data = np.load(out, allow_pickle=True)
     assert not any(k == "d0" for k in data.files)
     assert "no ground-state OUTCAR" in capsys.readouterr().err
@@ -152,6 +184,158 @@ def test_conv_ground_state_explicit_path(tmp_path):
     _conv_tree(tmp_path)
     _outcar(tmp_path / "elsewhere" / "OUTCAR", (1.0, 1.0, 5.0))
     _run_conv(args=_conv_args(tmp_path, tmp_path / "elsewhere" / "OUTCAR"), defect_folder=tmp_path / "NV_512")
-    out = next((tmp_path / "data").glob("NV_512_*_conv_*.npz"))
+    out = next((tmp_path / "data").rglob("NV_512_*_conv_*.npz"))
     data = np.load(out, allow_pickle=True)
     assert abs(data["d0"][2, 2] - 5.0) < 1e-9
+
+
+def test_multiple_folders_and_methods(tmp_path, monkeypatch):
+    _tree(tmp_path)
+    db = _registry(monkeypatch, tmp_path)
+    clv = tmp_path / "ClV_128"
+    clv.mkdir()
+    (clv / "first_order" / "pert_0.025" / "defect_band_approx").mkdir(parents=True)
+    (clv / "first_order" / "pert_0.025" / "defect_band_approx" / "OUTCAR").touch()
+    args = _make_args(tmp_path)
+    args.defect_folder = [tmp_path / "NV_512", clv]
+    args.method = ["all", "approx"]
+    with _patch(lambda **kw: _raw(order=kw["order"], calc_method=kw["calc_method"])):
+        _run(args)
+    day = date.today().strftime("%Y%m%d")
+    assert (tmp_path / "data" / "NV_512" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz").exists()
+    assert (tmp_path / "data" / "NV_512" / "defect_band_approx" / day / "pert_0.025" / "NV_512_raw_zfs_data_defect_band_approx_12d.npz").exists()
+    assert (tmp_path / "data" / "ClV_128" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
+    conn = sqlite3.connect(db)
+    rows = conn.execute("SELECT defect, cell_size, calc_method, pert_order, pert_scale FROM files ORDER BY id").fetchall()
+    assert len(rows) == 4
+    assert rows[2] == ("ClV", 128, "all_bands", "[1]", 0.025)
+
+
+def test_missing_pert_warns_and_skips(tmp_path):
+    _tree(tmp_path, perts=(0.025,))
+    args = _make_args(tmp_path)
+    args.pert = [0.025, 0.1]
+    with _patch():
+        with pytest.warns(UserWarning, match="0.1"):
+            _run(args)
+    files = list((tmp_path / "data").rglob("*.npz"))
+    assert len(files) == 1
+
+
+def _order_dicts(n_modes=2, *, first=True, second=True, pert_si=1e10):
+    """Build (first_order, second_order) dicts for RawZFSData tests."""
+    fo = (
+        {
+            i: {
+                "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+                "pert": pert_si,
+                "symmetry": "A1",
+                "ipr": 0.5,
+            }
+            for i in range(n_modes)
+        }
+        if first
+        else {}
+    )
+    so = (
+        {
+            (i, j): {
+                "tensor": np.diag([-1000.0, -1000.0, 2000.0]) * 6.626e-28,
+                "pert": (pert_si, pert_si),
+                "symmetry": ("A1", "A1") if i == j else ("A1", "Ex"),
+                "ipr": (0.5, 0.5),
+            }
+            for i in range(n_modes)
+            for j in range(i, n_modes)
+        }
+        if second
+        else {}
+    )
+    return fo, so
+
+
+def test_register_only(tmp_path):
+    from spinlabs.cli.package import _register_only
+    from spinlabs.registry import ensure_db
+
+    root = tmp_path / "data"
+    day = date.today().strftime("%Y%m%d")
+    d1 = root / "NV_512" / "all_bands" / day / "pert_0.1"
+    d1.mkdir(parents=True)
+    np.savez(
+        d1 / "NV_512_raw_zfs_data_all_bands_12d.npz",
+        defect="NV", cell_size=512, pert_scale=0.1, calc_method="all_bands", order=12,
+        first_order=np.array({}, dtype=object),
+    )
+    (root / "stray.npz").write_bytes(b"")  # junk with no metadata
+
+    with pytest.warns(UserWarning, match="stray.npz"):
+        _register_only(root)
+
+    conn = ensure_db()
+    rows = conn.execute(
+        "SELECT path, kind, defect, cell_size, calc_method, pert_order, pert_scale FROM files"
+    ).fetchall()
+    assert len(rows) == 1
+    path, kind, defect, cell, method, order, pert = rows[0]
+    assert kind == "packaged_zfs"
+    assert (defect, cell, method, order, pert) == ("NV", 512, "all_bands", "[1, 2]", 0.1)
+    assert path.endswith("NV_512_raw_zfs_data_all_bands_12d.npz")
+
+
+def test_register_only_stale_combined_metadata(tmp_path):
+    """Old files store combined data with order=2; the npz content wins over that metadata."""
+    from spinlabs.models import RawZFSData
+    from spinlabs.registry import ensure_db
+
+    gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
+    first_order, second_order = _order_dicts()
+    raw = RawZFSData(
+        defect="ClV",
+        cell_size=128,
+        pert_scale=0.025,
+        calc_method="all_bands",
+        order=2,  # stale metadata from the old packaging code
+        ground_state_zfs=gs,
+        first_order=first_order,
+        second_order=second_order,
+    )
+    out = tmp_path / "ClV_128_raw_zfs_data_all_bands_12d.npz"
+    raw.save(out)
+    conn = ensure_db()
+    parser = argparse.ArgumentParser()
+    build_package_parser(parser)
+    args = parser.parse_args(["--register-only", str(out.parent)])
+    args.func(args)
+
+    rows = conn.execute(
+        "SELECT pert_order FROM files WHERE kind='packaged_zfs'"
+    ).fetchall()
+    assert json.loads(rows[0][0]) == [1, 2]
+
+
+def test_register_only_orders_from_content(tmp_path):
+    """2d-only file: empty first_order -> [2] regardless of stale metadata."""
+    from spinlabs.registry import ensure_db
+
+    gs = ZFSTensor(matrix=np.diag([-1000.0, -1000.0, 2000.0]), unit="MHz")
+    first_order, second_order = _order_dicts(first=False)
+    raw = RawZFSData(
+        defect="ClV",
+        cell_size=128,
+        pert_scale=0.025,
+        calc_method="all_bands",
+        order=2,
+        ground_state_zfs=gs,
+        first_order={},  # explicitly empty: no 1d data in this file
+        second_order=second_order,
+    )
+    out = tmp_path / "ClV_128_raw_zfs_data_all_bands_2d.npz"
+    raw.save(out)
+    conn = ensure_db()
+    parser = argparse.ArgumentParser()
+    build_package_parser(parser)
+    args = parser.parse_args(["--register-only", str(out.parent)])
+    args.func(args)
+    rows = conn.execute("SELECT pert_order FROM files WHERE kind='packaged_zfs'").fetchall()
+    assert json.loads(rows[0][0]) == [2]

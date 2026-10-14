@@ -1,7 +1,9 @@
 """CLI subcommand for the end-to-end analysis pipeline."""
 
 import argparse
+from pathlib import Path
 
+from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
 
 
@@ -14,6 +16,13 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     inputs.add_argument("--raw-zfs-file-1d", metavar="FILE", help="Raw ZFS 1st-order .npz (combined 1d+2d mode)")
     inputs.add_argument("--raw-zfs-file-2d", metavar="FILE", help="Raw ZFS 2nd-order .npz (combined 1d+2d mode)")
     inputs.add_argument("--coupling-file", metavar="FILE", help="Path to pre-computed spin-phonon coupling .npz")
+    inputs.add_argument(
+        "--query",
+        action="store_true",
+        help="Run every packaged dataset in the registry matching the filters "
+        "(--defect/--cell-size/--method/--order/--pert-scale); files already analyzed are skipped. "
+        "All other run options (temperatures, --init-state, --plot, ...) apply to each dataset",
+    )
 
     opt = parser.add_argument_group("options")
     opt.add_argument("-ph", "--phonon-file", metavar="FILE", help="phonopy.yaml or phonon_data.npz")
@@ -24,7 +33,7 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
         help="Calculation method: 'all' for all_bands (ZFS_hyp), 'approx' for defect_band_approx (ZFS_occup). "
         "Inferred from the input file name when omitted.",
     )
-    opt.add_argument("--order", type=int, choices=[1, 2], help="Perturbation order (1 or 2)")
+    opt.add_argument("--order", type=int, choices=[1, 2, 12], help="Perturbation order (1, 2 or 12 for combined 1d+2d data)")
     opt.add_argument("--pert-scale", type=float, help="Override perturbation scale (e.g. 0.025)")
     opt.add_argument("--defect", help="Override defect name (e.g. NV, ClV)")
     opt.add_argument("--cell-size", type=int, help="Override supercell size (e.g. 64, 128)")
@@ -40,7 +49,11 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     opt.add_argument(
         "-o", "--output-root", default="runs", help="Root folder for output run directories (default: runs)"
     )
-    opt.add_argument("--run-name", help="Custom run folder name; an increment index is appended if it exists")
+    opt.add_argument(
+        "--run-name",
+        help="Custom run folder name; an increment index is appended if it exists. "
+        "With --query it is rejected when the query matches more than one dataset",
+    )
     opt.add_argument("--plot", action="store_true", help="Generate plots inside <run_dir>/figures/")
     opt.add_argument("-d", "--debug", action="store_true", help="Print debug details during derivative calculations")
 
@@ -48,6 +61,12 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
 
 
 _METHOD_MAP = {"all": ("all_bands", "ZFS_hyp"), "approx": ("defect_band_approx", "ZFS_occup")}
+
+
+def _infer_method_from_file(path: Path) -> str:
+    """Infer 'all' or 'approx' from a packaged filename (falls back to 'all')."""
+    name = path.name.lower()
+    return "approx" if ("approx" in name or "zfs_occup" in name) else "all"
 
 
 def _infer_method(args: argparse.Namespace) -> str:
@@ -86,6 +105,7 @@ def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
             [args.raw_zfs_file_1d, args.raw_zfs_file_2d] if (args.raw_zfs_file_1d or args.raw_zfs_file_2d) else None,
         ),
         ("--coupling-file", args.coupling_file),
+        ("--query", args.query),
     ]
     given = [name for name, val in modes if val]
     if not given:
@@ -98,6 +118,9 @@ def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
 
 def _run(args: argparse.Namespace) -> None:
     _validate(argparse.ArgumentParser(prog="spinlabs run"), args)
+    if args.query:
+        _run_query(args)
+        return
     run_full_pipeline(
         sim_folder=args.sim_folder[0] if args.sim_folder and len(args.sim_folder) == 1 else args.sim_folder,
         raw_zfs_file=args.raw_zfs_file[0] if args.raw_zfs_file and len(args.raw_zfs_file) == 1 else args.raw_zfs_file,
@@ -123,3 +146,63 @@ def _run(args: argparse.Namespace) -> None:
         show_plots=False,
         debug=args.debug,
     )
+
+
+def _run_query(args: argparse.Namespace) -> None:
+    """
+    Resolve packaged data from the registry and run each dataset.
+
+    Every option accepted by ``run`` is forwarded to the pipeline exactly as in the
+    non-query path, so ``--query`` never silently computes something other than what
+    was asked for. ``--defect``/``--cell-size``/``--method``/``--order``/``--pert-scale``
+    do double duty: they filter the registry *and* are passed through to the run.
+    ``--phonon-file`` is optional here -- when omitted the pipeline resolves the phonon
+    from the registry; when given it takes precedence, as it does for any other input mode.
+    """
+    from spinlabs.registry import ensure_db, find_packaged
+
+    conn = ensure_db()
+    files = find_packaged(
+        conn,
+        defect=args.defect,
+        cell_size=args.cell_size,
+        calc_method=_normalize_calc_method(args.method),
+        pert_scale=args.pert_scale,
+        pert_order=args.order,
+    )
+    if not files:
+        print("No unanalyzed packaged data matching the query.")
+        return
+    if args.run_name and len(files) > 1:
+        listing = "\n  ".join(str(p) for p in files)
+        raise SystemExit(
+            f"--run-name '{args.run_name}' is ambiguous: the query matches {len(files)} datasets, "
+            "which would all be written under that one name.\n"
+            f"  {listing}\n"
+            "Narrow the query (--defect/--cell-size/--method/--order/--pert-scale) or drop --run-name."
+        )
+    for path in files:
+        print(f"Running: {path}")
+        method = _infer_method_from_file(Path(path))
+        run_full_pipeline(
+            raw_zfs_file=str(path),
+            phonon_file=args.phonon_file,
+            two_phonon_file=args.two_phonon,
+            calc_method=_METHOD_MAP[method][0],
+            zfs_folder=_METHOD_MAP[method][1],
+            order=args.order,
+            pert_scale=args.pert_scale,
+            defect=args.defect,
+            cell_size=args.cell_size,
+            t_start=args.t_start,
+            t_end=args.t_end,
+            t_step=args.t_step,
+            temperatures=args.temperatures,
+            init_state=args.init_state,
+            output_root=args.output_root if args.output_root else "runs",
+            run_name=args.run_name,
+            save_plots=args.plot,
+            show_plots=False,
+            debug=args.debug,
+        )
+    print(f"Done: {len(files)} dataset(s).")

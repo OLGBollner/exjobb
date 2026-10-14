@@ -98,8 +98,16 @@ for i in $MODES; do
       fi
       srun $binary
       echo "$ID: Done! $i, $j"
-      echo "$ID: removing excess WAVECAR"
-      rm -f WAVECAR
+      # Only drop the restart files once this directory really is complete -- the same test
+      # the skip-guard above uses. VASP can exit 0 without writing a ZFS block; such a
+      # directory is not skipped on relaunch, so it restarts from scratch and needs
+      # CHGCAR/CHG to resume. (A cancelled job never reaches this line at all.)
+      if [ -f OUTCAR ] && grep -qzP "$ZFS_REGEX_PATTERN" OUTCAR; then
+        echo "$ID: removing excess VASP results (WAVECAR, CHGCAR, CHG)"
+        rm -f WAVECAR CHGCAR CHG
+      else
+        echo "$ID: pair $i, $j did not finish -- keeping CHGCAR/CHG so it can resume"
+      fi
       cd "$HEAD_DIR"
     fi
     PAIR_ID=$((PAIR_ID + 1))
