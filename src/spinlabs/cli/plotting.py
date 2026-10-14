@@ -20,33 +20,20 @@ def _add_output_args(parser: argparse.ArgumentParser) -> None:
 def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: SLF001
     """Add the ``plot`` subcommands to a subparsers object."""
     coupling = subparsers.add_parser("coupling", help="Plot run coupling from a run directory")
-    coupling.add_argument("run_dir", type=Path)
+    coupling.add_argument("run_dir", type=Path, nargs="?")
+    _add_query_args(coupling)
     _add_output_args(coupling)
     coupling.set_defaults(func=_run_coupling)
 
     rates = subparsers.add_parser("rates", help="Plot transition rates from a run directory")
-    rates.add_argument("run_dir", type=Path)
+    rates.add_argument("run_dir", type=Path, nargs="?")
+    _add_query_args(rates)
     _add_output_args(rates)
     rates.set_defaults(func=_run_rates)
 
     t1 = subparsers.add_parser("t1", help="Plot T1 curves from one or more npz files or run directories in one figure")
     t1.add_argument("inputs", nargs="*", type=Path)
-    t1.add_argument("-r", "--output-root", default="runs", help="Root folder holding run directories (default: runs); used to resolve runs queried from the registry")
-    t1.add_argument(
-        "--query",
-        action="store_true",
-        help="Plot the completed runs in the registry matching the filters "
-        "(--defect/--cell-size/--method/--order/--pert-scale). Same syntax as 'run --query'. "
-        "Each matching run's t1_relaxation.npz goes into one figure",
-    )
-    t1.add_argument("--defect", help="Filter by defect name (e.g. NV, ClV)")
-    t1.add_argument("--cell-size", type=int, help="Filter by supercell size (e.g. 64, 128)")
-    t1.add_argument(
-        "--method", choices=["all", "approx"], help="Filter by calculation method: 'all' for all_bands, 'approx' for defect_band_approx"
-    )
-    t1.add_argument("--order", type=int, choices=[1, 2, 12], help="Filter by perturbation order (1, 2 or 12)")
-    t1.add_argument("--pert-scale", type=float, help="Filter by perturbation scale (e.g. 0.025)")
-    t1.add_argument("--latest", action="store_true", help="With --query, use only the most recent matching run")
+    _add_query_args(t1)
     t1.add_argument("--plain-name", action="store_true", help="Do not append metadata to the output filename")
     _add_output_args(t1)
     t1.set_defaults(func=_run_t1)
@@ -113,16 +100,69 @@ def _default_output(args: argparse.Namespace, kind: str, stem: str) -> Path:
     return p
 
 
+def _explicit_inputs(args: argparse.Namespace) -> list[Path]:
+    """Explicit run paths given on the command line, if any."""
+    if hasattr(args, "inputs"):
+        return list(args.inputs)
+    run_dir = getattr(args, "run_dir", None)
+    return [run_dir] if run_dir else []
+
+
+def _resolve_query_runs(args: argparse.Namespace) -> list[Path]:
+    """Completed run dirs in the registry matching the --query filters."""
+    if _explicit_inputs(args):
+        raise SystemExit("error: pass either explicit run paths or --query, not both")
+    conn = ensure_db()
+    dirs = find_runs(conn, _query_filters(args), latest=args.latest, output_root=args.output_root)
+    if not dirs:
+        raise SystemExit("error: no completed runs in the registry match the query")
+    return dirs
+
+
+def _resolve_run_dirs(args: argparse.Namespace) -> list[Path]:
+    """Run directories to plot: explicit paths, or registry matches via --query."""
+    if args.query:
+        return _resolve_query_runs(args)
+    provided = _explicit_inputs(args)
+    if not provided:
+        raise SystemExit("error: provide a run directory, or use --query to select registry runs")
+    return [p if p.is_dir() else p.parent for p in provided]
+
+
 def _run_coupling(args: argparse.Namespace) -> None:
-    out_dir = args.output or _figures_dir("coupling") / args.run_dir.name
-    out_dir.mkdir(parents=True, exist_ok=True)
-    plot_run_coupling(args.run_dir, out_dir, args.fmt, args.dpi, args.show)
+    for run_dir in _resolve_run_dirs(args):
+        out_dir = args.output / run_dir.name if args.output else _figures_dir("coupling") / run_dir.name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        plot_run_coupling(run_dir, out_dir, args.fmt, args.dpi, args.show)
 
 
 def _run_rates(args: argparse.Namespace) -> None:
-    out_dir = args.output or _figures_dir("rates") / args.run_dir.name
-    out_dir.mkdir(parents=True, exist_ok=True)
-    plot_run_rates(args.run_dir, out_dir, args.fmt, args.dpi, args.show)
+    for run_dir in _resolve_run_dirs(args):
+        out_dir = args.output / run_dir.name if args.output else _figures_dir("rates") / run_dir.name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        plot_run_rates(run_dir, out_dir, args.fmt, args.dpi, args.show)
+
+
+def _add_query_args(parser: argparse.ArgumentParser) -> None:
+    """Registry-query filters shared by all plot subcommands (same as 'run --query')."""
+    parser.add_argument(
+        "--query",
+        action="store_true",
+        help="Plot the completed runs in the registry matching the filters "
+        "(--defect/--cell-size/--method/--order/--pert-scale). Same syntax as 'run --query'",
+    )
+    parser.add_argument("--defect", help="Filter by defect name (e.g. NV, ClV)")
+    parser.add_argument("--cell-size", type=int, help="Filter by supercell size (e.g. 64, 128)")
+    parser.add_argument(
+        "--method", choices=["all", "approx"], help="Filter by calculation method: 'all' for all_bands, 'approx' for defect_band_approx"
+    )
+    parser.add_argument("--order", type=int, choices=[1, 2, 12], help="Filter by perturbation order (1, 2 or 12)")
+    parser.add_argument("--pert-scale", type=float, help="Filter by perturbation scale (e.g. 0.025)")
+    parser.add_argument("--latest", action="store_true", help="With --query, use only the most recent matching run")
+    parser.add_argument(
+        "-r", "--output-root", default="runs",
+        help="Root folder holding run directories (default: runs); used to resolve runs queried from the registry",
+    )
 
 
 def _query_filters(args: argparse.Namespace) -> list[tuple[str, str]]:
@@ -143,12 +183,7 @@ def _query_filters(args: argparse.Namespace) -> list[tuple[str, str]]:
 
 def _run_t1(args: argparse.Namespace) -> None:
     if args.query:
-        if args.inputs:
-            raise SystemExit("error: pass either explicit run paths or --query, not both")
-        conn = ensure_db()
-        dirs = find_runs(conn, _query_filters(args), latest=args.latest, output_root=args.output_root)
-        if not dirs:
-            raise SystemExit("error: no completed runs in the registry match the query")
+        dirs = _resolve_query_runs(args)
         inputs = [d / "t1_relaxation.npz" for d in dirs]
         missing = [i for i in inputs if not i.exists()]
         if missing:

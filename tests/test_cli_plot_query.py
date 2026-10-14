@@ -94,3 +94,43 @@ def test_order_column_is_quoted(registry_db):
     conn, run_dir = registry_db
     dirs = registry.find_runs(conn, [("order", 1)])
     assert dirs == [run_dir]
+
+
+@pytest.mark.parametrize("subcmd", ["coupling", "rates"])
+def test_plot_run_subcommand_query(subcmd, registry_db, tmp_path, monkeypatch, capsys):
+    """plot coupling/rates --query resolve registry runs like plot t1."""
+    monkeypatch.chdir(tmp_path)
+    from spinlabs.cli import build_parser
+
+    called = []
+
+    def fake_plot(run_dir, out_dir, fmt, dpi, show):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        called.append(run_dir)
+
+    import spinlabs.cli.plotting as plotting
+    monkeypatch.setattr(plotting, "plot_run_coupling", fake_plot)
+    monkeypatch.setattr(plotting, "plot_run_rates", fake_plot)
+    args = build_parser().parse_args(["plot", subcmd, "--query", "--defect", "NV", "--cell-size", "512"])
+    args.func(args)
+    assert len(called) == 1
+    assert called[0].name == "NV_512_pert_0.025"
+    assert (tmp_path / "figures" / subcmd / "NV_512_pert_0.025").exists()
+
+
+@pytest.mark.parametrize("subcmd", ["coupling", "rates", "t1"])
+def test_plot_query_no_match_errors(subcmd, registry_db, monkeypatch):
+    from spinlabs.cli import build_parser
+
+    args = build_parser().parse_args(["plot", subcmd, "--query", "--defect", "ClV"])
+    with pytest.raises(SystemExit, match="no completed runs"):
+        args.func(args)
+
+
+@pytest.mark.parametrize("subcmd", ["coupling", "rates"])
+def test_plot_path_and_query_conflict(subcmd, registry_db):
+    from spinlabs.cli import build_parser
+
+    args = build_parser().parse_args(["plot", subcmd, "some_dir", "--query", "--defect", "NV"])
+    with pytest.raises(SystemExit, match="not both"):
+        args.func(args)
