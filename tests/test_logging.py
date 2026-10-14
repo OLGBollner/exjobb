@@ -79,6 +79,7 @@ def test_configure_logging_default_console_level_is_warning():
 
 def test_configure_logging_verbosity_count_and_quiet():
     import spinlabs.logging_utils as lu
+
     get_logger()
 
     configure_logging(verbosity=0)

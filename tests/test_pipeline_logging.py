@@ -8,9 +8,7 @@ from spinlabs.pipeline import run_full_pipeline
 
 def _run_logs(reg):
     conn = sqlite3.connect(reg.REGISTRY_PATH)
-    return conn.execute(
-        "SELECT level, logger, message, run_id FROM run_logs"
-    ).fetchall()
+    return conn.execute("SELECT level, logger, message, run_id FROM run_logs").fetchall()
 
 
 def test_pipeline_logs_captured_with_run_id(tmp_path, dummy_coupling_file):

@@ -61,9 +61,7 @@ class SQLiteLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            insert_run_log(
-                self.conn, record.levelname, record.name, self.format(record), self.run_id
-            )
+            insert_run_log(self.conn, record.levelname, record.name, self.format(record), self.run_id)
         except Exception:
             self.handleError(record)
 
