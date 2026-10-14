@@ -220,5 +220,5 @@ def test_register_only(tmp_path):
     assert len(rows) == 1
     path, kind, defect, cell, method, order, pert = rows[0]
     assert kind == "packaged_zfs"
-    assert (defect, cell, method, order, pert) == ("NV", 512, "all_bands", 12, 0.1)
+    assert (defect, cell, method, order, pert) == ("NV", 512, "all_bands", "[1, 2]", 0.1)
     assert path.endswith("NV_512_raw_zfs_data_all_bands_12d.npz")

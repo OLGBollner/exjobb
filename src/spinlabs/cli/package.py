@@ -167,7 +167,7 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
                 defect=defect,
                 cell_size=cell_size,
                 calc_method=calc_method,
-                pert_order=12 if raw.has_first_order and raw.has_second_order else _ORDER_NUM[orders[0]],
+                pert_order=([1, 2] if raw.has_first_order and raw.has_second_order else [_ORDER_NUM[orders[0]]]),
                 pert_scale=pert_scale,
             )
             append_data_row(
@@ -214,6 +214,7 @@ def _register_only(data_path: Path) -> None:
                 pert_scale = float(data["pert_scale"])
                 calc_method = _normalize_calc_method(str(data["calc_method"]))
                 order = int(data["order"])
+                orders = [1, 2] if order == 12 else [order]
         except Exception as exc:  # unreadable npz: report and move on
             warnings.warn(f"Could not read {npz_path.name}: {exc}")
             skipped += 1
@@ -225,10 +226,10 @@ def _register_only(data_path: Path) -> None:
             defect=defect,
             cell_size=cell_size,
             calc_method=calc_method,
-            pert_order=order,
+            pert_order=orders,
             pert_scale=pert_scale,
         )
-        print(f"Registered: {npz_path} ({defect}_{cell_size}, {calc_method}, order {order}, pert {pert_scale:g})")
+        print(f"Registered: {npz_path} ({defect}_{cell_size}, {calc_method}, order {orders}, pert {pert_scale:g})")
         registered += 1
     print(f"\nDone: {registered} registered, {skipped} skipped")
 

@@ -53,11 +53,13 @@ def ensure_db() -> sqlite3.Connection:
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(REGISTRY_PATH)
     conn.executescript(_SCHEMA)
-    # Old combined 1d+2d files were registered with pert_order=NULL; the unified
-    # convention is 12, and only combined files were ever NULL. Normalize once.
-    cur = conn.execute("SELECT COUNT(*) FROM files WHERE kind = 'packaged_zfs' AND pert_order IS NULL")
+    # Old rows: combined files had pert_order=NULL (before the 12 convention),
+    # then 12. Both map to the unified list [1, 2].
+    cur = conn.execute("SELECT COUNT(*) FROM files WHERE kind = 'packaged_zfs' AND (pert_order IS NULL OR pert_order NOT LIKE '[%')")
     if cur.fetchone()[0]:
-        conn.execute("UPDATE files SET pert_order = 12 WHERE kind = 'packaged_zfs' AND pert_order IS NULL")
+        conn.execute(
+            "UPDATE files SET pert_order = '[1, 2]' WHERE kind = 'packaged_zfs' AND (pert_order IS NULL OR pert_order NOT LIKE '[%')",
+        )
         conn.commit()
     return conn
 
@@ -74,6 +76,16 @@ def sha256_of(path: str | Path) -> str:
     return h.hexdigest()
 
 
+def _normalize_orders(value: list[int] | int | None) -> str | None:
+    """Normalize a perturbation order value to a JSON list string, e.g. '[1, 2]'."""
+    if value is None:
+        return None
+    if value == 12:  # legacy combined marker
+        return json.dumps([1, 2])
+    orders = sorted(set(value if isinstance(value, (list, tuple)) else [value]))
+    return json.dumps(orders)
+
+
 def register_file(
     conn: sqlite3.Connection,
     path: str | Path,
@@ -82,12 +94,16 @@ def register_file(
     defect: str | None = None,
     cell_size: int | None = None,
     calc_method: str | None = None,
-    pert_order: int | None = None,
+    pert_order: list[int] | int | None = None,
     pert_scale: float | None = None,
 ) -> int:
-    """Insert or update a file row (re-registering overwrites metadata and hash)."""
+    """Insert or update a file row (re-registering overwrites metadata and hash).
+
+    ``pert_order`` is normalized to a JSON list (e.g. ``[1, 2]`` for combined data).
+    """
     path = str(Path(path).resolve())
     digest = sha256_of(path) if Path(path).exists() else None
+    orders = _normalize_orders(pert_order)
     conn.execute(
         """INSERT INTO files (path, kind, defect, cell_size, calc_method, pert_order, pert_scale, sha256, registered_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -102,7 +118,7 @@ def register_file(
             defect,
             cell_size,
             calc_method,
-            pert_order,
+            orders,
             pert_scale,
             digest,
             _now(),
@@ -157,7 +173,7 @@ def find_packaged(
     cell_size: int | str | None = None,
     calc_method: str | None = None,
     pert_scale: float | None = None,
-    pert_order: int | None = None,
+    pert_order: list[int] | int | None = None,
     exclude_run: bool = True,
 ) -> list[Path]:
     """Packaged ZFS files matching the filters.
@@ -181,8 +197,8 @@ def find_packaged(
         sql += " AND pert_scale = ?"
         params.append(pert_scale)
     if pert_order is not None:
-        sql += " AND pert_order = ?"
-        params.append(pert_order)
+        wanted = sorted(_normalize_orders(pert_order))
+        sql += " AND (" + " AND ".join(f"instr(pert_order, '{o}')" for o in wanted) + ")"
     if exclude_run:
         sql += " AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.status = 'done' AND runs.zfs_files LIKE '%' || files.path || '%')"
     cur = conn.execute(sql, params)  # type: ignore[arg-type]
