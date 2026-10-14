@@ -98,8 +98,8 @@ for i in $MODES; do
       fi
       srun $binary
       echo "$ID: Done! $i, $j"
-      echo "$ID: removing excess WAVECAR"
-      rm -f WAVECAR
+      echo "$ID: removing excess VASP results (WAVECAR, CHGCAR, CHG)"
+      rm -f WAVECAR CHGCAR CHG                                                                                                                                                                                                                                                          
       cd "$HEAD_DIR"
     fi
     PAIR_ID=$((PAIR_ID + 1))
