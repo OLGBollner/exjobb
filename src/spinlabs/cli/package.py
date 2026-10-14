@@ -9,6 +9,7 @@ from pathlib import Path
 
 from spinlabs.data_index import append_row as append_data_row
 from spinlabs.models import _normalize_calc_method
+from spinlabs.registry import ensure_db, register_file
 from spinlabs.pack_convergence import pack_convergence
 from spinlabs.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
 
@@ -19,8 +20,14 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
         type=Path,
         nargs="+",
         metavar="FOLDER",
-        required=True,
         help="Root folder(s) for one defect each, e.g. ../NV_512 ../ClV_128. With --conv: exactly one folder containing runs/.",
+    )
+    parser.add_argument(
+        "--register-only",
+        type=Path,
+        metavar="DATA_PATH",
+        default=None,
+        help="Don't package anything: scan DATA_PATH for packaged .npz files and add them to the registry.",
     )
     parser.add_argument(
         "--conv",
@@ -75,6 +82,12 @@ _GS_AUTO = Path("__auto__")  # --ground-state given without a path: auto-discove
 
 
 def _run(args: argparse.Namespace) -> None:
+    if getattr(args, "register_only", None) is not None:
+        _register_only(args.register_only)
+        return
+
+    if not args.defect_folder:
+        raise SystemExit("--defect-folder is required (unless --register-only is given)")
     defect_folders = [f.resolve() for f in args.defect_folder]
     for f in defect_folders:
         if not f.is_dir():
@@ -147,6 +160,16 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
             pert_folder = folder / f"pert_{pert_scale:g}"
             pert_folder.mkdir(parents=True, exist_ok=True)
             save_path = raw.save(pert_folder / raw._default_name())
+            register_file(
+                ensure_db(),
+                save_path,
+                "packaged_zfs",
+                defect=defect,
+                cell_size=cell_size,
+                calc_method=calc_method,
+                pert_order=None if raw.combined_order == 2 else _ORDER_NUM[orders[0]],
+                pert_scale=pert_scale,
+            )
             append_data_row(
                 args.output_root,
                 defect=defect,
@@ -159,6 +182,56 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
                 data_dir=pert_folder,
             )
             print(f"Saved raw data in: {save_path}")
+
+
+def _register_only(data_path: Path) -> None:
+    """Register already-packaged .npz files under data_path without re-packaging."""
+    import numpy as np
+
+    from spinlabs.models import RawZFSData
+
+    data_path = data_path.resolve()
+    if not data_path.is_dir():
+        raise SystemExit(f"Data path not found: {data_path}")
+
+    conn = ensure_db()
+    registered, skipped = 0, 0
+    for npz_path in sorted(data_path.rglob("*.npz")):
+        try:
+            with np.load(str(npz_path), allow_pickle=True) as data:
+                keys = set(data.files)
+                required = {f.name for f in RawZFSData.SCHEMA if not f.optional} | {
+                    "defect",
+                    "cell_size",
+                }
+                if not required.issubset(keys):
+                    warnings.warn(f"Not a packaged raw ZFS file, skipping: {npz_path.name}")
+                    skipped += 1
+                    continue
+                defect = str(data["defect"])
+                cell_size = int(data["cell_size"])
+                pert_scale = float(data["pert_scale"])
+                calc_method = _normalize_calc_method(str(data["calc_method"]))
+                order = int(data["order"]) if "order" in keys else None
+                if order == 12:  # combined 1d+2d: registered like normal package output
+                    order = None
+        except Exception as exc:  # unreadable npz: report and move on
+            warnings.warn(f"Could not read {npz_path.name}: {exc}")
+            skipped += 1
+            continue
+        register_file(
+            conn,
+            npz_path,
+            "packaged_zfs",
+            defect=defect,
+            cell_size=cell_size,
+            calc_method=calc_method,
+            pert_order=order,
+            pert_scale=pert_scale,
+        )
+        print(f"Registered: {npz_path} ({defect}_{cell_size}, {calc_method}, order {order}, pert {pert_scale:g})")
+        registered += 1
+    print(f"\nDone: {registered} registered, {skipped} skipped")
 
 
 def _auto_ground_state(defect_folder: Path, method: str | None) -> Path | None:
@@ -211,6 +284,9 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
             ground_state = _auto_ground_state(defect_folder, method)
         pack_convergence(
             root, output, ground_state=ground_state, defect=defect, cell=cell, method=method, method_key=suffix
+        )
+        register_file(
+            ensure_db(), output, "convergence", defect=defect, cell_size=cell, calc_method=calc_method
         )
         append_data_row(
             args.output_root,

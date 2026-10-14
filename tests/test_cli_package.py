@@ -193,3 +193,32 @@ def test_missing_pert_warns_and_skips(tmp_path):
             _run(args)
     files = list((tmp_path / "data").rglob("*.npz"))
     assert len(files) == 1
+
+
+def test_register_only(tmp_path):
+    from spinlabs.cli.package import _register_only
+    from spinlabs.registry import ensure_db
+
+    root = tmp_path / "data"
+    day = date.today().strftime("%Y%m%d")
+    d1 = root / "NV_512" / "all_bands" / day / "pert_0.1"
+    d1.mkdir(parents=True)
+    np.savez(
+        d1 / "NV_512_raw_zfs_data_all_bands_12d.npz",
+        defect="NV", cell_size=512, pert_scale=0.1, calc_method="all_bands", order=12,
+        first_order=np.array({}, dtype=object),
+    )
+    (root / "stray.npz").write_bytes(b"")  # junk with no metadata
+
+    with pytest.warns(UserWarning, match="stray.npz"):
+        _register_only(root)
+
+    conn = ensure_db()
+    rows = conn.execute(
+        "SELECT path, kind, defect, cell_size, calc_method, pert_order, pert_scale FROM files"
+    ).fetchall()
+    assert len(rows) == 1
+    path, kind, defect, cell, method, order, pert = rows[0]
+    assert kind == "packaged_zfs"
+    assert (defect, cell, method, order, pert) == ("NV", 512, "all_bands", None, 0.1)
+    assert path.endswith("NV_512_raw_zfs_data_all_bands_12d.npz")
