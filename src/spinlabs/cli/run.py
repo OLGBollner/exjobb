@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 
-from spinlabs.logging_utils import attach_db_logging, configure_logging
+from spinlabs.logging_utils import configure_logging
 from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
 from spinlabs.registry import ensure_db, parse_orders
@@ -64,8 +64,14 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     )
     opt.add_argument("--plot", action="store_true", help="Generate plots inside <run_dir>/figures/")
     opt.add_argument("-d", "--debug", action="store_true", help="Print debug details during derivative calculations")
-    opt.add_argument("-v", "--verbose", action="store_true", help="Enable info and debug logging output")
-    opt.add_argument("-q", "--quiet", action="store_true", help="Show only warnings and errors")
+    opt.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="info-level console logging; repeat (-vv) for debug output",
+    )
+    opt.add_argument("-q", "--quiet", action="store_true", help="Show only errors")
 
     parser.set_defaults(func=_run)
 
@@ -128,8 +134,7 @@ def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
 
 def _run(args: argparse.Namespace) -> None:
     _validate(argparse.ArgumentParser(prog="spinlabs run"), args)
-    configure_logging(verbose=args.verbose, quiet=args.quiet)
-    attach_db_logging(ensure_db())
+    configure_logging(verbosity=args.verbose, quiet=args.quiet)
     if args.query:
         _run_query(args)
         return
@@ -171,7 +176,7 @@ def _run_query(args: argparse.Namespace) -> None:
     ``--phonon-file`` is optional here -- when omitted the pipeline resolves the phonon
     from the registry; when given it takes precedence, as it does for any other input mode.
     """
-    from spinlabs.registry import ensure_db, find_packaged
+    from spinlabs.registry import find_packaged
 
     conn = ensure_db()
     files = find_packaged(

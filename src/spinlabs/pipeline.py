@@ -8,7 +8,13 @@ from typing import Any
 
 import numpy as np
 
-from spinlabs.logging_utils import attach_db_logging, get_logger, set_db_run_id
+from spinlabs.logging_utils import (
+    attach_db_logging,
+    db_logging_attached,
+    detach_db_logging,
+    get_logger,
+    set_db_run_id,
+)
 
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
@@ -192,10 +198,72 @@ def run_full_pipeline(
       4. Compute population relaxation dynamics and T_1 times
       5. Save all results bunched together in a dedicated unique run folder
       6. (Optional) Generate and save publication-ready figures
+    Keyword-only wrapper: see :func:`_execute_pipeline` for the pipeline body.
     """
-    from spinlabs.registry import ensure_db as _ensure_db
+    owns_db_logging = not db_logging_attached()
+    if owns_db_logging:
+        # Library callers may have attached their own DB handler already; only
+        # attach (and later detach) when none is present, so ownership is clear.
+        attach_db_logging(ensure_db())
+    try:
+        return _execute_pipeline(
+            sim_folder=sim_folder,
+            raw_zfs_file=raw_zfs_file,
+            raw_zfs_file_1d=raw_zfs_file_1d,
+            raw_zfs_file_2d=raw_zfs_file_2d,
+            coupling_file=coupling_file,
+            phonon_file=phonon_file,
+            two_phonon_file=two_phonon_file,
+            calc_method=calc_method,
+            zfs_folder=zfs_folder,
+            order=order,
+            pert_scale=pert_scale,
+            defect=defect,
+            cell_size=cell_size,
+            t_start=t_start,
+            t_end=t_end,
+            t_step=t_step,
+            temperatures=temperatures,
+            init_state=init_state,
+            output_root=output_root,
+            run_name=run_name,
+            save_plots=save_plots,
+            show_plots=show_plots,
+            debug=debug,
+        )
+    finally:
+        if owns_db_logging:
+            detach_db_logging()
 
-    attach_db_logging(_ensure_db())
+
+def _execute_pipeline(
+    *,
+    sim_folder: str | Path | Sequence[str | Path] | None = None,
+    raw_zfs_file: str | Path | Sequence[str | Path] | None = None,
+    raw_zfs_file_1d: str | Path | None = None,
+    raw_zfs_file_2d: str | Path | None = None,
+    coupling_file: str | Path | None = None,
+    phonon_file: str | Path | None = None,
+    two_phonon_file: str | Path | None = None,
+    calc_method: str = "all_bands",
+    zfs_folder: str | None = None,
+    order: int | None = None,
+    pert_scale: float | None = None,
+    defect: str | None = None,
+    cell_size: int | None = None,
+    t_start: float = 0.0,
+    t_end: float = 300.0,
+    t_step: float = 10.0,
+    temperatures: Sequence[float] | None = None,
+    init_state: str = "ms_0",
+    output_root: str | Path = "runs",
+    run_name: str | None = None,
+    save_plots: bool = True,
+    show_plots: bool = False,
+    debug: bool = False,
+) -> dict[str, Any]:
+    """Pipeline body of :func:`run_full_pipeline` (DB logging already owned)."""
+
     LOGGER.info("Starting spinlabs pipeline run")
     # ── 1. Resolve order and method ──────────────────────────────────────────
     # ``--order`` is a filter: which orders to analyze / look for. It accepts

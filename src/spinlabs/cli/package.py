@@ -105,7 +105,7 @@ _GS_AUTO = Path("__auto__")  # --ground-state given without a path: auto-discove
 
 def _run(args: argparse.Namespace) -> None:
     configure_logging(
-        verbose=getattr(args, "verbose", False), quiet=getattr(args, "quiet", False)
+        verbosity=int(getattr(args, "verbose", 0)), quiet=getattr(args, "quiet", False)
     )
     attach_db_logging(ensure_db())
     if getattr(args, "register_only", None) is not None:

@@ -5,6 +5,8 @@ Each module in this package defines one CLI domain, e.g. plotting.
 
 import argparse
 
+from spinlabs.logging_utils import configure_logging
+
 
 def build_parser() -> argparse.ArgumentParser:
     from spinlabs.cli.package import build_package_parser
@@ -27,4 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # Configure console logging once at the entry point so every subcommand
+    # (including ones without their own flags, e.g. `plot`) gets sane levels.
+    verbosity = getattr(args, "verbosity", 0)
+    quiet = getattr(args, "quiet", False)
+    configure_logging(verbosity=verbosity, quiet=quiet)
     args.func(args)

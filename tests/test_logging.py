@@ -10,6 +10,8 @@ from spinlabs.logging_utils import configure_logging, get_logger
 from spinlabs.pipeline import run_full_pipeline
 from spinlabs.models import SpinPhononCouplingData, ZFSTensor
 
+logger = get_logger()
+
 
 @pytest.fixture
 def dummy_coupling_file(tmp_path):
@@ -63,26 +65,40 @@ def _capture_records():
     return Capture
 
 
-def test_configure_logging_default_is_warning():
-    logger = get_logger()
+def test_configure_logging_default_console_level_is_warning():
+    get_logger()
     configure_logging()
-    assert logger.level == logging.WARNING
+    # The logger itself stays at DEBUG so DB logging sees the full stream;
+    # the console handler carries the requested level.
+    from spinlabs.logging_utils import _stream_handler as sh
 
-
-def test_configure_logging_verbose_and_quiet():
-    logger = get_logger()
-    configure_logging(verbose=True)
+    assert sh is not None and sh in logger.handlers
     assert logger.level == logging.DEBUG
+    assert sh.level == logging.WARNING
+
+
+def test_configure_logging_verbosity_count_and_quiet():
+    import spinlabs.logging_utils as lu
+    get_logger()
+
+    configure_logging(verbosity=0)
+    assert lu._stream_handler.level == logging.WARNING
+    configure_logging(verbosity=1)
+    assert lu._stream_handler.level == logging.INFO
+    configure_logging(verbosity=2)
+    assert lu._stream_handler.level == logging.DEBUG
+    configure_logging(verbosity=5)  # extra -v caps at DEBUG
+    assert lu._stream_handler.level == logging.DEBUG
     configure_logging(quiet=True)
-    assert logger.level == logging.WARNING
-    assert logger.level == logging.WARNING
+    assert lu._stream_handler.level == logging.ERROR
 
 
 def test_configure_logging_does_not_stack_handlers():
-    logger = get_logger()
+    get_logger()
     configure_logging()
-    configure_logging(verbose=True)
-    assert len(logger.handlers) == 1
+    configure_logging(verbosity=2)
+    streams = [h for h in logger.handlers if type(h) is logging.StreamHandler]
+    assert len(streams) == 1
     assert logger.level == logging.DEBUG
 
 
@@ -98,8 +114,6 @@ def test_pipeline_uses_logging_not_print(tmp_path, dummy_coupling_file, capsys):
     Capture = _capture_records()()
     logger = logging.getLogger("spinlabs")
     logger.addHandler(Capture)
-    old_level = logger.level
-    logger.setLevel(logging.INFO)
     try:
         run_full_pipeline(
             coupling_file=str(dummy_coupling_file),
@@ -108,7 +122,6 @@ def test_pipeline_uses_logging_not_print(tmp_path, dummy_coupling_file, capsys):
         )
     finally:
         logger.removeHandler(Capture)
-        logger.setLevel(old_level)
 
     messages = [r.getMessage() for r in Capture.records if r.name.startswith("spinlabs")]
     assert messages, "expected pipeline log records"
@@ -124,9 +137,6 @@ def test_pipeline_logs_persist_to_registry(tmp_path, dummy_coupling_file, _isola
     import spinlabs.registry as reg
     from spinlabs.logging_utils import detach_db_logging
 
-    logger = logging.getLogger("spinlabs")
-    old_level = logger.level
-    logger.setLevel(logging.INFO)
     try:
         run_full_pipeline(
             coupling_file=str(dummy_coupling_file),
@@ -134,10 +144,118 @@ def test_pipeline_logs_persist_to_registry(tmp_path, dummy_coupling_file, _isola
             save_plots=False,
         )
     finally:
-        logger.setLevel(old_level)
         detach_db_logging()
 
     conn = sqlite3.connect(tmp_path / ".spinlabs" / "registry.db")
     rows = reg.list_run_logs(conn)
     assert any("Initialized run" in r["message"] for r in rows)
     assert any(r["level"] == "INFO" for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# New SPI-14 regressions: handler ownership, backfilling, level separation
+# ---------------------------------------------------------------------------
+
+
+def test_attach_db_logging_reuses_single_handler(_isolated_registry):
+    """Repeated attaches re-point the same handler instead of stacking copies."""
+    import spinlabs.registry as reg
+    from spinlabs.logging_utils import attach_db_logging, db_logging_attached, get_logger
+
+    conn = reg.ensure_db()
+    h1 = attach_db_logging(conn)
+    get_logger()
+    n_handlers = len(logger.handlers)
+    h2 = attach_db_logging(reg.ensure_db())
+    assert h1 is h2
+    assert len(logger.handlers) == n_handlers  # no duplicate handler
+    assert db_logging_attached()
+    from spinlabs.logging_utils import detach_db_logging
+
+    detach_db_logging()
+
+
+def test_db_logging_attached_reflects_state(_isolated_registry):
+    import spinlabs.registry as reg
+    from spinlabs.logging_utils import attach_db_logging, db_logging_attached, detach_db_logging
+
+    assert not db_logging_attached()
+    attach_db_logging(reg.ensure_db())
+    assert db_logging_attached()
+    detach_db_logging()
+    assert not db_logging_attached()
+
+
+def test_set_db_run_id_backfills_pending_records(tmp_path):
+    """Records logged before the run is registered get backfilled to run_id."""
+    import spinlabs.registry as reg
+    from spinlabs.logging_utils import attach_db_logging, detach_db_logging, get_logger, set_db_run_id
+
+    conn = reg.ensure_db()
+    attach_db_logging(conn)
+    get_logger()
+    logger.info("before registration")
+
+    run_id = reg.register_run(conn, run_dir=tmp_path / "demo", method="all_bands")
+    set_db_run_id(run_id)
+    logger.info("after registration")
+    detach_db_logging()
+
+    rows = reg.list_run_logs(conn)
+    by_msg = {r["message"]: r["run_id"] for r in rows}
+    assert by_msg["before registration"] == run_id  # backfilled
+    assert by_msg["after registration"] == run_id
+
+
+def test_set_db_run_id_does_not_touch_older_unattached_records(tmp_path):
+    """Unattached leftovers from a previous run in the same process stay NULL."""
+    import spinlabs.registry as reg
+    from spinlabs.logging_utils import attach_db_logging, detach_db_logging, set_db_run_id
+
+    conn = reg.ensure_db()
+    reg.insert_run_log(conn, "INFO", "other", "old run leftover", run_id=None)
+    baseline_before = reg.list_run_logs(conn)[-1]["id"]
+    # a run row must exist so run_id=42 is a plausible id, but the point is
+    # that the pre-existing NULL log row stays unattributed
+    reg.register_run(conn, run_dir=tmp_path, method="all_bands")
+
+    h = attach_db_logging(conn)
+    assert h._baseline >= baseline_before
+    logger = logging.getLogger("spinlabs")
+    logger.info("new run record")
+    set_db_run_id(42)
+    detach_db_logging()
+
+    rows = reg.list_run_logs(conn)
+    assert rows[0]["run_id"] is None  # old record untouched
+    assert any(r["message"] == "new run record" and r["run_id"] == 42 for r in rows)
+
+
+def test_set_db_run_id_safe_without_handler():
+    from spinlabs.logging_utils import set_db_run_id
+
+    set_db_run_id(None)  # must not raise when no DB handler is attached
+    set_db_run_id(1)
+
+
+def test_console_level_independent_of_db_capture(tmp_path):
+    """DEBUG records are captured to the DB even when the console shows WARNING."""
+    import spinlabs.logging_utils as lu
+    import spinlabs.registry as reg
+    from spinlabs.logging_utils import (
+        attach_db_logging,
+        configure_logging,
+        detach_db_logging,
+        get_logger,
+    )
+
+    configure_logging(verbosity=0)  # console: WARNING
+    assert lu._stream_handler is not None
+    assert lu._stream_handler.level == logging.WARNING
+    attach_db_logging(reg.ensure_db())
+    get_logger()
+    logger.debug("dbg-only message")
+    detach_db_logging()
+
+    rows = reg.list_run_logs(reg.ensure_db())
+    assert any(r["message"] == "dbg-only message" and r["level"] == "DEBUG" for r in rows)
