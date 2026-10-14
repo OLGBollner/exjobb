@@ -1,6 +1,7 @@
 """CLI subcommand for the end-to-end analysis pipeline."""
 
 import argparse
+from pathlib import Path
 
 from spinlabs.pipeline import run_full_pipeline
 
@@ -14,6 +15,11 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     inputs.add_argument("--raw-zfs-file-1d", metavar="FILE", help="Raw ZFS 1st-order .npz (combined 1d+2d mode)")
     inputs.add_argument("--raw-zfs-file-2d", metavar="FILE", help="Raw ZFS 2nd-order .npz (combined 1d+2d mode)")
     inputs.add_argument("--coupling-file", metavar="FILE", help="Path to pre-computed spin-phonon coupling .npz")
+    inputs.add_argument(
+        "--query",
+        action="store_true",
+        help="Run every packaged dataset in the registry matching the filters (--defect/--cell-size/--method/--order/--pert-scale); files already analyzed are skipped",
+    )
 
     opt = parser.add_argument_group("options")
     opt.add_argument("-ph", "--phonon-file", metavar="FILE", help="phonopy.yaml or phonon_data.npz")
@@ -48,6 +54,12 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
 
 
 _METHOD_MAP = {"all": ("all_bands", "ZFS_hyp"), "approx": ("defect_band_approx", "ZFS_occup")}
+
+
+def _infer_method_from_file(path: Path) -> str:
+    """Infer 'all' or 'approx' from a packaged filename (falls back to 'all')."""
+    name = path.name.lower()
+    return "approx" if ("approx" in name or "zfs_occup" in name) else "all"
 
 
 def _infer_method(args: argparse.Namespace) -> str:
@@ -86,6 +98,7 @@ def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
             [args.raw_zfs_file_1d, args.raw_zfs_file_2d] if (args.raw_zfs_file_1d or args.raw_zfs_file_2d) else None,
         ),
         ("--coupling-file", args.coupling_file),
+        ("--query", args.query),
     ]
     given = [name for name, val in modes if val]
     if not given:
@@ -98,6 +111,9 @@ def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
 
 def _run(args: argparse.Namespace) -> None:
     _validate(argparse.ArgumentParser(prog="spinlabs run"), args)
+    if args.query:
+        _run_query(args)
+        return
     run_full_pipeline(
         sim_folder=args.sim_folder[0] if args.sim_folder and len(args.sim_folder) == 1 else args.sim_folder,
         raw_zfs_file=args.raw_zfs_file[0] if args.raw_zfs_file and len(args.raw_zfs_file) == 1 else args.raw_zfs_file,
@@ -123,3 +139,31 @@ def _run(args: argparse.Namespace) -> None:
         show_plots=False,
         debug=args.debug,
     )
+
+
+def _run_query(args: argparse.Namespace) -> None:
+    """Resolve packaged data from the registry and run each dataset."""
+    from spinlabs.registry import ensure_db, find_packaged
+
+    conn = ensure_db()
+    files = find_packaged(
+        conn,
+        defect=args.defect,
+        cell_size=args.cell_size,
+        calc_method=args.method,
+        pert_scale=args.pert_scale,
+        pert_order=args.order,
+    )
+    if not files:
+        print("No unanalyzed packaged data matching the query.")
+        return
+    for path in files:
+        print(f"Running: {path}")
+        run_full_pipeline(
+            raw_zfs_file=str(path),
+            calc_method=_METHOD_MAP[_infer_method_from_file(Path(path))][0],
+            zfs_folder=_METHOD_MAP[_infer_method_from_file(Path(path))][1],
+            output_root=args.output_root if args.output_root else "runs",
+            debug=args.debug,
+        )
+    print(f"Done: {len(files)} dataset(s).")
