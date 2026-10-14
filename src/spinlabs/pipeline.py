@@ -10,6 +10,7 @@ import numpy as np
 
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
+from spinlabs.registry import ensure_db, find_phonon, finish_run, register_file, register_run
 from spinlabs.parsers import (
     parse_phonon_data,
     parse_zfs_dataset_npz,
@@ -184,6 +185,9 @@ def run_full_pipeline(
     coupling_data: SpinPhononCouplingData | None = None
 
     # ── 2. Ingest Input Data ─────────────────────────────────────────────────
+    spectrum = None
+    ph_path = None
+    _zfs_paths: list[Path] = []
     if coupling_file is not None:
         coupling_data = SpinPhononCouplingData.load(coupling_file)
         defect = coupling_data.defect or defect or "defect"
@@ -245,6 +249,23 @@ def run_full_pipeline(
         defect = raw_data.defect or defect or "defect"
         cell_size = raw_data.cell_size or cell_size or 0
 
+        # Registry fallback: resolve phonon by defect/cell when no file found next to the inputs
+        if spectrum is None:
+            reg = ensure_db()
+            reg_hits = find_phonon(reg, str(defect), cell_size)
+            if len(reg_hits) == 1:
+                ph_path = reg_hits[0]
+                spectrum = parse_phonon_data(ph_path)
+                print(f"  Registry: using phonon file {ph_path} for {defect}_{cell_size}")
+            elif len(reg_hits) > 1:
+                print(
+                    f"  Registry: {len(reg_hits)} phonon files match {defect}_{cell_size}; "
+                    "pass --phonon-file to pick one. First match used: "
+                    f"{reg_hits[0]}"
+                )
+                ph_path = reg_hits[0]
+                spectrum = parse_phonon_data(ph_path)
+
         # Resolve calc_method (avoid string "None")
         if calc_method in (None, "None", ""):
             if raw_data.calc_method not in (None, "None", ""):
@@ -266,6 +287,22 @@ def run_full_pipeline(
             order = 2
         elif raw_data is not None and len(raw_data.first_order) > 0:
             order = 1
+
+    # ── 2b. Registry: record input files so future lookups and queries work ──
+    reg = ensure_db()
+    if isinstance(raw_zfs_file, (list, tuple)):
+        _zfs_paths = [Path(p) for p in raw_zfs_file]
+    elif raw_zfs_file:
+        _zfs_paths = [Path(raw_zfs_file)]
+    _zfs_paths += [Path(p) for p in (raw_zfs_file_1d, raw_zfs_file_2d) if p]
+    for p in _zfs_paths:
+        register_file(reg, p, "raw_zfs", defect=str(defect), cell_size=cell_size, calc_method=calc_method)
+    if coupling_file is not None:
+        register_file(
+            reg, coupling_file, "coupling", defect=str(defect), cell_size=cell_size, calc_method=calc_method
+        )
+    if ph_path is not None and ph_path.exists():
+        register_file(reg, ph_path, "phonon", defect=str(defect), cell_size=cell_size)
 
     # ── 3. Create Unique Run Folder ──────────────────────────────────────────
     pert_eff = (
@@ -497,6 +534,19 @@ def run_full_pipeline(
     )
     print(f"      Indexed run in {index_path(output_root)}")
 
+    # ── 8c. Registry ─────────────────────────────────────────────────────────
+    reg = ensure_db()
+    run_id = register_run(
+        reg,
+        run_dir=run_dir,
+        zfs_files=[str(Path(p).resolve()) for p in _zfs_paths] if raw_data is not None else None,
+        phonon_file=ph_path if ph_path is not None else None,
+        method=calc_method,
+        init_state=init_state,
+    )
+    reg.commit()
+    print("      Registered run in ~/.spinlabs/registry.db")
+
     # ── 9. Optional Plotting ─────────────────────────────────────────────────
     figures_saved = []
     if save_plots:
@@ -577,6 +627,9 @@ def run_full_pipeline(
     print("  Run successfully completed!")
     print(f"  All results stored in: {run_dir}")
     print("========================================================\n")
+
+    finish_run(reg, run_id, "done")
+    reg.commit()
 
     return {
         "run_dir": run_dir,
