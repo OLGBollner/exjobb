@@ -15,6 +15,7 @@ from datetime import date
 from pathlib import Path
 from typing import NamedTuple
 
+from spinlabs.logging_utils import attach_db_logging, configure_logging
 from spinlabs.models import RawZFSData, _normalize_calc_method
 from spinlabs.registry import ensure_db, register_file
 from spinlabs.pack_convergence import pack_convergence
@@ -103,6 +104,10 @@ _GS_AUTO = Path("__auto__")  # --ground-state given without a path: auto-discove
 
 
 def _run(args: argparse.Namespace) -> None:
+    configure_logging(
+        verbose=getattr(args, "verbose", False), quiet=getattr(args, "quiet", False)
+    )
+    attach_db_logging(ensure_db())
     if getattr(args, "register_only", None) is not None:
         _register_only(args.register_only)
         return

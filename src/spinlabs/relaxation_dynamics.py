@@ -2,6 +2,9 @@ import numpy as np
 import scipy.constants as Cn
 from scipy.integrate import odeint
 from scipy.optimize import curve_fit
+from spinlabs.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class RelaxationDynamics:
@@ -21,7 +24,7 @@ class RelaxationDynamics:
 
         rate_matrices = []
 
-        print("Creating rate matrices...")
+        logger.info("Creating rate matrices...")
         for i, t in enumerate(data.get("temperatures")):
             A = [
                 [-data["1_to_0"][i] - data["1_to_-1"][i], data["0_to_1"][i], data["-1_to_1"][i]],

@@ -3,9 +3,10 @@
 import argparse
 from pathlib import Path
 
+from spinlabs.logging_utils import attach_db_logging, configure_logging
 from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
-from spinlabs.registry import parse_orders
+from spinlabs.registry import ensure_db, parse_orders
 
 
 def build_run_parser(parser: argparse.ArgumentParser) -> None:
@@ -63,6 +64,8 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     )
     opt.add_argument("--plot", action="store_true", help="Generate plots inside <run_dir>/figures/")
     opt.add_argument("-d", "--debug", action="store_true", help="Print debug details during derivative calculations")
+    opt.add_argument("-v", "--verbose", action="store_true", help="Enable info and debug logging output")
+    opt.add_argument("-q", "--quiet", action="store_true", help="Show only warnings and errors")
 
     parser.set_defaults(func=_run)
 
@@ -125,6 +128,8 @@ def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
 
 def _run(args: argparse.Namespace) -> None:
     _validate(argparse.ArgumentParser(prog="spinlabs run"), args)
+    configure_logging(verbose=args.verbose, quiet=args.quiet)
+    attach_db_logging(ensure_db())
     if args.query:
         _run_query(args)
         return

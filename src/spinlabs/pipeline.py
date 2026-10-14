@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from spinlabs.logging_utils import attach_db_logging, get_logger, set_db_run_id
+
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
 from spinlabs.registry import ensure_db, find_phonon, finish_run, parse_orders, register_file, register_run
@@ -24,6 +26,8 @@ from spinlabs.plotter import (
 from spinlabs.relaxation_dynamics import RelaxationDynamics
 from spinlabs.transition_rate import TransitionRate
 from spinlabs.zfs_manager import ZFSManager
+
+LOGGER = get_logger(__name__)
 
 
 def _pert_dir_name(pert_scale: float | None) -> str:
@@ -189,6 +193,10 @@ def run_full_pipeline(
       5. Save all results bunched together in a dedicated unique run folder
       6. (Optional) Generate and save publication-ready figures
     """
+    from spinlabs.registry import ensure_db as _ensure_db
+
+    attach_db_logging(_ensure_db())
+    LOGGER.info("Starting spinlabs pipeline run")
     # ── 1. Resolve order and method ──────────────────────────────────────────
     # ``--order`` is a filter: which orders to analyze / look for. It accepts
     # one or more integers (1, 2); the legacy scalar 12 means "both".
@@ -248,7 +256,7 @@ def run_full_pipeline(
         elif phonon_file is not None:
             raise FileNotFoundError(f"Phonon file not found: {phonon_file}")
         elif ph_path is not None and not ph_path.exists():
-            print(f"Warning: phonon file {ph_path} not found, running without phonon data.")
+            LOGGER.warning(f"Phonon file {ph_path} not found, running without phonon data.")
 
         # Load raw ZFS
         if sim_folder is not None:
@@ -299,9 +307,9 @@ def run_full_pipeline(
             if len(reg_hits) == 1:
                 ph_path = reg_hits[0]
                 spectrum = parse_phonon_data(ph_path)
-                print(f"  Registry: using phonon file {ph_path} for {defect}_{cell_size}")
+                LOGGER.info(f"  Registry: using phonon file {ph_path} for {defect}_{cell_size}")
             elif len(reg_hits) > 1:
-                print(
+                LOGGER.debug(
                     f"  Registry: {len(reg_hits)} phonon files match {defect}_{cell_size}; "
                     "pass --phonon-file to pick one. First match used: "
                     f"{reg_hits[0]}"
@@ -391,22 +399,22 @@ def run_full_pipeline(
         pert_scale=pert_eff,
         run_name=run_name,
     )
-    print("\n========================================================")
-    print(f"  Initialized run in: {run_dir}")
-    print(f"  Defect: {defect} | Cell: {cell_size} | Method: {calc_method} | Orders: {analyzed}")
-    print("========================================================\n")
+    LOGGER.info("=" * 56)
+    LOGGER.info(f"  Initialized run in: {run_dir}")
+    LOGGER.info(f"  Defect: {defect} | Cell: {cell_size} | Method: {calc_method} | Orders: {analyzed}")
+    LOGGER.info("=" * 56)
 
     # ── 4. Save Raw ZFS Data (if generated/loaded) ───────────────────────────
     raw_path = run_dir / "raw_zfs_data.npz"
     if raw_data is not None:
         raw_data.save(raw_path, spectrum=spectrum)
-        print(f"[1/5] Saved raw ZFS data -> {raw_path.name}")
+        LOGGER.info(f"[1/5] Saved raw ZFS data -> {raw_path.name}")
 
     # ── 5. Calculate Spin-Phonon Couplings ───────────────────────────────────
     coupling_path = run_dir / "spin_phonon_coupling.npz"
     if coupling_data is not None:
         coupling_data.save(coupling_path)
-        print(f"[2/5] Using provided coupling data -> {coupling_path.name}")
+        LOGGER.info(f"[2/5] Using provided coupling data -> {coupling_path.name}")
     else:
         manager = ZFSManager(raw_data=raw_data, spectrum=spectrum, debug=debug)
         if calc_method:
@@ -428,7 +436,7 @@ def run_full_pipeline(
         else:
             manager.process_first_order_perturbations(output_filename=out_base)
         coupling_data = SpinPhononCouplingData.load(coupling_path)
-        print(f"[2/5] Computed and saved spin-phonon coupling -> {coupling_path.name}")
+        LOGGER.info(f"[2/5] Computed and saved spin-phonon coupling -> {coupling_path.name}")
 
     # ── 6. Transition Rates Calculation ──────────────────────────────────────
     if temperatures is None:
@@ -472,7 +480,7 @@ def run_full_pipeline(
     }
     valid_temps = []
 
-    print(f"[3/5] Computing transition rates for {len(temps)} temperature points...")
+    LOGGER.info(f"[3/5] Computing transition rates for {len(temps)} temperature points...")
     for T in temps:
         calculator.compute_transition_rates(T, omega, J_0_pm, J_p_m, J_0_0, omega_zfs)
         if two_ph_p is not None or (coupling_data is not None and coupling_data.has_second_order):
@@ -513,8 +521,8 @@ def run_full_pipeline(
         temperatures=valid_temps_arr,
         **directional_results,
     )
-    print(f"      Saved transition rates -> {rates_path.name}")
-    print(f"      Saved directional rates -> {dir_rates_path.name}")
+    LOGGER.info(f"      Saved transition rates -> {rates_path.name}")
+    LOGGER.info(f"      Saved directional rates -> {dir_rates_path.name}")
 
     # ── 7. Population Relaxation Dynamics & T1 Times ─────────────────────────
     ms_mapping = {
@@ -524,7 +532,7 @@ def run_full_pipeline(
     }
     init_pop = ms_mapping.get(init_state, [0.0, 1.0, 0.0])
 
-    print(f"[4/5] Solving population relaxation dynamics (initial state: {init_state})...")
+    LOGGER.info(f"[4/5] Solving population relaxation dynamics (initial state: {init_state})...")
     dynamics = RelaxationDynamics(init_state=init_pop, rates_data=str(dir_rates_path))
 
     t1_fit_list = dynamics.compute_T1_range()
@@ -549,7 +557,7 @@ def run_full_pipeline(
         rates_fit=rates_fit,
         rates_eigenval=rates_eig,
     )
-    print(f"      Saved T1 relaxation -> {t1_path.name}")
+    LOGGER.info(f"      Saved T1 relaxation -> {t1_path.name}")
 
     # ── 8. Summary and Metadata ──────────────────────────────────────────────
     run_info = {
@@ -607,7 +615,8 @@ def run_full_pipeline(
         git_hash=_git_hash(),
     )
     reg.commit()
-    print("      Registered run in ~/.spinlabs/registry.db")
+    set_db_run_id(run_id)
+    LOGGER.info("      Registered run in ~/.spinlabs/registry.db")
 
     # Mark the run failed on any unhandled error so queries don't skip
     # files that were never fully analyzed.
@@ -617,7 +626,7 @@ def run_full_pipeline(
         if save_plots:
             fig_dir = run_dir / "figures"
             fig_dir.mkdir(exist_ok=True)
-            print(f"[5/5] Generating figures in {fig_dir.name}/ ...")
+            LOGGER.info(f"[5/5] Generating figures in {fig_dir.name}/ ...")
 
             # Coupling plots (1D and 2D diagonal)
             try:
@@ -669,7 +678,7 @@ def run_full_pipeline(
                     fig_c2.savefig(fc2_path, dpi=300)
                     figures_saved.append(fc2_path)
             except Exception as e:
-                print(f"Warning: could not generate coupling plot: {e}")
+                LOGGER.warning(f"Could not generate coupling plot: {e}")
 
             # Transition rate stacked plots
             try:
@@ -678,7 +687,7 @@ def run_full_pipeline(
                 figures_saved.append(fig_dir / "transition_rates_0_1.png")
                 figures_saved.append(fig_dir / "transition_rates_1_-1.png")
             except Exception as e:
-                print(f"Warning: could not generate rate plots: {e}")
+                LOGGER.warning(f"Could not generate rate plots: {e}")
 
             # T1 plot
             try:
@@ -686,12 +695,12 @@ def run_full_pipeline(
                 plot_t1([t1_path], output_path=ft1_path, plain_name=True)
                 figures_saved.append(ft1_path)
             except Exception as e:
-                print(f"Warning: could not generate T1 plot: {e}")
+                LOGGER.warning(f"Could not generate T1 plot: {e}")
 
-        print("\n========================================================")
-        print("  Run successfully completed!")
-        print(f"  All results stored in: {run_dir}")
-        print("========================================================\n")
+        LOGGER.info("=" * 56)
+        LOGGER.info("  Run successfully completed!")
+        LOGGER.info(f"  All results stored in: {run_dir}")
+        LOGGER.info("=" * 56)
 
         finish_run(reg, run_id, "done")
         reg.commit()
