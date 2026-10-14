@@ -167,7 +167,7 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
                 defect=defect,
                 cell_size=cell_size,
                 calc_method=calc_method,
-                pert_order=None if raw.combined_order == 2 else _ORDER_NUM[orders[0]],
+                pert_order=12 if raw.has_first_order and raw.has_second_order else _ORDER_NUM[orders[0]],
                 pert_scale=pert_scale,
             )
             append_data_row(
@@ -203,6 +203,7 @@ def _register_only(data_path: Path) -> None:
                 required = {f.name for f in RawZFSData.SCHEMA if not f.optional} | {
                     "defect",
                     "cell_size",
+                    "order",
                 }
                 if not required.issubset(keys):
                     warnings.warn(f"Not a packaged raw ZFS file, skipping: {npz_path.name}")
@@ -212,9 +213,7 @@ def _register_only(data_path: Path) -> None:
                 cell_size = int(data["cell_size"])
                 pert_scale = float(data["pert_scale"])
                 calc_method = _normalize_calc_method(str(data["calc_method"]))
-                order = int(data["order"]) if "order" in keys else None
-                if order == 12:  # combined 1d+2d: registered like normal package output
-                    order = None
+                order = int(data["order"])
         except Exception as exc:  # unreadable npz: report and move on
             warnings.warn(f"Could not read {npz_path.name}: {exc}")
             skipped += 1

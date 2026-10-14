@@ -342,10 +342,10 @@ def run_full_pipeline(
         out_base = str(run_dir / "spin_phonon_coupling")
         has_both = bool(manager.zfs_tensors_2d and manager.zfs_tensors)
 
-        if (order == 2 or user_order is None) and has_both:
+        if (order in (2, 12) or user_order is None) and has_both:
             # Combined 1d + 2d analysis: compute both and save in one file.
             manager.process_both_orders(output_filename=out_base)
-        elif order == 2 and manager.zfs_tensors_2d:
+        elif order in (2, 12) and manager.zfs_tensors_2d:
             manager.process_second_order_perturbations(output_filename=out_base)
         elif order == 1:
             manager.process_first_order_perturbations(output_filename=out_base)

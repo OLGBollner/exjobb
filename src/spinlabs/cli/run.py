@@ -30,7 +30,7 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
         help="Calculation method: 'all' for all_bands (ZFS_hyp), 'approx' for defect_band_approx (ZFS_occup). "
         "Inferred from the input file name when omitted.",
     )
-    opt.add_argument("--order", type=int, choices=[1, 2], help="Perturbation order (1 or 2)")
+    opt.add_argument("--order", type=int, choices=[1, 2, 12], help="Perturbation order (1, 2 or 12 for combined 1d+2d data)")
     opt.add_argument("--pert-scale", type=float, help="Override perturbation scale (e.g. 0.025)")
     opt.add_argument("--defect", help="Override defect name (e.g. NV, ClV)")
     opt.add_argument("--cell-size", type=int, help="Override supercell size (e.g. 64, 128)")

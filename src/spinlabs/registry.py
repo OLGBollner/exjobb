@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-REGISTRY_DIR = Path.home() / ".spinlabs"
+_env_dir = os.environ.get("SPINLABS_REGISTRY_DIR")
+REGISTRY_DIR = Path(_env_dir) if _env_dir else Path.home() / ".spinlabs"
 REGISTRY_PATH = REGISTRY_DIR / "registry.db"
 
 _SCHEMA = """
@@ -51,6 +53,12 @@ def ensure_db() -> sqlite3.Connection:
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(REGISTRY_PATH)
     conn.executescript(_SCHEMA)
+    # Old combined 1d+2d files were registered with pert_order=NULL; the unified
+    # convention is 12, and only combined files were ever NULL. Normalize once.
+    cur = conn.execute("SELECT COUNT(*) FROM files WHERE kind = 'packaged_zfs' AND pert_order IS NULL")
+    if cur.fetchone()[0]:
+        conn.execute("UPDATE files SET pert_order = 12 WHERE kind = 'packaged_zfs' AND pert_order IS NULL")
+        conn.commit()
     return conn
 
 
@@ -140,6 +148,45 @@ def finish_run(conn: sqlite3.Connection, run_id: int, status: str) -> None:
         "UPDATE runs SET status = ?, finished_at = ? WHERE id = ?", (status, _now(), run_id)
     )
     conn.commit()
+
+
+def find_packaged(
+    conn: sqlite3.Connection,
+    *,
+    defect: str | None = None,
+    cell_size: int | str | None = None,
+    calc_method: str | None = None,
+    pert_scale: float | None = None,
+    pert_order: int | None = None,
+    exclude_run: bool = True,
+) -> list[Path]:
+    """Packaged ZFS files matching the filters.
+
+    With ``exclude_run`` (default) files that already have a successful run
+    registered against them are skipped, so repeated query runs pick up only
+    new data.
+    """
+    sql = "SELECT path FROM files WHERE kind = 'packaged_zfs'"
+    params: list[object] = []
+    if defect is not None:
+        sql += " AND defect = ?"
+        params.append(defect)
+    if cell_size is not None:
+        sql += " AND cell_size = ?"
+        params.append(int(cell_size))
+    if calc_method is not None:
+        sql += " AND calc_method = ?"
+        params.append(calc_method)
+    if pert_scale is not None:
+        sql += " AND pert_scale = ?"
+        params.append(pert_scale)
+    if pert_order is not None:
+        sql += " AND pert_order = ?"
+        params.append(pert_order)
+    if exclude_run:
+        sql += " AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.status = 'done' AND runs.zfs_files LIKE '%' || files.path || '%')"
+    cur = conn.execute(sql, params)  # type: ignore[arg-type]
+    return [Path(p_) for (p_,) in cur.fetchall() if Path(p_).exists()]
 
 
 def find_phonon(

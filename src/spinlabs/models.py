@@ -1195,7 +1195,9 @@ class RawZFSData:
 
         # Effective order derived from which perturbation dicts are present
         eff_order = self.order
-        if eff_order is None or eff_order == 1:
+        if self.has_first_order and self.has_second_order:
+            eff_order = 12  # combined 1d+2d data: unified order marker everywhere
+        elif eff_order is None or eff_order == 1:
             if self.second_order:
                 eff_order = 2
             elif self.first_order:
