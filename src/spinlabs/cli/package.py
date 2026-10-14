@@ -155,10 +155,16 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
             for o in orders:
                 if pert_scale not in datasets[o]:
                     continue
+                if not any(datasets[o][pert_scale].rglob("OUTCAR")):
+                    warnings.warn(f"No OUTCARs in {datasets[o][pert_scale]}; skipping {o} order")
+                    continue
                 data = parse_zfs_simulation_dataset(
                     sim_folder=datasets[o][pert_scale], order=_ORDER_NUM[o], calc_method=method, verbose=True
                 )
                 raw = data if raw is None else raw.combine(data)
+            if raw is None:
+                warnings.warn(f"No data parsed for {defect_folder.name} ({calc_method}, pert {pert_scale:g}); skipping")
+                continue
             pert_folder = folder / f"pert_{pert_scale:g}"
             pert_folder.mkdir(parents=True, exist_ok=True)
             save_path = raw.save(pert_folder / raw._default_name())

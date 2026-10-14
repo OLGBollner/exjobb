@@ -57,7 +57,9 @@ def _make_args(tmp_path, orders="first,second", pert=None):
 def _tree(tmp_path, orders=("first", "second"), perts=(0.025,)):
     for o in orders:
         for p in perts:
-            (tmp_path / "NV_512" / f"{o}_order" / f"pert_{p:g}").mkdir(parents=True)
+            outcar = tmp_path / "NV_512" / f"{o}_order" / f"pert_{p:g}" / "defect_band_approx" / "OUTCAR"
+            outcar.parent.mkdir(parents=True, exist_ok=True)
+            outcar.touch()
 
 
 def _patch(side_effect=_raw):
@@ -192,7 +194,8 @@ def test_multiple_folders_and_methods(tmp_path, monkeypatch):
     db = _registry(monkeypatch, tmp_path)
     clv = tmp_path / "ClV_128"
     clv.mkdir()
-    (clv / "first_order" / "pert_0.025").mkdir(parents=True)
+    (clv / "first_order" / "pert_0.025" / "defect_band_approx").mkdir(parents=True)
+    (clv / "first_order" / "pert_0.025" / "defect_band_approx" / "OUTCAR").touch()
     args = _make_args(tmp_path)
     args.defect_folder = [tmp_path / "NV_512", clv]
     args.method = ["all", "approx"]
