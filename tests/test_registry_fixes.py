@@ -226,3 +226,122 @@ def test_order_2_without_second_order_raises(tmp_path):
             output_root=tmp_path / "runs",
             temperatures=[10.0],
         )
+
+
+def test_find_runs_order_matching(tmp_path):
+    """Regression (SPI-19): --order filtering must not silently drop every run.
+
+    ``order`` is a JSON list of the orders the run analyzed; the filter is a
+    subset match (a --order 1 query also finds a combined [1, 2] run).
+    """
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    d1 = tmp_path / "NV_512_pert_0.025_1"
+    d2 = tmp_path / "NV_512_pert_0.025_2"
+    registry.register_run(conn, run_dir=d1, defect="NV", cell=512, order=1,
+                          pert=0.025, method="all_bands",
+                          npz_files=["t1_relaxation.npz"])
+    registry.register_run(conn, run_dir=d2, defect="NV", cell=512, order=2,
+                          pert=0.025, method="all_bands",
+                          npz_files=["t1_relaxation.npz"])
+    conn.execute("UPDATE runs SET status='done'")
+    conn.commit()
+
+    assert [p.name for p in registry.find_runs(conn, [("order", "1")])] == [d1.name]
+    assert [p.name for p in registry.find_runs(conn, [("order", "2")])] == [d2.name]
+    assert registry.find_runs(conn, [("order", "12")]) == []
+    # A run registered with the combined order 12 must be found by --order 12.
+    d12 = tmp_path / "NV_512_pert_0.025_12"
+    registry.register_run(conn, run_dir=d12, defect="NV", cell=512, order=12,
+                          pert=0.025, method="all_bands",
+                          npz_files=["t1_relaxation.npz"])
+    conn.execute("UPDATE runs SET status='done' WHERE run_dir LIKE '%_12'")
+    conn.commit()
+    assert [p.name for p in registry.find_runs(conn, [("order", "12")])] == [d12.name]
+    # Subset semantics: --order 1 also finds the combined run.
+    assert d12.name in [p.name for p in registry.find_runs(conn, [("order", "1")])]
+    # A legacy CSV-style row (scalar orders rendered as '1+2') keeps matching
+    # via the migration fallback.
+    conn.execute(
+        'insert into runs (run_dir, status, defect, cell, "order", started_at)'
+        " values (?, 'done', 'NV-', 64, '1+2', datetime('now'))",
+        (str(tmp_path / "NV_64_pert_0.025"),),
+    )
+    conn.commit()
+    assert str(tmp_path / "NV_64_pert_0.025") in [
+        str(p) for p in registry.find_runs(conn, [("order", "12")])
+    ]
+
+
+def test_find_runs_latest_picks_most_recent(tmp_path):
+    """Regression (SPI-19): --latest must return the newest matching run.
+
+    started_at differs between the two runs (the common case), so the old
+    ``ORDER BY started_at, id DESC`` picked the OLDEST one. Also check the
+    started_at tie, broken by the higher (later-registered) id.
+    """
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    d1 = tmp_path / "NV_512_pert_0.025_1"
+    d2 = tmp_path / "NV_512_pert_0.025_2"
+    for d in (d1, d2):
+        registry.register_run(conn, run_dir=d, defect="NV", cell=512, order=1,
+                              pert=0.025, method="all_bands",
+                              npz_files=["t1_relaxation.npz"])
+    conn.execute("UPDATE runs SET status='done', started_at=datetime('now', '-1 day') WHERE id = 1")
+    conn.commit()
+
+    conn.execute("UPDATE runs SET status='done' WHERE id = 2")
+    conn.commit()
+
+    latest = registry.find_runs(conn, [("defect", "NV")], latest=True)
+    assert [p.name for p in latest] == [d2.name]
+
+    conn.execute("UPDATE runs SET started_at = datetime('now') WHERE id IN (1, 2)")
+    conn.commit()
+    conn.commit()
+    latest_tie = registry.find_runs(conn, [("defect", "NV")], latest=True)
+    assert [p.name for p in latest_tie] == [d2.name]
+
+
+def test_parse_orders_expands_legacy_and_rejects_unknown():
+    from spinlabs.registry import parse_orders
+
+    assert parse_orders(12) == [1, 2]
+    assert parse_orders([2, 1, 2]) == [1, 2]
+    assert parse_orders("1+2") == [1, 2]
+    with pytest.raises(ValueError, match="unknown perturbation order 3"):
+        parse_orders([3])
+
+
+def test_register_run_rejects_unknown_order(tmp_path):
+    """register_run must not store an order outside {1, 2}."""
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    with pytest.raises(ValueError, match="unknown perturbation order 3"):
+        registry.register_run(conn, run_dir=tmp_path / "r", order=[3])
+
+
+def test_find_runs_empty_order_filter_raises(tmp_path):
+    """An empty order filter must fail loudly, not silently match every run."""
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    with pytest.raises(SystemExit, match="empty --order"):
+        registry.find_runs(conn, [("order", [])])
+
+
+def test_find_runs_npz_files_matches_single_name(tmp_path):
+    """npz_files matches when any stored name equals the filter value."""
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    d = tmp_path / "NV_512_pert_0.025"
+    registry.register_run(conn, run_dir=d, npz_files=["a.npz", "b.npz"])
+    conn.execute("UPDATE runs SET status='done'")
+    conn.commit()
+    assert [p.name for p in registry.find_runs(conn, [("npz_files", "B.npz")])] == [d.name]
+    assert registry.find_runs(conn, [("npz_files", "a.npz+b.npz")]) == []

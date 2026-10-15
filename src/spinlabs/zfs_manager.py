@@ -8,10 +8,6 @@ import numpy as np
 from spinlabs.constants import CONSTANTS
 from spinlabs.symmetry import twin_of, _build_groups_from_labels
 from spinlabs.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, _normalize_calc_method
-from spinlabs.parsers import (
-    parse_zfs_simulation_dataset,
-    parse_zfs_dataset_npz,
-)
 from spinlabs.utils import MathUtils
 
 
@@ -336,29 +332,6 @@ class ZFSManager:
         vals = np.array(vals)
         return float(np.median(vals))
 
-    def load_outcar_zfs_data(self, **kwargs):
-        """
-        Loads ZFS data by delegating to parsers.
-        """
-        if kwargs.get("sim_folder") is not None and kwargs.get("calc_method") is not None:
-            sim_folder = kwargs["sim_folder"]
-            zfs_folder = kwargs.get("zfs_folder", "relaxed")
-            calc_method = kwargs["calc_method"]
-
-            raw_data = parse_zfs_simulation_dataset(sim_folder, zfs_folder=zfs_folder, calc_method=calc_method)
-            self._ingest_raw_data(raw_data)
-            return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation
-
-        elif kwargs.get("raw_data_path") is not None:
-            raw_paths = kwargs["raw_data_path"]
-            raw_data = parse_zfs_dataset_npz(raw_paths)
-            self._ingest_raw_data(raw_data)
-
-            print("Successfully loaded ZFS data via parser from .npz files")
-            return self.zfs_relaxed, self.zfs_tensors, self.zfs_tensors_2d, self.eigen_rotation
-        else:
-            print("Initialized empty ZFSManager.")
-
     def _get_symmetry_factor(self) -> set[int]:
         total_modes = self.nmodes
         n_1d = len(self.zfs_tensors)
@@ -580,24 +553,10 @@ class ZFSManager:
         return [save_path]
 
     def process_second_order_perturbations(
-        self, zfs_1d_derivs_file: Optional[str] = None, output_filename: Optional[str] = None
+        self, first_order: Optional[SpinPhononCouplingData] = None, output_filename: Optional[str] = None
     ) -> list[str]:
         if not self.zfs_tensors_2d:
             raise ValueError("Second order ZFS data not loaded.")
-
-        results = []
-        if not self.zfs_tensors and zfs_1d_derivs_file:
-            first_order_data = np.load(zfs_1d_derivs_file)
-            zfs_1d_derivs = first_order_data["zfs_derivs"]
-        else:
-            first_order_file = self.process_first_order_perturbations(output_filename=output_filename)[0]
-            results.append(first_order_file)
-            zfs_1d_derivs = np.load(first_order_file, allow_pickle=True)["zfs_derivs"]
-
-        zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd = self.calculate_second_order_derivatives(zfs_1d_derivs)
-
-        pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
-        phonon_pert = self.get_phonon_pert(pert_SI)
 
         save_name = (
             f"{output_filename}.npz"
@@ -605,20 +564,41 @@ class ZFSManager:
             else f"derivatives/{self.defect}_{self.cell_size}_zfs2d_coefficients_"
             f"{self.calc_method}_{self.pert_scale}_.npz"
         )
+
+        # Second-order couplings are built on the first-order derivatives, so with
+        # 1d tensors loaded this is the combined analysis: one file, V_* + V2_*.
+        if self.zfs_tensors:
+            return self.process_both_orders(output_filename=save_name[: -len(".npz")])
+        if first_order is None or first_order.zfs_derivs is None:
+            raise ValueError("First order ZFS data not loaded (need 1d perturbation set or first_order coupling data).")
+
+        if first_order.coupling_unit != "J" or first_order.derivs_unit != "J":
+            raise ValueError("first_order coupling data must be in J (coupling_unit and derivs_unit).")
+        zfs_1d_derivs = first_order.zfs_derivs
+        zfs_2nd_derivs, V2_0_0, V2_p_m, V2_0_pm = self.calculate_second_order_derivatives(zfs_1d_derivs)
+
+        pert_SI = self.pert_scale * CONSTANTS["ang_amu2SI"]
+        phonon_pert = self.get_phonon_pert(pert_SI)
+
+        # Keep the first-order couplings from first_order under V_*; the
+        # second-order ones go under V2_* so the two never share keys.
         save_path = self.save_data(
             save_name,
             second_order=True,
             zfs=1.5 * self.zfs_relaxed[2, 2],
-            zfs_derivs=zfs_2nd_derivs,
-            V_0_0=V_0_0_2nd,
-            V_p_m=V_p_m_2nd,
-            V_0_pm=V_0_pm_2nd,
+            zfs_derivs=zfs_1d_derivs,
+            V_0_0=first_order.V_0_0,
+            V_p_m=first_order.V_p_m,
+            V_0_pm=first_order.V_0_pm,
+            V2_0_0=V2_0_0,
+            V2_p_m=V2_p_m,
+            V2_0_pm=V2_0_pm,
+            zfs_2nd_derivs=zfs_2nd_derivs,
             freqs=phonon_pert["freqs"],
             sym=phonon_pert["sym"],
             ipr=phonon_pert["ipr"],
         )
-        results.append(save_path)
-        return results
+        return [save_path]
 
     def process_both_orders(
         self,

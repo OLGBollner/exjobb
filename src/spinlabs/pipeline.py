@@ -10,7 +10,7 @@ import numpy as np
 
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
-from spinlabs.registry import ensure_db, find_phonon, finish_run, register_file, register_run
+from spinlabs.registry import ensure_db, find_phonon, finish_run, parse_orders, register_file, register_run
 from spinlabs.parsers import (
     parse_phonon_data,
     parse_zfs_dataset_npz,
@@ -22,7 +22,6 @@ from spinlabs.plotter import (
     plot_transition_rates_stacked,
 )
 from spinlabs.relaxation_dynamics import RelaxationDynamics
-from spinlabs.runs_index import append_row, index_path
 from spinlabs.transition_rate import TransitionRate
 from spinlabs.zfs_manager import ZFSManager
 
@@ -32,6 +31,23 @@ def _pert_dir_name(pert_scale: float | None) -> str:
     if pert_scale is None:
         return "pert_none"
     return f"pert_{pert_scale:g}"
+
+
+def _git_hash() -> str | None:
+    """Short git hash of the spinlabs repo, or None outside a repo."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=Path(__file__).resolve().parent,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
 
 
 def get_unique_run_dir(
@@ -124,6 +140,20 @@ def find_default_phonon_file_for_raw(raw_zfs_file: str | Path | Sequence[str | P
     return None
 
 
+def _check_requested_orders(user_orders: Sequence[int], *, has_1d: bool | None, has_2d: bool) -> None:
+    """Raise when ``--order`` asks for an order the input data lacks.
+
+    ``has_1d=None`` means first-order presence is unknown and is not checked.
+    """
+    for req, present, label in ((1, has_1d, "first-order (1d)"), (2, has_2d, "second-order (2d)")):
+        if req in user_orders and present is False:
+            raise ValueError(
+                f"--order {req} requested, but the input dataset contains no "
+                f"{label} tensors. Rerun without --order {req} or with input that "
+                f"includes {label.split(' ')[0]} perturbation data."
+            )
+
+
 def run_full_pipeline(
     *,
     sim_folder: str | Path | Sequence[str | Path] | None = None,
@@ -135,7 +165,7 @@ def run_full_pipeline(
     two_phonon_file: str | Path | None = None,
     calc_method: str = "all_bands",
     zfs_folder: str | None = None,
-    order: int | None = None,
+    order: list[int] | int | None = None,
     pert_scale: float | None = None,
     defect: str | None = None,
     cell_size: int | None = None,
@@ -160,7 +190,11 @@ def run_full_pipeline(
       6. (Optional) Generate and save publication-ready figures
     """
     # ── 1. Resolve order and method ──────────────────────────────────────────
-    user_order = order  # preserve explicit caller / CLI override
+    # ``--order`` is a filter: which orders to analyze / look for. It accepts
+    # one or more integers (1, 2); the legacy scalar 12 means "both".
+    user_orders: list[int] | None = None
+    if order is not None:
+        user_orders = parse_orders(order) or None
     is_multi_sim = isinstance(sim_folder, (list, tuple)) and len(sim_folder) > 1
     combine_orders = (raw_zfs_file_1d is not None and raw_zfs_file_2d is not None) or is_multi_sim
     if combine_orders:
@@ -176,6 +210,10 @@ def run_full_pipeline(
             order = 2
         else:
             order = 1
+
+    if user_orders is not None and len(user_orders) == 1:
+        # A single explicitly requested order pins the parsing/branch scalar.
+        order = user_orders[0]
 
     if zfs_folder is None:
         zfs_folder = "ZFS_hyp" if calc_method == "all_bands" else "ZFS_occup"
@@ -193,6 +231,12 @@ def run_full_pipeline(
         cell_size = coupling_data.cell_size or cell_size or 0
         calc_method = coupling_data.calc_method or calc_method
         order = coupling_data.order or order
+        dims = [1, 2] if coupling_data.has_second_order else [1]
+        if user_orders is not None:
+            _check_requested_orders(user_orders, has_1d=None, has_2d=coupling_data.has_second_order)
+            analyzed = list(user_orders)
+        else:
+            analyzed = list(dims)
     else:
         # Load phonons
         sim_p = sim_folder[0] if isinstance(sim_folder, (list, tuple)) else sim_folder
@@ -275,19 +319,24 @@ def run_full_pipeline(
                         calc_method = "all_bands" if cm == "all_bands" else "defect_band_approx"
                         break
 
-        # Resolve order: explicit user request takes priority; otherwise inspect data
-        if user_order is not None:
+        # Orders actually present in the input data; ``dims`` is the single
+        # source of truth for what the data contains, ``order`` keeps the
+        # legacy scalar for parsing and branch selection below.
+        dims: list[int] = []
+        if raw_data is not None:
+            if len(raw_data.second_order) > 0:
+                dims.append(2)
+            if len(raw_data.first_order) > 0:
+                dims.append(1)
+        if user_orders is not None:
+            has_1d = bool(raw_data is not None and len(raw_data.first_order) > 0)
             has_2d = (raw_data is not None and len(raw_data.second_order) > 0) or (
                 coupling_data is not None and coupling_data.has_second_order
             )
-            if user_order in (2, 12) and not has_2d:
-                raise ValueError(
-                    f"--order {user_order} requested, but the input dataset contains no "
-                    "second-order (2d) tensors. Rerun without --order "
-                    f"{user_order} or with input that includes second-order perturbation "
-                    "data."
-                )
-            order = user_order
+            _check_requested_orders(user_orders, has_1d=has_1d if raw_data is not None else None, has_2d=has_2d)
+            # ``analyzed`` is what this run will actually compute and register:
+            # the user filter intersected with reality (validated above).
+            analyzed = list(user_orders)
         elif combine_orders or (raw_data is not None and len(raw_data.second_order) > 0):
             order = 2
         elif raw_data is not None and raw_data.order is not None and str(raw_data.order) != "None":
@@ -296,6 +345,13 @@ def run_full_pipeline(
             order = 2
         elif raw_data is not None and len(raw_data.first_order) > 0:
             order = 1
+        # No explicit filter: analyze everything the data contains.
+        if user_orders is None:
+            analyzed = (
+                list(dims)
+                if dims
+                else ([1, 2] if (coupling_data is not None and coupling_data.has_second_order) else [1])
+            )
 
     # ── 2b. Registry: record input files so future lookups and queries work ──
     reg = ensure_db()
@@ -337,7 +393,7 @@ def run_full_pipeline(
     )
     print("\n========================================================")
     print(f"  Initialized run in: {run_dir}")
-    print(f"  Defect: {defect} | Cell: {cell_size} | Method: {calc_method} | Order: {order}")
+    print(f"  Defect: {defect} | Cell: {cell_size} | Method: {calc_method} | Orders: {analyzed}")
     print("========================================================\n")
 
     # ── 4. Save Raw ZFS Data (if generated/loaded) ───────────────────────────
@@ -358,12 +414,14 @@ def run_full_pipeline(
         out_base = str(run_dir / "spin_phonon_coupling")
         has_both = bool(manager.zfs_tensors_2d and manager.zfs_tensors)
 
-        if (order in (2, 12) or user_order is None) and has_both:
+        # ``analyzed`` drives which analyses run: the user filter (or, when no
+        # filter was given, everything the data contains).
+        if 1 in analyzed and 2 in analyzed and has_both:
             # Combined 1d + 2d analysis: compute both and save in one file.
             manager.process_both_orders(output_filename=out_base)
-        elif order in (2, 12) and manager.zfs_tensors_2d:
+        elif 2 in analyzed and manager.zfs_tensors_2d:
             manager.process_second_order_perturbations(output_filename=out_base)
-        elif order == 1:
+        elif 1 in analyzed:
             manager.process_first_order_perturbations(output_filename=out_base)
         elif manager.zfs_tensors_2d:
             manager.process_second_order_perturbations(output_filename=out_base)
@@ -483,7 +541,7 @@ def run_full_pipeline(
         defect=defect,
         cell_size=cell_size,
         calc_method=calc_method,
-        order=order,
+        order=analyzed,
         init_state=init_state,
         temperatures=valid_temps_arr,
         t1_fit=t1_fit_arr,
@@ -498,7 +556,7 @@ def run_full_pipeline(
         "defect": defect,
         "cell_size": cell_size,
         "calc_method": calc_method,
-        "order": order,
+        "order": analyzed,
         "timestamp": datetime.now().isoformat(),
         "inputs": {
             "sim_folder": str(sim_folder) if sim_folder else None,
@@ -527,30 +585,9 @@ def run_full_pipeline(
     with open(info_path, "w") as f:
         json.dump(run_info, f, indent=2)
 
-    # ── 8b. Runs Index ────────────────────────────────────────────────────────
-    dims: list[int] = []
-    if raw_data is not None:
-        if len(raw_data.second_order) > 0:
-            dims.append(2)
-        if len(raw_data.first_order) > 0:
-            dims.append(1)
-    append_row(
-        output_root,
-        defect=str(defect),
-        cell=cell_size,
-        method=calc_method,
-        order=order,
-        pert=pert_eff,
-        n_dims=dims,
-        temp_min=float(np.min(valid_temps_arr)),
-        temp_max=float(np.max(valid_temps_arr)),
-        n_temps=len(valid_temps_arr),
-        npz_files=[p.name for p in sorted(run_dir.glob("*.npz"))],
-        run_dir=run_dir,
-    )
-    print(f"      Indexed run in {index_path(output_root)}")
-
-    # ── 8c. Registry ─────────────────────────────────────────────────────────
+    # ── 8b. Registry ──
+    # The runs table is the only index: one row per analysis run, carrying
+    # the metadata the old runs_index.csv used to hold.
     reg = ensure_db()
     run_id = register_run(
         reg,
@@ -559,6 +596,15 @@ def run_full_pipeline(
         phonon_file=ph_path if ph_path is not None else None,
         method=calc_method,
         init_state=init_state,
+        defect=str(defect),
+        cell=cell_size,
+        order=analyzed,
+        pert=pert_eff,
+        temp_min=float(np.min(valid_temps_arr)),
+        temp_max=float(np.max(valid_temps_arr)),
+        n_temps=len(valid_temps_arr),
+        npz_files=[p.name for p in sorted(run_dir.glob("*.npz"))],
+        git_hash=_git_hash(),
     )
     reg.commit()
     print("      Registered run in ~/.spinlabs/registry.db")

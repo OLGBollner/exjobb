@@ -5,6 +5,7 @@ from pathlib import Path
 
 from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
+from spinlabs.registry import parse_orders
 
 
 def build_run_parser(parser: argparse.ArgumentParser) -> None:
@@ -19,7 +20,9 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     inputs.add_argument(
         "--query",
         action="store_true",
-        help="Run every packaged dataset in the registry matching the filters (--defect/--cell-size/--method/--order/--pert-scale); files already analyzed are skipped",
+        help="Run every packaged dataset in the registry matching the filters "
+        "(--defect/--cell-size/--method/--order/--pert-scale); files already analyzed are skipped. "
+        "All other run options (temperatures, --init-state, --plot, ...) apply to each dataset",
     )
 
     opt = parser.add_argument_group("options")
@@ -31,7 +34,13 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
         help="Calculation method: 'all' for all_bands (ZFS_hyp), 'approx' for defect_band_approx (ZFS_occup). "
         "Inferred from the input file name when omitted.",
     )
-    opt.add_argument("--order", type=int, choices=[1, 2, 12], help="Perturbation order (1, 2 or 12 for combined 1d+2d data)")
+    opt.add_argument(
+        "--order",
+        nargs="+",
+        type=int,
+        choices=[1, 2, 12],
+        help="Perturbation order(s) to analyze, e.g. --order 1 2 (or 1 / 2; 12 is the legacy alias for 1 2)",
+    )
     opt.add_argument("--pert-scale", type=float, help="Override perturbation scale (e.g. 0.025)")
     opt.add_argument("--defect", help="Override defect name (e.g. NV, ClV)")
     opt.add_argument("--cell-size", type=int, help="Override supercell size (e.g. 64, 128)")
@@ -47,7 +56,11 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     opt.add_argument(
         "-o", "--output-root", default="runs", help="Root folder for output run directories (default: runs)"
     )
-    opt.add_argument("--run-name", help="Custom run folder name; an increment index is appended if it exists")
+    opt.add_argument(
+        "--run-name",
+        help="Custom run folder name; an increment index is appended if it exists. "
+        "With --query it is rejected when the query matches more than one dataset",
+    )
     opt.add_argument("--plot", action="store_true", help="Generate plots inside <run_dir>/figures/")
     opt.add_argument("-d", "--debug", action="store_true", help="Print debug details during derivative calculations")
 
@@ -125,7 +138,7 @@ def _run(args: argparse.Namespace) -> None:
         two_phonon_file=args.two_phonon,
         calc_method=_METHOD_MAP[_infer_method(args)][0],
         zfs_folder=_METHOD_MAP[_infer_method(args)][1],
-        order=args.order,
+        order=parse_orders(args.order) if args.order else None,
         pert_scale=args.pert_scale,
         defect=args.defect,
         cell_size=args.cell_size,
@@ -143,7 +156,16 @@ def _run(args: argparse.Namespace) -> None:
 
 
 def _run_query(args: argparse.Namespace) -> None:
-    """Resolve packaged data from the registry and run each dataset."""
+    """
+    Resolve packaged data from the registry and run each dataset.
+
+    Every option accepted by ``run`` is forwarded to the pipeline exactly as in the
+    non-query path, so ``--query`` never silently computes something other than what
+    was asked for. ``--defect``/``--cell-size``/``--method``/``--order``/``--pert-scale``
+    do double duty: they filter the registry *and* are passed through to the run.
+    ``--phonon-file`` is optional here -- when omitted the pipeline resolves the phonon
+    from the registry; when given it takes precedence, as it does for any other input mode.
+    """
     from spinlabs.registry import ensure_db, find_packaged
 
     conn = ensure_db()
@@ -153,7 +175,7 @@ def _run_query(args: argparse.Namespace) -> None:
         cell_size=args.cell_size,
         calc_method=_normalize_calc_method(args.method),
         pert_scale=args.pert_scale,
-        pert_order=args.order,
+        pert_order=parse_orders(args.order) if args.order else None,
     )
     if not files:
         print("No unanalyzed packaged data matching the query.")
@@ -161,7 +183,7 @@ def _run_query(args: argparse.Namespace) -> None:
     # With multiple matched datasets, disambiguate the run-name so each
     # dataset lands in its own <run_name>_<stem> directory instead of
     # silently sharing/creating duplicate <run_name>_1, _2, ... folders.
-    for i, path in enumerate(files):
+    for path in files:
         print(f"Running: {path}")
         method = _infer_method_from_file(Path(path))
         if args.run_name and len(files) > 1:
@@ -170,19 +192,23 @@ def _run_query(args: argparse.Namespace) -> None:
             run_name = args.run_name
         run_full_pipeline(
             raw_zfs_file=str(path),
+            phonon_file=args.phonon_file,
+            two_phonon_file=args.two_phonon,
             calc_method=_METHOD_MAP[method][0],
             zfs_folder=_METHOD_MAP[method][1],
-            order=args.order,
+            order=parse_orders(args.order) if args.order else None,
             pert_scale=args.pert_scale,
+            defect=args.defect,
+            cell_size=args.cell_size,
             t_start=args.t_start,
             t_end=args.t_end,
             t_step=args.t_step,
             temperatures=args.temperatures,
             init_state=args.init_state,
-            two_phonon_file=args.two_phonon,
+            output_root=args.output_root if args.output_root else "runs",
             run_name=run_name,
             save_plots=args.plot,
-            output_root=args.output_root if args.output_root else "runs",
+            show_plots=False,
             debug=args.debug,
         )
     print(f"Done: {len(files)} dataset(s).")

@@ -7,6 +7,7 @@ so there is nothing to set up by hand.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 import hashlib
 import json
 import os
@@ -17,6 +18,42 @@ from pathlib import Path
 _env_dir = os.environ.get("SPINLABS_REGISTRY_DIR")
 REGISTRY_DIR = Path(_env_dir) if _env_dir else Path.home() / ".spinlabs"
 REGISTRY_PATH = REGISTRY_DIR / "registry.db"
+
+def parse_orders(value: object) -> list[int]:
+    """Perturbation orders named by ``value``, as a sorted list.
+
+    Accepts a list of ints, a single int, or a string ('1', '1 2', '1,2', '1+2').
+    The legacy scalar 12 means both orders. Anything other than 1, 2 or 12
+    raises ValueError. This is the one place the 12 convention is expanded.
+    """
+    if isinstance(value, (list, tuple)):
+        values = list(value)
+    elif isinstance(value, int):
+        values = [value]
+    else:
+        values = [v for v in str(value).replace(",", "+").replace(" ", "+").split("+") if v.strip()]
+    out: set[int] = set()
+    for v in values:
+        n = int(v)
+        if n == 12:
+            out.update((1, 2))
+        elif n in (1, 2):
+            out.add(n)
+        else:
+            raise ValueError(f"unknown perturbation order {n}")
+    return sorted(out)
+
+
+def _normalize_orders(value: object) -> str | None:
+    """Normalize a perturbation order value to a JSON list string, e.g. '[1, 2]'.
+
+    ``None`` and an empty selection are stored as NULL.
+    """
+    if value is None:
+        return None
+    orders = parse_orders(value)
+    return json.dumps(orders) if orders else None
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
@@ -41,7 +78,16 @@ CREATE TABLE IF NOT EXISTS runs (
     phonon_file TEXT,
     method TEXT,
     init_state TEXT,
-    command TEXT
+    command TEXT,
+    defect TEXT,
+    cell INTEGER,
+    "order" TEXT,                             -- JSON list of orders present in the data, e.g. '[1, 2]'
+    pert REAL,
+    temp_min REAL,
+    temp_max REAL,
+    n_temps INTEGER,
+    npz_files TEXT,                           -- JSON list of npz names
+    git_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_defect ON files(defect, cell_size, calc_method);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
@@ -64,6 +110,50 @@ def ensure_db() -> sqlite3.Connection:
             "UPDATE files SET pert_order = '[1, 2]' WHERE kind = 'packaged_zfs' AND (pert_order IS NULL OR pert_order = '12')",
         )
         conn.commit()
+    # Migration: registrys created before the runs table grew the analysis-
+    # index columns (replacing runs_index.csv) need the columns added.
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    for column in (
+        "defect", "cell", '"order"', "pert",
+        "temp_min", "temp_max", "n_temps", "npz_files", "git_hash",
+    ):
+        if column.strip('"') not in existing:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {column}")
+    # Migration: ``order`` used to be a scalar int (1, 2 or 12) and ``n_dims``
+    # carried the actual data content as a JSON list. The two described the
+    # same thing; they are consolidated into one list column. Old scalar
+    # values become lists (12 -> '[1, 2]'), NULLs are backfilled from
+    # ``n_dims``, and ``n_dims`` is dropped.
+    if "n_dims" in existing:
+        for run_id, order_val, n_dims_val in conn.execute(
+            'SELECT id, "order", n_dims FROM runs'
+        ):
+            if isinstance(order_val, int):
+                orders = [1, 2] if order_val == 12 else [order_val]
+            elif isinstance(order_val, str):
+                try:
+                    parsed = json.loads(order_val)
+                except (TypeError, json.JSONDecodeError):
+                    parsed = None
+                orders = parsed if isinstance(parsed, list) else None
+            else:
+                orders = None
+            if orders is None and isinstance(n_dims_val, str):
+                try:
+                    parsed = json.loads(n_dims_val)
+                except (TypeError, json.JSONDecodeError):
+                    parsed = None
+                orders = parsed if isinstance(parsed, list) else None
+            if orders is not None:
+                orders = sorted(set(int(o) for o in orders if o in (1, 2)))
+                conn.execute(
+                    'UPDATE runs SET "order" = ? WHERE id = ?',
+                    (json.dumps(orders) if orders else None, run_id),
+                )
+        # DROP COLUMN needs SQLite >= 3.35 (2021-03); older libraries raise
+        # OperationalError here.
+        conn.execute('ALTER TABLE runs DROP COLUMN n_dims')
+    conn.commit()
     return conn
 
 
@@ -77,16 +167,6 @@ def sha256_of(path: str | Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def _normalize_orders(value: list[int] | int | None) -> str | None:
-    """Normalize a perturbation order value to a JSON list string, e.g. '[1, 2]'."""
-    if value is None:
-        return None
-    if value == 12:  # legacy combined marker
-        return json.dumps([1, 2])
-    orders = sorted(set(value if isinstance(value, (list, tuple)) else [value]))
-    return json.dumps(orders)
 
 
 def register_file(
@@ -141,11 +221,29 @@ def register_run(
     method: str | None = None,
     init_state: str | None = None,
     command: str | None = None,
+    defect: str | None = None,
+    cell: int | None = None,
+    order: list[int] | int | None = None,
+    pert: float | None = None,
+    temp_min: float | None = None,
+    temp_max: float | None = None,
+    n_temps: int | None = None,
+    npz_files: Sequence[str | Path] = (),
+    git_hash: str | None = None,
 ) -> int:
-    """Start a run row; returns its id for :func:`finish_run`."""
-    cur = conn.execute(
-        """INSERT INTO runs (run_dir, started_at, status, zfs_files, phonon_file, method, init_state, command)
-           VALUES (?, ?, 'running', ?, ?, ?, ?, ?)""",
+    """Start a run row; returns its id for :func:`finish_run`.
+
+    The analysis metadata (defect, cell, order, pert, temperatures, outputs)
+    replaces what used to be appended to ``runs_index.csv``; it makes the
+    ``runs`` table the single source of truth for analysis runs.
+
+    ``order`` is the perturbation orders actually present in the analyzed
+    data, normalized to a JSON list (e.g. ``[1, 2]`` for combined data).
+    """
+    conn.execute(
+        """INSERT INTO runs (run_dir, started_at, status, zfs_files, phonon_file, method, init_state, command,
+                            defect, cell, "order", pert, temp_min, temp_max, n_temps, npz_files, git_hash)
+           VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             str(Path(run_dir).resolve()) if run_dir else None,
             _now(),
@@ -154,10 +252,19 @@ def register_run(
             method,
             init_state,
             command,
+            defect,
+            cell,
+            _normalize_orders(order),
+            pert,
+            temp_min,
+            temp_max,
+            n_temps,
+            json.dumps([Path(p).name for p in npz_files]) if npz_files else None,
+            git_hash,
         ),
     )
     conn.commit()
-    return int(cur.lastrowid)
+    return int(conn.execute("SELECT id FROM runs ORDER BY id DESC LIMIT 1").fetchone()[0])
 
 
 def finish_run(conn: sqlite3.Connection, run_id: int, status: str) -> None:
@@ -200,7 +307,7 @@ def find_packaged(
         sql += " AND pert_scale = ?"
         params.append(pert_scale)
     if pert_order is not None:
-        wanted = set(json.loads(_normalize_orders(pert_order)))
+        wanted = set(parse_orders(pert_order))
     if exclude_run:
         sql += """ AND NOT EXISTS (
             SELECT 1 FROM runs, json_each(COALESCE(runs.zfs_files, '[]')) AS j
@@ -219,6 +326,122 @@ def find_packaged(
                 continue
         if Path(p_).exists():
             results.append(Path(p_))
+    return results
+
+
+def find_runs(
+    conn: sqlite3.Connection,
+    filters: Iterable[tuple[str, str]] = (),
+    *,
+    latest: bool = False,
+    output_root: str | Path | None = None,
+) -> list[Path]:
+    """Run directories of completed runs matching ``filters``.
+
+    Replaces ``runs_index.csv``: the ``runs`` table is the index. Filter
+    fields are the ``runs`` table columns (``defect``, ``cell``, ``order``,
+    ``pert``, ``temp_min``, ``temp_max``, ``n_temps``,
+    ``npz_files``, ``method``, ``init_state``, ``git_hash``, ``run_dir``,
+    plus ``timestamp`` as an alias for ``started_at``); unknown fields raise
+    SystemExit so typos fail loudly. Values match like the old CSV index:
+    exact and case-insensitive, with numeric fields compared numerically and
+    list fields (``npz_files`` per name) matching any element. ``order`` is a
+    JSON list of the orders present in the data (e.g. ``'[1, 2]'``); a filter
+    matches when every requested order is present (``--order 1`` matches
+    ``[1]`` and ``[1, 2]`` runs, ``--order 1 2`` matches only combined runs).
+
+    With ``latest`` only the most recent matching run (by ``started_at``) is
+    returned. Directories stored from another host are resolved against
+    ``output_root`` by name when the stored path does not exist.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    numeric = {"cell", "pert", "temp_min", "temp_max", "n_temps"}
+    list_like = {"npz_files"}
+    sql = "SELECT run_dir FROM runs WHERE status = 'done'"
+    params: list[object] = []
+    for field, value in filters:
+        column = "started_at" if field == "timestamp" else field
+        if column not in columns | {"timestamp"}:
+            raise SystemExit(
+                f"error: unknown run filter '{field}'; valid fields: "
+                + ", ".join(sorted(columns | {"timestamp"}))
+            )
+        if column in list_like:
+            # Matches when any stored element equals the value (case-insensitive).
+            wanted = str(value).strip().lower()
+            keep = []
+            for (raw,) in conn.execute(
+                f'SELECT DISTINCT "{column}" FROM runs WHERE status = \'done\''
+            ):
+                try:
+                    items = json.loads(raw) if isinstance(raw, str) else raw
+                except (TypeError, json.JSONDecodeError):
+                    items = []
+                if not isinstance(items, list):
+                    items = [items]
+                if wanted in [str(i).lower() for i in items]:
+                    keep.append(raw)
+            if not keep:
+                sql += " AND 0"  # nothing matches this filter
+            else:
+                placeholders = ", ".join("?" * len(keep))
+                sql += f' AND "{column}" IN ({placeholders})'
+                params.extend(keep)
+            continue
+        if column == "order":
+            # Subset semantics: every requested order must be present in the
+            # run's data, mirroring find_packaged(pert_order=...).
+            try:
+                wanted_orders = parse_orders(value)
+            except (TypeError, ValueError) as exc:
+                raise SystemExit(f"error: invalid --order value {value!r}: {exc}")
+            if not wanted_orders:
+                raise SystemExit("error: empty --order filter; give at least one of 1, 2")
+            keep = []
+            for (raw,) in conn.execute(
+                f'SELECT DISTINCT "{column}" FROM runs WHERE status = \'done\''
+            ):
+                try:
+                    have = set(json.loads(raw)) if isinstance(raw, str) else set()
+                except (TypeError, json.JSONDecodeError):
+                    # Legacy scalar convention: 1, 2, 12 or '1+2'.
+                    text = str(raw).replace("+", " ")
+                    have = {int(v) for v in text.split() if v.strip().isdigit() and int(v) in (1, 2)}
+                if set(wanted_orders).issubset(have):
+                    keep.append(raw)
+            if not keep:
+                sql += " AND 0"
+            else:
+                placeholders = ", ".join("?" * len(keep))
+                sql += f' AND "{column}" IN ({placeholders})'
+                params.extend(keep)
+            continue
+        sql += f' AND "{column}" = ?'
+        if column in numeric:
+            try:
+                number = float(value)
+                if number.is_integer() and column in ("cell", "n_temps"):
+                    number = int(number)
+                value = number
+            except ValueError:
+                pass
+        params.append(value)
+    if latest:
+        # Newest run first; ties broken by the higher (later-registered) id.
+        sql += " ORDER BY started_at DESC, id DESC LIMIT 1"
+    else:
+        sql += " ORDER BY started_at, id"
+    results: list[Path] = []
+    root = Path(output_root).resolve() if output_root else None
+    for (run_dir,) in conn.execute(sql, params):
+        if not run_dir:
+            continue
+        path = Path(run_dir)
+        if not path.exists() and root is not None:
+            candidate = root / path.name
+            if candidate.exists():
+                path = candidate
+        results.append(path)
     return results
 
 

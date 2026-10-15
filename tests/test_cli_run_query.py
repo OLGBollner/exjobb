@@ -76,6 +76,7 @@ def _query_args(tmp_path, out_root, run_name="spi17"):
         run_name=run_name,
         plot=False,
         two_phonon=None,
+        phonon_file=None,
         output_root=str(out_root),
         debug=False,
     )
