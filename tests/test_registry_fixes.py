@@ -226,3 +226,80 @@ def test_order_2_without_second_order_raises(tmp_path):
             output_root=tmp_path / "runs",
             temperatures=[10.0],
         )
+
+
+def test_find_runs_order_scalar_matches(tmp_path):
+    """Regression (SPI-19): --order filtering must not silently drop every run.
+
+    register_run stores ``order`` as a scalar int (1, 2 or 12), not a JSON
+    list; the list matcher must still match it (and keep matching rows whose
+    column holds a JSON list, as written by other callers).
+    """
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    d1 = tmp_path / "NV_512_pert_0.025_1"
+    d2 = tmp_path / "NV_512_pert_0.025_2"
+    registry.register_run(conn, run_dir=d1, defect="NV", cell=512, order=1,
+                          pert=0.025, method="all_bands", n_dims=[1, 2],
+                          npz_files=["t1_relaxation.npz"])
+    registry.register_run(conn, run_dir=d2, defect="NV", cell=512, order=2,
+                          pert=0.025, method="all_bands", n_dims=[1, 2],
+                          npz_files=["t1_relaxation.npz"])
+    conn.execute("UPDATE runs SET status='done'")
+    conn.commit()
+
+    first = registry.find_runs(conn, [("order", "1")])
+    assert [p.name for p in first] == [d1.name]
+    second = registry.find_runs(conn, [("order", "2")])
+    assert [p.name for p in second] == [d2.name]
+    combined = registry.find_runs(conn, [("order", "12")])
+    assert combined == []
+    # A run registered with the combined order 12 must be found by --order 12.
+    d12 = tmp_path / "NV_512_pert_0.025_12"
+    registry.register_run(conn, run_dir=d12, defect="NV", cell=512, order=12,
+                          pert=0.025, method="all_bands", n_dims=[1, 2],
+                          npz_files=["t1_relaxation.npz"])
+    conn.execute("UPDATE runs SET status='done' WHERE run_dir LIKE '%_12'")
+    conn.commit()
+    assert [p.name for p in registry.find_runs(conn, [("order", "12")])] == [d12.name]
+
+    # A row holding a JSON list (fixture style) must keep matching too.
+    conn.execute(
+        'insert into runs (run_dir, status, defect, cell, "order", n_dims, started_at)'
+        " values (?, 'done', 'NV-', 64, '[1, 2]', '1+2', datetime('now'))",
+        (str(tmp_path / "NV_64_pert_0.025"),),
+    )
+    conn.commit()
+
+
+def test_find_runs_latest_picks_most_recent(tmp_path):
+    """Regression (SPI-19): --latest must return the newest matching run.
+
+    started_at differs between the two runs (the common case), so the old
+    ``ORDER BY started_at, id DESC`` picked the OLDEST one. Also check the
+    started_at tie, broken by the higher (later-registered) id.
+    """
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    d1 = tmp_path / "NV_512_pert_0.025_1"
+    d2 = tmp_path / "NV_512_pert_0.025_2"
+    for d in (d1, d2):
+        registry.register_run(conn, run_dir=d, defect="NV", cell=512, order=1,
+                              pert=0.025, method="all_bands",
+                              npz_files=["t1_relaxation.npz"])
+    conn.execute("UPDATE runs SET status='done', started_at=datetime('now', '-1 day') WHERE id = 1")
+    conn.commit()
+
+    conn.execute("UPDATE runs SET status='done' WHERE id = 2")
+    conn.commit()
+
+    latest = registry.find_runs(conn, [("defect", "NV")], latest=True)
+    assert [p.name for p in latest] == [d2.name]
+
+    conn.execute("UPDATE runs SET started_at = datetime('now') WHERE id IN (1, 2)")
+    conn.commit()
+    conn.commit()
+    latest_tie = registry.find_runs(conn, [("defect", "NV")], latest=True)
+    assert [p.name for p in latest_tie] == [d2.name]

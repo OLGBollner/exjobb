@@ -293,10 +293,11 @@ def find_runs(
     ``output_root`` by name when the stored path does not exist.
     """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
-    numeric = {"cell", "pert", "temp_min", "temp_max", "n_temps"}
-    # 'order' is an SQL reserved word AND stored as a JSON list string, so it
-    # is matched as a list field like n_dims/npz_files.
-    list_like = {"n_dims", "npz_files", "order"}
+    # 'order' is an SQL reserved word but is stored as a plain integer
+    # (1, 2 or 12 — set by register_run), so it matches numerically like
+    # cell/n_temps, not as a list field.
+    numeric = {"cell", "order", "pert", "temp_min", "temp_max", "n_temps"}
+    list_like = {"n_dims", "npz_files"}
     sql = "SELECT run_dir FROM runs WHERE status = 'done'"
     params: list[object] = []
     for field, value in filters:
@@ -308,20 +309,18 @@ def find_runs(
             )
         if column in list_like:
             # Match like the CSV did: n_dims as '1+2', npz_files per name.
-            # Match like the CSV did: n_dims/order as '1+2', npz_files per name.
             wanted = str(value).strip().lower()
             keep = []
             for (raw,) in conn.execute(
                 f'SELECT DISTINCT "{column}" FROM runs WHERE status = \'done\''
             ):
                 try:
-                    items = json.loads(raw) if raw else []
+                    items = json.loads(raw) if isinstance(raw, str) else raw
                 except (TypeError, json.JSONDecodeError):
                     items = []
-                if column in ("n_dims", "order"):
-                    text = "+".join(str(i) for i in items)
-                else:
-                    text = "".join(str(i) for i in items)
+                if not isinstance(items, list):
+                    items = [items]
+                text = "+".join(str(i) for i in items)
                 if text.lower() == wanted or wanted in [str(i).lower() for i in items]:
                     keep.append(raw)
             if not keep:
@@ -341,9 +340,11 @@ def find_runs(
             except ValueError:
                 pass
         params.append(value)
-    sql += " ORDER BY started_at, id"
     if latest:
-        sql += " DESC LIMIT 1"
+        # Newest run first; ties broken by the higher (later-registered) id.
+        sql += " ORDER BY started_at DESC, id DESC LIMIT 1"
+    else:
+        sql += " ORDER BY started_at, id"
     results: list[Path] = []
     root = Path(output_root).resolve() if output_root else None
     for (run_dir,) in conn.execute(sql, params):
