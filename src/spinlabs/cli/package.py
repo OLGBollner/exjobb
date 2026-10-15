@@ -1,4 +1,9 @@
-"""CLI command for scanning/packaging raw ZFS simulation data into a single .npz."""
+"""CLI command for packaging raw ZFS simulation data into .npz files.
+
+The raw folders are scanned first and the available data is printed; the
+user then confirms before anything is written (skip with --yes, or stop after
+the listing with --scan).
+"""
 
 import argparse
 import re
@@ -8,8 +13,9 @@ import warnings
 import numpy as np
 from datetime import date
 from pathlib import Path
+from typing import NamedTuple
 
-from spinlabs.models import _normalize_calc_method
+from spinlabs.models import RawZFSData, _normalize_calc_method
 from spinlabs.registry import ensure_db, register_file
 from spinlabs.pack_convergence import pack_convergence
 from spinlabs.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
@@ -79,7 +85,13 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--scan",
         action="store_true",
-        help="Parse the simulation folders and report what was found, without writing or registering any .npz.",
+        help="Only scan: parse the simulation folders and print the available data, without asking to save.",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Save the scanned data without asking for confirmation (for non-interactive use).",
     )
 
     parser.set_defaults(func=_run)
@@ -108,12 +120,40 @@ def _run(args: argparse.Namespace) -> None:
         _run_conv(args, defect_folders[0])
         return
 
-    methods = args.method
+    scanned: list[_Scanned] = []
     for defect_folder in defect_folders:
-        _run_raw(args, defect_folder, methods)
+        scanned.extend(_scan_raw(args, defect_folder, args.method))
+    _print_scan_summary(scanned)
+    if args.scan or not scanned:
+        return
+    if not getattr(args, "yes", False) and not _confirm("Save the perturbation data to file? (Y/n): "):
+        print("Nothing saved.")
+        return
+    _save_raw(scanned, args.output_root)
 
 
-def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) -> None:
+class _Scanned(NamedTuple):
+    """One parsed perturbation scale, ready to be saved."""
+
+    defect: str
+    cell_size: int
+    calc_method: str
+    pert_scale: float
+    raw: RawZFSData
+
+
+def _confirm(prompt: str) -> bool:
+    """Ask a yes/no question; Enter means yes, EOF (no terminal) means no."""
+    try:
+        answer = input(prompt).strip().lower()
+    except EOFError:
+        print()
+        return False
+    return answer in ("", "y", "yes")
+
+
+def _scan_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) -> list[_Scanned]:
+    """Parse every requested order/method/pert under one defect folder."""
     orders = [o.strip().lower() for o in args.orders.split(",") if o.strip()]
     unknown = [o for o in orders if o not in _ORDER_DIRS]
     if unknown:
@@ -124,7 +164,6 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
         raise SystemExit(f"Cell size not found in defect folder name: {defect_folder.name} (expected e.g. NV_512)")
 
     print(f"Defect folder: {defect_folder}")
-    date_dir = date.today().strftime("%Y%m%d")
 
     def _collect(order: str) -> dict[float, Path]:
         """Map pert_scale -> pert folder for one order, filtered to the requested scales."""
@@ -140,13 +179,9 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
             perts[pert_scale] = pert_dir
         return perts
 
+    found: list[_Scanned] = []
     for method in methods:
         calc_method = _normalize_calc_method(method)
-
-        if not args.scan:
-            folder = args.output_root / f"{defect}_{cell_size}" / calc_method / date_dir
-            folder.mkdir(parents=True, exist_ok=True)
-
         datasets = {o: _collect(o) for o in orders}
         for o in orders:
             print(f"  {o} order: {len(datasets[o])} perturbation length(s) found in {defect_folder / _ORDER_DIRS[o]}")
@@ -158,7 +193,6 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
         if not pert_scales:
             warnings.warn(f"No perturbation data found in {defect_folder.name} ({calc_method}); skipping")
             continue
-        print(f"Perturbation scales to scan/package: {pert_scales}")
         for pert_scale in pert_scales:
             raw = None
             for o in orders:
@@ -171,22 +205,44 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
             if raw is None:
                 warnings.warn(f"No data parsed for {defect_folder.name} ({calc_method}, pert {pert_scale:g}); skipping")
                 continue
+            found.append(_Scanned(defect, cell_size, calc_method, pert_scale, raw))
+    return found
 
-            if not args.scan:
-                pert_folder = folder / f"pert_{pert_scale:g}"
-                pert_folder.mkdir(parents=True, exist_ok=True)
-                save_path = raw.save(pert_folder / raw._default_name())
-                register_file(
-                    ensure_db(),
-                    save_path,
-                    "packaged_zfs",
-                    defect=defect,
-                    cell_size=cell_size,
-                    calc_method=calc_method,
-                    pert_order=([1] if raw.has_first_order else []) + ([2] if raw.has_second_order else []),
-                    pert_scale=pert_scale,
-                )
-                print(f"Saved raw data in: {save_path}")
+
+def _print_scan_summary(scanned: list[_Scanned]) -> None:
+    if not scanned:
+        print("\nNo perturbation data found.")
+        return
+    header = f"{'defect':<12} {'method':<20} {'pert':>8} {'1st-order modes':>16} {'2nd-order pairs':>16}"
+    print("\nAvailable perturbation data:")
+    print(header)
+    print("-" * len(header))
+    for s in scanned:
+        print(
+            f"{f'{s.defect}_{s.cell_size}':<12} {s.calc_method:<20} {s.pert_scale:>8g} "
+            f"{len(s.raw.first_order):>16} {len(s.raw.second_order):>16}"
+        )
+    print()
+
+
+def _save_raw(scanned: list[_Scanned], output_root: Path) -> None:
+    """Write each scanned dataset to <output_root>/<defect>_<cell>/<method>/<date>/pert_<p>/ and register it."""
+    date_dir = date.today().strftime("%Y%m%d")
+    for s in scanned:
+        pert_folder = output_root / f"{s.defect}_{s.cell_size}" / s.calc_method / date_dir / f"pert_{s.pert_scale:g}"
+        pert_folder.mkdir(parents=True, exist_ok=True)
+        save_path = s.raw.save(pert_folder / s.raw._default_name())
+        register_file(
+            ensure_db(),
+            save_path,
+            "packaged_zfs",
+            defect=s.defect,
+            cell_size=s.cell_size,
+            calc_method=s.calc_method,
+            pert_order=([1] if s.raw.has_first_order else []) + ([2] if s.raw.has_second_order else []),
+            pert_scale=s.pert_scale,
+        )
+        print(f"Saved raw data in: {save_path}")
 
 
 _DICT_ORDER_SUFFIXES = {
@@ -213,8 +269,6 @@ def _dict_nonempty(data: np.lib.npyio.NpzFile, key: str) -> bool:
 
 def _register_only(data_path: Path) -> None:
     """Register already-packaged .npz files under data_path without re-packaging."""
-    from spinlabs.models import RawZFSData
-
     data_path = data_path.resolve()
     if not data_path.is_dir():
         raise SystemExit(f"Data path not found: {data_path}")

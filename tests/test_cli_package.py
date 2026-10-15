@@ -44,14 +44,15 @@ def _raw(order=1, pert=0.025, calc_method=None, **_kw):
     return RawZFSData(**kwargs)
 
 
-def _make_args(tmp_path, orders="first,second", pert=None):
+def _make_args(tmp_path, orders="first,second", pert=None, yes=True, scan=False):
     return argparse.Namespace(
         defect_folder=[tmp_path / "NV_512"],
         orders=orders,
         pert=pert,
         method=["all"],
         output_root=tmp_path / "data",
-        scan=False,
+        scan=scan,
+        yes=yes,
     )
 
 
@@ -113,6 +114,57 @@ def test_missing_order_folder_warns(tmp_path):
         with pytest.warns(UserWarning):
             _run(_make_args(tmp_path))
     assert len(list((tmp_path / "data").rglob("*.npz"))) == 1
+
+
+@pytest.mark.parametrize("answer", ["", "y", "Yes"])
+def test_prompt_yes_saves(tmp_path, monkeypatch, capsys, answer):
+    _tree(tmp_path, orders=("first",))
+    _registry(monkeypatch, tmp_path)
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or answer)
+    with _patch():
+        _run(_make_args(tmp_path, orders="first", yes=False))
+    assert prompts == ["Save the perturbation data to file? (Y/n): "]
+    out = capsys.readouterr().out
+    assert "Available perturbation data:" in out
+    assert out.index("Available perturbation data:") < out.index("Saved raw data in:")
+    assert len(list((tmp_path / "data").rglob("*.npz"))) == 1
+
+
+@pytest.mark.parametrize("answer", ["n", "no", "N"])
+def test_prompt_no_saves_nothing(tmp_path, monkeypatch, answer):
+    _tree(tmp_path, orders=("first",))
+    monkeypatch.setattr("builtins.input", lambda prompt: answer)
+    with _patch():
+        _run(_make_args(tmp_path, orders="first", yes=False))
+    assert not (tmp_path / "data").exists()
+
+
+def test_prompt_eof_saves_nothing(tmp_path, monkeypatch):
+    """Without a terminal (input() hits EOF) nothing is written."""
+    _tree(tmp_path, orders=("first",))
+
+    def _eof(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _eof)
+    with _patch():
+        _run(_make_args(tmp_path, orders="first", yes=False))
+    assert not (tmp_path / "data").exists()
+
+
+def test_scan_lists_without_prompting(tmp_path, monkeypatch, capsys):
+    _tree(tmp_path)
+
+    def _no_input(prompt):
+        raise AssertionError("--scan must not prompt")
+
+    monkeypatch.setattr("builtins.input", _no_input)
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path, yes=False, scan=True))
+    out = capsys.readouterr().out
+    assert "NV_512" in out and "all_bands" in out and "0.025" in out
+    assert not (tmp_path / "data").exists()
 
 
 # ── --conv --ground-state (flag-only auto-discovery) ─────────────────────────
