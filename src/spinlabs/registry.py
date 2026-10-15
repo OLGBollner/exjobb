@@ -19,27 +19,17 @@ _env_dir = os.environ.get("SPINLABS_REGISTRY_DIR")
 REGISTRY_DIR = Path(_env_dir) if _env_dir else Path.home() / ".spinlabs"
 REGISTRY_PATH = REGISTRY_DIR / "registry.db"
 
-def _normalize_orders(order: list[int] | int | None) -> str | None:
-    """Normalize an ``order`` argument to a sorted JSON list like '[1, 2]'.
-
-    The legacy scalar convention (1, 2 or 12 for combined 1d+2d data) is
-    accepted and expanded: 12 becomes ``[1, 2]``.
-    """
-    if order is None:
-        return None
-    values = [1, 2] if isinstance(order, int) and order == 12 else [order] if isinstance(order, int) else list(order)
-    orders = sorted(set(int(v) for v in values if int(v) in (1, 2)))
-    return json.dumps(orders) if orders else None
-
-
-def _order_filter_values(value: object) -> list[int]:
-    """Orders requested by a find_runs 'order' filter.
+def parse_orders(value: object) -> list[int]:
+    """Perturbation orders named by ``value``, as a sorted list.
 
     Accepts a list of ints, a single int, or a string ('1', '1 2', '1,2', '1+2').
-    The legacy scalar 12 means both orders.
+    The legacy scalar 12 means both orders. Anything other than 1, 2 or 12
+    raises ValueError. This is the one place the 12 convention is expanded.
     """
     if isinstance(value, (list, tuple)):
         values = list(value)
+    elif isinstance(value, int):
+        values = [value]
     else:
         values = [v for v in str(value).replace(",", "+").replace(" ", "+").split("+") if v.strip()]
     out: set[int] = set()
@@ -52,6 +42,17 @@ def _order_filter_values(value: object) -> list[int]:
         else:
             raise ValueError(f"unknown perturbation order {n}")
     return sorted(out)
+
+
+def _normalize_orders(value: object) -> str | None:
+    """Normalize a perturbation order value to a JSON list string, e.g. '[1, 2]'.
+
+    ``None`` and an empty selection are stored as NULL.
+    """
+    if value is None:
+        return None
+    orders = parse_orders(value)
+    return json.dumps(orders) if orders else None
 
 
 _SCHEMA = """
@@ -149,6 +150,8 @@ def ensure_db() -> sqlite3.Connection:
                     'UPDATE runs SET "order" = ? WHERE id = ?',
                     (json.dumps(orders) if orders else None, run_id),
                 )
+        # DROP COLUMN needs SQLite >= 3.35 (2021-03); older libraries raise
+        # OperationalError here.
         conn.execute('ALTER TABLE runs DROP COLUMN n_dims')
     conn.commit()
     return conn
@@ -164,16 +167,6 @@ def sha256_of(path: str | Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def _normalize_orders(value: list[int] | int | None) -> str | None:
-    """Normalize a perturbation order value to a JSON list string, e.g. '[1, 2]'."""
-    if value is None:
-        return None
-    if value == 12:  # legacy combined marker
-        return json.dumps([1, 2])
-    orders = sorted(set(value if isinstance(value, (list, tuple)) else [value]))
-    return json.dumps(orders)
 
 
 def register_file(
@@ -314,7 +307,7 @@ def find_packaged(
         sql += " AND pert_scale = ?"
         params.append(pert_scale)
     if pert_order is not None:
-        wanted = set(json.loads(_normalize_orders(pert_order)))
+        wanted = set(parse_orders(pert_order))
     if exclude_run:
         sql += """ AND NOT EXISTS (
             SELECT 1 FROM runs, json_each(COALESCE(runs.zfs_files, '[]')) AS j
@@ -374,7 +367,7 @@ def find_runs(
                 + ", ".join(sorted(columns | {"timestamp"}))
             )
         if column in list_like:
-            # Match like the CSV did: n_dims as '1+2', npz_files per name.
+            # Matches when any stored element equals the value (case-insensitive).
             wanted = str(value).strip().lower()
             keep = []
             for (raw,) in conn.execute(
@@ -386,8 +379,7 @@ def find_runs(
                     items = []
                 if not isinstance(items, list):
                     items = [items]
-                text = "+".join(str(i) for i in items)
-                if text.lower() == wanted or wanted in [str(i).lower() for i in items]:
+                if wanted in [str(i).lower() for i in items]:
                     keep.append(raw)
             if not keep:
                 sql += " AND 0"  # nothing matches this filter
@@ -400,28 +392,29 @@ def find_runs(
             # Subset semantics: every requested order must be present in the
             # run's data, mirroring find_packaged(pert_order=...).
             try:
-                wanted_orders = _order_filter_values(value)
+                wanted_orders = parse_orders(value)
             except (TypeError, ValueError) as exc:
                 raise SystemExit(f"error: invalid --order value {value!r}: {exc}")
-            if wanted_orders:
-                keep = []
-                for (raw,) in conn.execute(
-                    f'SELECT DISTINCT "{column}" FROM runs WHERE status = \'done\''
-                ):
-                    try:
-                        have = set(json.loads(raw)) if isinstance(raw, str) else set()
-                    except (TypeError, json.JSONDecodeError):
-                        # Legacy scalar convention: 1, 2, 12 or '1+2'.
-                        text = str(raw).replace("+", " ")
-                        have = {int(v) for v in text.split() if v.strip().isdigit() and int(v) in (1, 2)}
-                    if set(wanted_orders).issubset(have):
-                        keep.append(raw)
-                if not keep:
-                    sql += " AND 0"
-                else:
-                    placeholders = ", ".join("?" * len(keep))
-                    sql += f' AND "{column}" IN ({placeholders})'
-                    params.extend(keep)
+            if not wanted_orders:
+                raise SystemExit("error: empty --order filter; give at least one of 1, 2")
+            keep = []
+            for (raw,) in conn.execute(
+                f'SELECT DISTINCT "{column}" FROM runs WHERE status = \'done\''
+            ):
+                try:
+                    have = set(json.loads(raw)) if isinstance(raw, str) else set()
+                except (TypeError, json.JSONDecodeError):
+                    # Legacy scalar convention: 1, 2, 12 or '1+2'.
+                    text = str(raw).replace("+", " ")
+                    have = {int(v) for v in text.split() if v.strip().isdigit() and int(v) in (1, 2)}
+                if set(wanted_orders).issubset(have):
+                    keep.append(raw)
+            if not keep:
+                sql += " AND 0"
+            else:
+                placeholders = ", ".join("?" * len(keep))
+                sql += f' AND "{column}" IN ({placeholders})'
+                params.extend(keep)
             continue
         sql += f' AND "{column}" = ?'
         if column in numeric:

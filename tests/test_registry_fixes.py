@@ -304,3 +304,44 @@ def test_find_runs_latest_picks_most_recent(tmp_path):
     conn.commit()
     latest_tie = registry.find_runs(conn, [("defect", "NV")], latest=True)
     assert [p.name for p in latest_tie] == [d2.name]
+
+
+def test_parse_orders_expands_legacy_and_rejects_unknown():
+    from spinlabs.registry import parse_orders
+
+    assert parse_orders(12) == [1, 2]
+    assert parse_orders([2, 1, 2]) == [1, 2]
+    assert parse_orders("1+2") == [1, 2]
+    with pytest.raises(ValueError, match="unknown perturbation order 3"):
+        parse_orders([3])
+
+
+def test_register_run_rejects_unknown_order(tmp_path):
+    """register_run must not store an order outside {1, 2}."""
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    with pytest.raises(ValueError, match="unknown perturbation order 3"):
+        registry.register_run(conn, run_dir=tmp_path / "r", order=[3])
+
+
+def test_find_runs_empty_order_filter_raises(tmp_path):
+    """An empty order filter must fail loudly, not silently match every run."""
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    with pytest.raises(SystemExit, match="empty --order"):
+        registry.find_runs(conn, [("order", [])])
+
+
+def test_find_runs_npz_files_matches_single_name(tmp_path):
+    """npz_files matches when any stored name equals the filter value."""
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    d = tmp_path / "NV_512_pert_0.025"
+    registry.register_run(conn, run_dir=d, npz_files=["a.npz", "b.npz"])
+    conn.execute("UPDATE runs SET status='done'")
+    conn.commit()
+    assert [p.name for p in registry.find_runs(conn, [("npz_files", "B.npz")])] == [d.name]
+    assert registry.find_runs(conn, [("npz_files", "a.npz+b.npz")]) == []

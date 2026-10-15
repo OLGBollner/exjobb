@@ -10,7 +10,7 @@ import numpy as np
 
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import PhononSpectrum, RawZFSData, SpinPhononCouplingData
-from spinlabs.registry import ensure_db, find_phonon, finish_run, register_file, register_run
+from spinlabs.registry import ensure_db, find_phonon, finish_run, parse_orders, register_file, register_run
 from spinlabs.parsers import (
     parse_phonon_data,
     parse_zfs_dataset_npz,
@@ -140,6 +140,20 @@ def find_default_phonon_file_for_raw(raw_zfs_file: str | Path | Sequence[str | P
     return None
 
 
+def _check_requested_orders(user_orders: Sequence[int], *, has_1d: bool | None, has_2d: bool) -> None:
+    """Raise when ``--order`` asks for an order the input data lacks.
+
+    ``has_1d=None`` means first-order presence is unknown and is not checked.
+    """
+    for req, present, label in ((1, has_1d, "first-order (1d)"), (2, has_2d, "second-order (2d)")):
+        if req in user_orders and present is False:
+            raise ValueError(
+                f"--order {req} requested, but the input dataset contains no "
+                f"{label} tensors. Rerun without --order {req} or with input that "
+                f"includes {label.split(' ')[0]} perturbation data."
+            )
+
+
 def run_full_pipeline(
     *,
     sim_folder: str | Path | Sequence[str | Path] | None = None,
@@ -151,7 +165,7 @@ def run_full_pipeline(
     two_phonon_file: str | Path | None = None,
     calc_method: str = "all_bands",
     zfs_folder: str | None = None,
-    order: int | None = None,
+    order: list[int] | int | None = None,
     pert_scale: float | None = None,
     defect: str | None = None,
     cell_size: int | None = None,
@@ -180,8 +194,7 @@ def run_full_pipeline(
     # one or more integers (1, 2); the legacy scalar 12 means "both".
     user_orders: list[int] | None = None
     if order is not None:
-        _vals = [1, 2] if order == 12 else ([order] if isinstance(order, int) else list(order))
-        user_orders = sorted(set(int(v) for v in _vals if int(v) in (1, 2))) or None
+        user_orders = parse_orders(order) or None
     is_multi_sim = isinstance(sim_folder, (list, tuple)) and len(sim_folder) > 1
     combine_orders = (raw_zfs_file_1d is not None and raw_zfs_file_2d is not None) or is_multi_sim
     if combine_orders:
@@ -220,13 +233,7 @@ def run_full_pipeline(
         order = coupling_data.order or order
         dims = [1, 2] if coupling_data.has_second_order else [1]
         if user_orders is not None:
-            for req in user_orders:
-                if req == 2 and not coupling_data.has_second_order:
-                    raise ValueError(
-                        "--order 2 requested, but the input dataset contains no "
-                        "second-order (2d) tensors. Rerun without --order 2 or with input that "
-                        "includes second-order perturbation data."
-                    )
+            _check_requested_orders(user_orders, has_1d=None, has_2d=coupling_data.has_second_order)
             analyzed = list(user_orders)
         else:
             analyzed = list(dims)
@@ -326,19 +333,7 @@ def run_full_pipeline(
             has_2d = (raw_data is not None and len(raw_data.second_order) > 0) or (
                 coupling_data is not None and coupling_data.has_second_order
             )
-            for req in user_orders:
-                if req == 2 and not has_2d:
-                    raise ValueError(
-                        "--order 2 requested, but the input dataset contains no "
-                        "second-order (2d) tensors. Rerun without --order 2 or with input that "
-                        "includes second-order perturbation data."
-                    )
-                if req == 1 and raw_data is not None and not has_1d:
-                    raise ValueError(
-                        "--order 1 requested, but the input dataset contains no "
-                        "first-order (1d) tensors. Rerun without --order 1 or with input that "
-                        "includes first-order perturbation data."
-                    )
+            _check_requested_orders(user_orders, has_1d=has_1d if raw_data is not None else None, has_2d=has_2d)
             # ``analyzed`` is what this run will actually compute and register:
             # the user filter intersected with reality (validated above).
             analyzed = list(user_orders)

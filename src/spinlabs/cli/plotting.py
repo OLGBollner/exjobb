@@ -5,7 +5,7 @@ from pathlib import Path
 
 from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
 from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
-from spinlabs.registry import _order_filter_values, ensure_db, find_runs
+from spinlabs.registry import ensure_db, find_runs, parse_orders
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -181,7 +181,7 @@ def _query_filters(args: argparse.Namespace) -> list[tuple[str, str]]:
     if args.method is not None:
         out.append(("method", {"all": "all_bands", "approx": "defect_band_approx"}[args.method]))
     if args.order is not None:
-        out.append(("order", _order_filter_values(args.order)))
+        out.append(("order", parse_orders(args.order)))
     if args.pert_scale is not None:
         out.append(("pert", args.pert_scale))
     return out

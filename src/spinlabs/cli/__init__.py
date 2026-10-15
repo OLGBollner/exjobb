@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     build_run_parser(subparsers.add_parser("run", help="Run the end-to-end analysis pipeline"))
 
-    build_package_parser(subparsers.add_parser("scan", help="Scan/package raw ZFS simulation data into a single .npz"))
+    build_package_parser(subparsers.add_parser("package", help="Package (or with --scan, only parse) raw ZFS simulation data into a single .npz"))
 
     return parser
 

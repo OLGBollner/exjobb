@@ -79,8 +79,8 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--scan",
         action="store_true",
-        help="Scan the destination folders for completed runs instead of packaging."
-        )
+        help="Parse the simulation folders and report what was found, without writing or registering any .npz.",
+    )
 
     parser.set_defaults(func=_run)
 
@@ -156,7 +156,7 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
             for p in missing:
                 warnings.warn(f"Perturbation scale {p:g} not found in {defect_folder.name}; skipping")
         if not pert_scales:
-            warnings.warn(f"No data to in {defect_folder.name} ({calc_method}); skipping")
+            warnings.warn(f"No perturbation data found in {defect_folder.name} ({calc_method}); skipping")
             continue
         print(f"Perturbation scales to scan/package: {pert_scales}")
         for pert_scale in pert_scales:
