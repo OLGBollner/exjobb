@@ -180,17 +180,16 @@ def _run_query(args: argparse.Namespace) -> None:
     if not files:
         print("No unanalyzed packaged data matching the query.")
         return
-    if args.run_name and len(files) > 1:
-        listing = "\n  ".join(str(p) for p in files)
-        raise SystemExit(
-            f"--run-name '{args.run_name}' is ambiguous: the query matches {len(files)} datasets, "
-            "which would all be written under that one name.\n"
-            f"  {listing}\n"
-            "Narrow the query (--defect/--cell-size/--method/--order/--pert-scale) or drop --run-name."
-        )
+    # With multiple matched datasets, disambiguate the run-name so each
+    # dataset lands in its own <run_name>_<stem> directory instead of
+    # silently sharing/creating duplicate <run_name>_1, _2, ... folders.
     for path in files:
         print(f"Running: {path}")
         method = _infer_method_from_file(Path(path))
+        if args.run_name and len(files) > 1:
+            run_name = f"{args.run_name}_{Path(path).stem}"
+        else:
+            run_name = args.run_name
         run_full_pipeline(
             raw_zfs_file=str(path),
             phonon_file=args.phonon_file,
@@ -207,7 +206,7 @@ def _run_query(args: argparse.Namespace) -> None:
             temperatures=args.temperatures,
             init_state=args.init_state,
             output_root=args.output_root if args.output_root else "runs",
-            run_name=args.run_name,
+            run_name=run_name,
             save_plots=args.plot,
             show_plots=False,
             debug=args.debug,
