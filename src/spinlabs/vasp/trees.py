@@ -12,6 +12,10 @@ import numpy as np
 from spinlabs.parsers import parse_phonon_data, save_phonon_npz
 from spinlabs.symmetry import classify_and_pair, filter_degenerate_partners, symmetrize_degenerate_groups
 
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
+
 RUN_STAGES = ("relaxation_data", "ZFS_hyp", "ZFS_occup")
 
 FIRST_ORDER_SCRIPT = "run_perturbation_first_order.sh"
@@ -188,10 +192,10 @@ def resolve_sym_phonon(out: Path, phonon: Path) -> Path:
     filtered = filter_degenerate_partners(symmetrized)
     target = data / f"phonon_data_sym{filtered.n_modes}.npz"
     if target.is_file():
-        print(f"  using existing symmetrised phonon file {target}")
+        LOGGER.info(f"  using existing symmetrised phonon file {target}")
         return target
     save_phonon_npz(filtered, target)
-    print(f"  symmetrised phonon data saved to {target} ({filtered.n_modes} of {spectrum.n_modes} modes)")
+    LOGGER.info(f"  symmetrised phonon data saved to {target} ({filtered.n_modes} of {spectrum.n_modes} modes)")
     return target
 
 
@@ -239,14 +243,14 @@ def build_zfs_tree(inp: Path, run_dirs: list[str] | tuple[str, ...] = RUN_STAGES
     if out.exists():
         raise FileExistsError(f"output directory {out} already exists, refusing to overwrite")
 
-    print(f"Creating {out}/ from {inp}")
+    LOGGER.info(f"Creating {out}/ from {inp}")
     shutil.copytree(data_src, out / "data")
 
     for stage in run_dirs:
         dst = out / stage
         shutil.copytree(relax_src, dst)
         shutil.copy2(struct_file, dst / "POSCAR")
-        print(f"  {stage}/  <- template/relax + POSCAR")
+        LOGGER.info(f"  {stage}/  <- template/relax + POSCAR")
     return out
 
 
@@ -278,7 +282,7 @@ def prepare_basis(
 
     def fail(msg: str) -> None:
         failures.append(msg)
-        print(f"  FAIL: {msg}")
+        LOGGER.error(f"  FAIL: {msg}")
 
     inp = dst / "input"
     inp.mkdir(parents=True, exist_ok=True)
@@ -305,7 +309,7 @@ def prepare_basis(
                 warnings.append(warning)
         incar_path.write_text(patch_restart_incar(incar))
         for warning in warnings:
-            print(f"  WARN: {warning}")
+            LOGGER.warning(f"  WARN: {warning}")
     else:
         fail("no INCAR in the ZFS source folder -- cannot make it restart-ready")
 
@@ -347,7 +351,7 @@ def prepare_basis(
     shutil.copy2(scripts_dir / "verify_perturbation_setup.py", dst / "verify_perturbation_setup.py")
 
     if per_sim is not None:
-        print(
+        LOGGER.info(
             f"    time: {per_sim:.0f} s/sim x {n_tasks} tasks / "
             f"{n_array_jobs} array jobs = {per_job:.0f} s/job "
             f"-> {sbatch_time(per_job)}"
@@ -392,19 +396,19 @@ def build_perturbation_tree(
 
     phonon = resolve_sym_phonon(out, phonon)
     n_modes = n_modes_from_phonon(phonon)
-    print(f"=== {defect}: phonon {phonon} ({n_modes} modes) -> {out} ===")
+    LOGGER.info(f"=== {defect}: phonon {phonon} ({n_modes} modes) -> {out} ===")
     for order in ("first_order", "second_order"):
         for basis, src in sources.items():
             for p in pert:
                 dst = out / order / f"pert_{p}" / basis
                 if dst.exists():
                     if force:
-                        print(f"  overwriting {dst}")
+                        LOGGER.info(f"  overwriting {dst}")
                         shutil.rmtree(dst)
                     else:
-                        print(f"  note: {dst} already exists -- skipping")
+                        LOGGER.info(f"  note: {dst} already exists -- skipping")
                         continue
-                print(f"  creating {dst}")
+                LOGGER.info(f"  creating {dst}")
                 script_name = FIRST_ORDER_SCRIPT if order == "first_order" else SECOND_ORDER_SCRIPT
                 failures.extend(
                     prepare_basis(

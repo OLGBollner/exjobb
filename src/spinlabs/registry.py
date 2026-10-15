@@ -91,6 +91,15 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_files_defect ON files(defect, cell_size, calc_method);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+CREATE TABLE IF NOT EXISTS run_logs (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER,                  -- runs.id once the run is registered; NULL before
+    ts TEXT NOT NULL,
+    level TEXT NOT NULL,
+    logger TEXT NOT NULL,
+    message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_run_logs_run ON run_logs(run_id);
 """
 
 
@@ -210,6 +219,37 @@ def register_file(
     conn.commit()
     cur = conn.execute("SELECT id FROM files WHERE path = ?", (path,))
     return int(cur.fetchone()[0])
+
+
+def insert_run_log(
+    conn: sqlite3.Connection,
+    level: str,
+    logger_name: str,
+    message: str,
+    run_id: int | None = None,
+) -> None:
+    """Append one log record to the ``run_logs`` table."""
+    conn.execute(
+        "INSERT INTO run_logs (run_id, ts, level, logger, message) VALUES (?, ?, ?, ?, ?)",
+        (run_id, _now(), level, logger_name, message),
+    )
+    conn.commit()
+
+
+def list_run_logs(conn: sqlite3.Connection, run_id: int | None = None) -> list[dict]:
+    """Return log records from ``run_logs`` (optionally for one run), oldest first."""
+    if run_id is None:
+        cur = conn.execute(
+            "SELECT id, run_id, ts, level, logger, message FROM run_logs ORDER BY id"
+        )
+    else:
+        cur = conn.execute(
+            "SELECT id, run_id, ts, level, logger, message FROM run_logs"
+            " WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
 def register_run(

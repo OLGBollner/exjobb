@@ -10,6 +10,10 @@ from scipy import constants as Cn
 from spinlabs.constants import CONSTANTS
 from spinlabs.serialization import FieldSpec, SchemaError, load_npz, save_npz, _fields_from_npz, warn_unknown_keys
 
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
+
 
 class EnergyUnit(str, Enum):
     MHZ = "MHz"
@@ -442,8 +446,8 @@ class PhononSpectrum:
         raw_sorted = sorted(raw_perturbations.items(), key=lambda kv: kv[1])
         freq_pos = np.argsort(self.frequencies_mev)
         if len(raw_sorted) != self.n_modes:
-            print(
-                f"Warning: raw ZFS data covers {len(raw_sorted)} modes but spectrum has "
+            LOGGER.warning(
+                f"raw ZFS data covers {len(raw_sorted)} modes but spectrum has "
                 f"{self.n_modes}; cannot infer original_indices by rank matching. "
                 "Modes will be dropped loudly instead of silently mismatched."
             )
@@ -457,8 +461,8 @@ class PhononSpectrum:
             return False
         c = np.corrcoef(p2[valid], f[valid])[0, 1]
         if c < 1 - tol_rel:
-            print(
-                f"Warning: perturbation-frequency correlation is only {c:.4f}; "
+            LOGGER.warning(
+                f"perturbation-frequency correlation is only {c:.4f}; "
                 "refusing to infer original_indices from a dubious match."
             )
             return False
@@ -467,8 +471,8 @@ class PhononSpectrum:
         residuals = np.abs(p2 - q0_2 * f) / (q0_2 * f + 1e-30)
         bad = int(np.sum(residuals[valid] > tol_rel))
         if bad > 0:
-            print(
-                f"Warning: {bad} modes deviate > {tol_rel:.0%} from the fitted "
+            LOGGER.warning(
+                f"{bad} modes deviate > {tol_rel:.0%} from the fitted "
                 f"q0^2 = {q0_2:.3e}; inferred original_indices may be unreliable."
             )
 
@@ -480,7 +484,7 @@ class PhononSpectrum:
             original_indices[pos] = raw_idx
 
         self.original_indices = original_indices
-        print(
+        LOGGER.info(
             f"Inferred original_indices for legacy phonon file by amplitude-frequency "
             f"rank matching (corr={c:.5f}, q0^2={q0_2:.3e}). "
             "Regenerate the phonon npz with explicit original_indices for a principled mapping."
@@ -543,7 +547,7 @@ class PhononSpectrum:
                 if detected is not None:
                     defect_frac = detected
                 else:
-                    print("Warning: Could not identify defect centre, no shift applied.")
+                    LOGGER.warning("Could not identify defect centre, no shift applied.")
                     return frac_atoms, np.zeros(3)
         else:
             defect_pos = np.asarray(defect_pos, dtype=float)
@@ -1284,7 +1288,7 @@ class RawZFSData:
         )
         for p, (_, scaled_now) in zip(paths, scaled_pairs):
             if apply_corrections and scaled_now:
-                print(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE:g} (x3/2) [{p.name}]")
+                LOGGER.info(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE:g} (x3/2) [{p.name}]")
         return obj.to_unit("J")
 
     def _apply_spin_correction(self) -> None:
@@ -1311,7 +1315,7 @@ class RawZFSData:
         self.first_order = scaled["first_order"]
         self.second_order = scaled["second_order"]
         self.spin_correction_applied = True
-        print(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE:g} (x3/2)")
+        LOGGER.info(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE:g} (x3/2)")
 
 
 @dataclass

@@ -11,6 +11,10 @@ from spinlabs.constants import CONSTANTS
 from spinlabs.models import SpinPhononCouplingData
 from spinlabs.utils import MathUtils
 
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
+
 
 def plot_vlines_sorted_by_magnitude(
     ax: plt.Axes,
@@ -219,7 +223,7 @@ def plot_transition_rates_stacked(
             else:
                 out_file = p.parent / f"{stem}_{trans_key}{p.suffix}"
             fig.savefig(out_file, dpi=300)
-            print(f"Saved stacked rate figure to: {out_file}")
+            LOGGER.info(f"Saved stacked rate figure to: {out_file}")
 
         figures.append((fig, ax))
 
@@ -290,7 +294,7 @@ def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bo
     """Plots 1D and diagonal 2D spin-phonon couplings and spectral functions."""
     coupling_file = run_dir / "spin_phonon_coupling.npz"
     if not coupling_file.exists():
-        print(f"Skipping coupling plot: {coupling_file} not found.")
+        LOGGER.warning(f"Skipping coupling plot: {coupling_file} not found.")
         return
 
     data = SpinPhononCouplingData.load(coupling_file)
@@ -306,7 +310,7 @@ def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bo
     )
     out_file1 = out_dir / f"coupling_spectral_1d.{fmt}"
     fig1.savefig(out_file1, dpi=dpi, bbox_inches="tight")
-    print(f"  [✓] Saved 1D coupling plot -> {out_file1}")
+    LOGGER.info(f"  [✓] Saved 1D coupling plot -> {out_file1}")
 
     # Backward compatible alias
     out_file_alias = out_dir / f"coupling_spectral.{fmt}"
@@ -339,31 +343,31 @@ def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bo
         )
         out_file2 = out_dir / f"coupling_spectral_2d.{fmt}"
         fig2.savefig(out_file2, dpi=dpi, bbox_inches="tight")
-        print(f"  [✓] Saved 2D coupling plot -> {out_file2}")
+        LOGGER.info(f"  [✓] Saved 2D coupling plot -> {out_file2}")
 
 
 def plot_run_rates(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
     """Plots transition rates vs temperature."""
     rates_file = run_dir / "transition_rates.npz"
     if not rates_file.exists():
-        print(f"Skipping transition rates plot: {rates_file} not found.")
+        LOGGER.warning(f"Skipping transition rates plot: {rates_file} not found.")
         return
 
     out_base = out_dir / f"transition_rates.{fmt}"
     plot_transition_rates_stacked(rates_file, output_path=out_base)
-    print(f"  [✓] Saved transition rate plots in -> {out_dir}")
+    LOGGER.info(f"  [✓] Saved transition rate plots in -> {out_dir}")
 
 
 def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
     """Plots T_1 relaxation times vs temperature."""
     t1_file = run_dir / "t1_relaxation.npz"
     if not t1_file.exists():
-        print(f"Skipping T1 plot: {t1_file} not found.")
+        LOGGER.warning(f"Skipping T1 plot: {t1_file} not found.")
         return
 
     out_file = out_dir / f"t1_vs_temperature.{fmt}"
     plot_t1([t1_file], output_path=out_file, plain_name=True)
-    print(f"  [✓] Saved T1 plot -> {out_file}")
+    LOGGER.info(f"  [✓] Saved T1 plot -> {out_file}")
 
 
 def plot_t1(
@@ -441,7 +445,7 @@ def plot_t1(
         meta_parts.extend(x.replace(" ", "-") for x in (defect, cell_size, calc_method, init_state) if x)
 
     if not plotted_any:
-        print("No valid T1 data found in the provided files.")
+        LOGGER.warning("No valid T1 data found in the provided files.")
         plt.close(fig)
         return fig, ax
 
@@ -460,7 +464,7 @@ def plot_t1(
         if meta and meta not in p.stem and not plain_name:
             p = p.with_name(f"{p.stem}_{meta}{p.suffix}")
         fig.savefig(p, dpi=300, bbox_inches="tight")
-        print(f"Saved T1 figure to: {p}")
+        LOGGER.info(f"Saved T1 figure to: {p}")
 
     if show:
         plt.show()
@@ -542,5 +546,5 @@ class ZFSPlotter:
                 )
                 Path("figures").mkdir(exist_ok=True)
                 fig.savefig(f"figures/{out_name}")
-                print(f"Saved figure in figures/{out_name}")
+                LOGGER.info(f"Saved figure in figures/{out_name}")
                 plt.close(fig)

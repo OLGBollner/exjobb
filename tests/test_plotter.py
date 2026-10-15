@@ -125,14 +125,14 @@ class TestPlotter:
         assert len(plotted.get_xdata()) == 1
         plt.close(fig)
 
-    def test_plot_t1_no_valid_data_returns_empty(self, tmp_path, capsys):
+    def test_plot_t1_no_valid_data_returns_empty(self, tmp_path, caplog):
         """Files with no usable curves produce no lines and a message."""
         p = tmp_path / "empty.npz"
         np.savez(p, temperatures=np.array([1.0]), t1_fit=np.array([np.nan]))
 
         fig, ax = plot_t1([p])
         assert len(ax.get_lines()) == 0
-        assert "No valid T1 data" in capsys.readouterr().out
+        assert "No valid T1 data" in caplog.text
         plt.close(fig)
 
     def test_plot_t1_output_filename_metadata(self, tmp_path):

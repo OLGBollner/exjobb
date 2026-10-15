@@ -3,9 +3,14 @@
 import argparse
 from pathlib import Path
 
+from spinlabs.cli import add_verbosity_args
 from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
-from spinlabs.registry import parse_orders
+from spinlabs.registry import ensure_db, parse_orders
+
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
 
 
 def build_run_parser(parser: argparse.ArgumentParser) -> None:
@@ -63,6 +68,7 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     )
     opt.add_argument("--plot", action="store_true", help="Generate plots inside <run_dir>/figures/")
     opt.add_argument("-d", "--debug", action="store_true", help="Print debug details during derivative calculations")
+    add_verbosity_args(opt)
 
     parser.set_defaults(func=_run)
 
@@ -166,7 +172,7 @@ def _run_query(args: argparse.Namespace) -> None:
     ``--phonon-file`` is optional here -- when omitted the pipeline resolves the phonon
     from the registry; when given it takes precedence, as it does for any other input mode.
     """
-    from spinlabs.registry import ensure_db, find_packaged
+    from spinlabs.registry import find_packaged
 
     conn = ensure_db()
     files = find_packaged(
@@ -178,13 +184,13 @@ def _run_query(args: argparse.Namespace) -> None:
         pert_order=parse_orders(args.order) if args.order else None,
     )
     if not files:
-        print("No unanalyzed packaged data matching the query.")
+        LOGGER.warning("No unanalyzed packaged data matching the query.")
         return
     # With multiple matched datasets, disambiguate the run-name so each
     # dataset lands in its own <run_name>_<stem> directory instead of
     # silently sharing/creating duplicate <run_name>_1, _2, ... folders.
     for path in files:
-        print(f"Running: {path}")
+        LOGGER.info(f"Running: {path}")
         method = _infer_method_from_file(Path(path))
         if args.run_name and len(files) > 1:
             run_name = f"{args.run_name}_{Path(path).stem}"
@@ -211,4 +217,4 @@ def _run_query(args: argparse.Namespace) -> None:
             show_plots=False,
             debug=args.debug,
         )
-    print(f"Done: {len(files)} dataset(s).")
+    LOGGER.info(f"Done: {len(files)} dataset(s).")

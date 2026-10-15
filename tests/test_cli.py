@@ -20,15 +20,16 @@ def _make_t1_npz(path, defect="NV", cell=2, method="pbe", state="ms0"):
     )
 
 
-def test_plot_t1_single_file(tmp_path, capsys):
+def test_plot_t1_single_file(tmp_path, caplog):
     npz = tmp_path / "t1_relaxation.npz"
     _make_t1_npz(npz)
     out = tmp_path / "out.png"
     parser = build_parser()
     args = parser.parse_args(["plot", "t1", str(npz), "-o", str(out)])
-    args.func(args)
+    with caplog.at_level("INFO", logger="spinlabs"):
+        args.func(args)
     assert list(tmp_path.glob("out*.png"))
-    assert "Saved T1 figure to:" in capsys.readouterr().out
+    assert "Saved T1 figure to:" in caplog.text
 
 
 def test_plot_t1_multiple_files_same_figure(tmp_path):

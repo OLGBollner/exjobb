@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 
+from spinlabs.cli import add_verbosity_args
 from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
 from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
 from spinlabs.registry import ensure_db, find_runs, parse_orders
@@ -15,6 +16,7 @@ def _add_output_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--fmt", default="png", help="Image format, e.g. png or pdf")
     parser.add_argument("--dpi", type=int, default=300, help="Image resolution")
     parser.add_argument("--show", action="store_true", help="Show the figure interactively")
+    add_verbosity_args(parser)
 
 
 def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: SLF001

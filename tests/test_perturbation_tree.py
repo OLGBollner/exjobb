@@ -196,7 +196,7 @@ def test_forbid_sym_ldmatrix_leaves_valid_incars_alone():
         assert warning is None and out == incar
 
 
-def test_perturbation_input_incar_corrects_algo_none(tmp_path, capsys):
+def test_perturbation_input_incar_corrects_algo_none(tmp_path, caplog):
     """ALGO=None in the ZFS source INCAR is corrected to Normal with a log."""
     from spinlabs.vasp import build_perturbation_tree
 
@@ -223,11 +223,11 @@ def test_perturbation_input_incar_corrects_algo_none(tmp_path, capsys):
     incar = (defect / "first_order" / "pert_0.0001" / "all_bands" / "input" / "INCAR").read_text()
     assert re.search(r"^\s*ALGO\s*=\s*Normal\b", incar, re.M | re.I)
     assert "ALGO=None" not in incar
-    out = capsys.readouterr().out
+    out = caplog.text
     assert "WARN" in out and "ALGO=Normal" in out
 
 
-def test_perturbation_input_incar_corrects_isym_with_ldmatrix(tmp_path, capsys):
+def test_perturbation_input_incar_corrects_isym_with_ldmatrix(tmp_path, caplog):
     """ISYM=1/2 with LDMATRIX in the source INCAR is corrected to 3."""
     from spinlabs.vasp import build_perturbation_tree
 
@@ -253,7 +253,7 @@ def test_perturbation_input_incar_corrects_isym_with_ldmatrix(tmp_path, capsys):
     assert failures == []
     incar = (defect / "first_order" / "pert_0.0001" / "all_bands" / "input" / "INCAR").read_text()
     assert re.search(r"^\s*ISYM\s*=\s*3\b", incar, re.M | re.I)
-    out = capsys.readouterr().out
+    out = caplog.text
     assert "WARN" in out and "ISYM=2" in out and "LDMATRIX" in out
 
 

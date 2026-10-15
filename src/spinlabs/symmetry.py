@@ -26,6 +26,10 @@ from spinlabs.models import PhononSpectrum, check_original_indices
 from pymatgen.core import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Character tables (Hermann-Mauguin spglib point-group symbols as keys).
@@ -765,7 +769,7 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
         if len(new_vecs) != len(g):
             report["skipped"].append((g, parents))
             if verbose:
-                print(f"skipped cluster {g} {parents}: {len(new_vecs)} basis vectors for {len(g)} modes")
+                LOGGER.info(f"skipped cluster {g} {parents}: {len(new_vecs)} basis vectors for {len(g)} modes")
             continue
         # keep the cluster's slots frequency-sorted: pair up new vectors
         # with their inherited frequencies, sort, then fill the slots in order
@@ -775,7 +779,7 @@ def symmetrize_degenerate_groups(spectrum, tol_mev: float = 0.01, verbose: bool 
             freqs[slot] = f
         report["symmetrized"].append((g, parents))
         if verbose:
-            print(f"symmetrized {g}: {parents}")
+            LOGGER.info(f"symmetrized {g}: {parents}")
 
     # Labels and groups are re-derived from the cleaned vectors rather than
     # inherited: a symmetrization can move a mode between irreps (that is

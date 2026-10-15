@@ -20,9 +20,11 @@ if (_repo / "src").is_dir():
     sys.path.insert(0, str(_repo / "src"))
 
 from spinlabs.convergence import plot_pert_convergence  # noqa: E402
+from spinlabs.logging_utils import configure_logging  # noqa: E402
 
 
 def main() -> int:
+    configure_logging(verbosity=1)
     ap = argparse.ArgumentParser(
         description="Plot ZFS principal components vs perturbation scale with linear-fit residuals"
     )

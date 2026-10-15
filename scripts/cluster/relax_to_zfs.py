@@ -10,9 +10,11 @@ import sys
 from pathlib import Path
 
 from spinlabs.vasp import prepare_relax_to_zfs
+from spinlabs.logging_utils import configure_logging
 
 
 def main() -> int:
+    configure_logging(verbosity=1)
     args = sys.argv[1:]
     if len(args) < 2:
         sys.exit(__doc__)
