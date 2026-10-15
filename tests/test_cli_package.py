@@ -117,17 +117,17 @@ def test_missing_order_folder_warns(tmp_path):
 
 
 @pytest.mark.parametrize("answer", ["", "y", "Yes"])
-def test_prompt_yes_saves(tmp_path, monkeypatch, capsys, answer):
+def test_prompt_yes_saves(tmp_path, monkeypatch, capsys, caplog, answer):
     _tree(tmp_path, orders=("first",))
     _registry(monkeypatch, tmp_path)
     prompts = []
     monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or answer)
-    with _patch():
+    with _patch(), caplog.at_level("INFO", logger="spinlabs"):
         _run(_make_args(tmp_path, orders="first", yes=False))
     assert prompts == ["Save the perturbation data to file? (Y/n): "]
-    out = capsys.readouterr().out
-    assert "Available perturbation data:" in out
-    assert out.index("Available perturbation data:") < out.index("Saved raw data in:")
+    # The scan table is CLI output (stdout); the save confirmation is logged.
+    assert "Available perturbation data:" in capsys.readouterr().out
+    assert "Saved raw data in:" in caplog.text
     assert len(list((tmp_path / "data").rglob("*.npz"))) == 1
 
 
@@ -198,16 +198,17 @@ def _conv_tree(tmp_path):
     return root
 
 
-def test_conv_ground_state_flag_auto_all(tmp_path, capsys, monkeypatch):
+def test_conv_ground_state_flag_auto_all(tmp_path, caplog, monkeypatch):
     _conv_tree(tmp_path)
     db = _registry(monkeypatch, tmp_path)
     _outcar(tmp_path / "NV_512" / "ZFS_hyp" / "OUTCAR", (1.0, 1.0, 4.0))
-    _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
+    with caplog.at_level("INFO", logger="spinlabs"):
+        _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
     out = next((tmp_path / "data").rglob("NV_512_*_conv_test_all.npz"))
     data = np.load(out, allow_pickle=True)
     assert data["d0"].shape == (3, 3)
     assert abs(data["d0"][2, 2] - 4.0) < 1e-9
-    assert "ground state:" in capsys.readouterr().out
+    assert "ground state:" in caplog.text
     conn = sqlite3.connect(db)
     row = conn.execute("SELECT defect, cell_size, calc_method FROM files").fetchone()
     assert row == ("NV", 512, "all_bands")
@@ -224,13 +225,13 @@ def test_conv_ground_state_flag_auto_occup(tmp_path):
     assert abs(data["d0"][2, 2] - 3.0) < 1e-9
 
 
-def test_conv_ground_state_missing_warns(tmp_path, capsys):
+def test_conv_ground_state_missing_warns(tmp_path, caplog):
     _conv_tree(tmp_path)
     _run_conv(args=_conv_args(tmp_path, Path("__auto__")), defect_folder=tmp_path / "NV_512")
     out = next((tmp_path / "data").rglob("NV_512_*_conv_*.npz"))
     data = np.load(out, allow_pickle=True)
     assert not any(k == "d0" for k in data.files)
-    assert "no ground-state OUTCAR" in capsys.readouterr().err
+    assert any(r.levelname == "WARNING" and "no ground-state OUTCAR" in r.getMessage() for r in caplog.records)
 
 
 def test_conv_ground_state_explicit_path(tmp_path):

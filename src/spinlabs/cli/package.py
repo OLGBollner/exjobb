@@ -7,7 +7,6 @@ the listing with --scan).
 
 import argparse
 import re
-import sys
 import warnings
 
 import numpy as np
@@ -15,11 +14,16 @@ from datetime import date
 from pathlib import Path
 from typing import NamedTuple
 
-from spinlabs.logging_utils import attach_db_logging, configure_logging
+from spinlabs.cli import add_verbosity_args
+from spinlabs.logging_utils import attach_db_logging
 from spinlabs.models import RawZFSData, _normalize_calc_method
 from spinlabs.registry import ensure_db, register_file
 from spinlabs.pack_convergence import pack_convergence
 from spinlabs.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
+
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
 
 
 def build_package_parser(parser: argparse.ArgumentParser) -> None:
@@ -95,6 +99,8 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
         help="Save the scanned data without asking for confirmation (for non-interactive use).",
     )
 
+    add_verbosity_args(parser)
+
     parser.set_defaults(func=_run)
 
 
@@ -104,9 +110,6 @@ _GS_AUTO = Path("__auto__")  # --ground-state given without a path: auto-discove
 
 
 def _run(args: argparse.Namespace) -> None:
-    configure_logging(
-        verbosity=int(getattr(args, "verbose", 0)), quiet=getattr(args, "quiet", False)
-    )
     attach_db_logging(ensure_db())
     if getattr(args, "register_only", None) is not None:
         _register_only(args.register_only)
@@ -168,7 +171,7 @@ def _scan_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str])
     if cell_size is None:
         raise SystemExit(f"Cell size not found in defect folder name: {defect_folder.name} (expected e.g. NV_512)")
 
-    print(f"Defect folder: {defect_folder}")
+    LOGGER.info(f"Defect folder: {defect_folder}")
 
     def _collect(order: str) -> dict[float, Path]:
         """Map pert_scale -> pert folder for one order, filtered to the requested scales."""
@@ -189,7 +192,7 @@ def _scan_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str])
         calc_method = _normalize_calc_method(method)
         datasets = {o: _collect(o) for o in orders}
         for o in orders:
-            print(f"  {o} order: {len(datasets[o])} perturbation length(s) found in {defect_folder / _ORDER_DIRS[o]}")
+            LOGGER.info(f"  {o} order: {len(datasets[o])} perturbation length(s) found in {defect_folder / _ORDER_DIRS[o]}")
         pert_scales = sorted(set().union(*datasets.values()))
         if args.pert is not None:
             missing = [p for p in args.pert if p not in pert_scales]
@@ -247,7 +250,7 @@ def _save_raw(scanned: list[_Scanned], output_root: Path) -> None:
             pert_order=([1] if s.raw.has_first_order else []) + ([2] if s.raw.has_second_order else []),
             pert_scale=s.pert_scale,
         )
-        print(f"Saved raw data in: {save_path}")
+        LOGGER.info(f"Saved raw data in: {save_path}")
 
 
 _DICT_ORDER_SUFFIXES = {
@@ -329,9 +332,9 @@ def _register_only(data_path: Path) -> None:
             pert_order=orders,
             pert_scale=pert_scale,
         )
-        print(f"Registered: {npz_path} ({defect}_{cell_size}, {calc_method}, order {orders}, pert {pert_scale:g})")
+        LOGGER.info(f"Registered: {npz_path} ({defect}_{cell_size}, {calc_method}, order {orders}, pert {pert_scale:g})")
         registered += 1
-    print(f"\nDone: {registered} registered, {skipped} skipped")
+    LOGGER.info(f"Done: {registered} registered, {skipped} skipped")
 
 
 def _auto_ground_state(defect_folder: Path, method: str | None) -> Path | None:
@@ -341,17 +344,16 @@ def _auto_ground_state(defect_folder: Path, method: str | None) -> Path | None:
     elif method in ("occup", "approx"):
         zfs_folder = "ZFS_occup"
     else:
-        print(
-            "warning: cannot infer ground-state method from folder suffix "
+        LOGGER.warning(
+            "cannot infer ground-state method from folder suffix "
             "(neither 'all' nor 'occup'); skipping ground state",
-            file=sys.stderr,
         )
         return None
     candidate = defect_folder / zfs_folder / "OUTCAR"
     if candidate.exists():
-        print(f"ground state: {candidate}")
+        LOGGER.info(f"ground state: {candidate}")
         return candidate
-    print(f"warning: no ground-state OUTCAR at {candidate}; skipping ground state", file=sys.stderr)
+    LOGGER.warning(f"no ground-state OUTCAR at {candidate}; skipping ground state")
     return None
 
 
@@ -363,13 +365,13 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
     defaults = {"orders": "first,second", "pert": None, "method": ["all"]}
     for opt in ("orders", "pert", "method"):
         if getattr(args, opt, defaults[opt]) != defaults[opt]:
-            print(f"warning: --{opt.replace('_', '-')} is ignored with --conv")
+            LOGGER.warning(f"--{opt.replace('_', '-')} is ignored with --conv")
     conv_roots = sorted(p for p in defect_folder.glob("convergence*") if p.is_dir())
     if not conv_roots:
         raise SystemExit(f"No convergence* folders found under {defect_folder}")
     method_map = {"all": "all", "occup": "approx"}
     for root in conv_roots:
-        print(f"Convergence folder: {root}")
+        LOGGER.info(f"Convergence folder: {root}")
         suffix = re.sub(r"^convergence[._-]*", "", root.name).lstrip("_-") or "conv"
         method = next((v for k, v in method_map.items() if k in suffix), None)
         defect, cell = split_defect_folder_name(defect_folder.name)

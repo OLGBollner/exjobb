@@ -347,7 +347,7 @@ class TestSpinCorrectionOnLoad:
         raw.save(out)
         return out
 
-    def test_approx_tensors_scaled_by_three_halves_once(self, tmp_path, capsys):
+    def test_approx_tensors_scaled_by_three_halves_once(self, tmp_path, caplog):
         raw = self._make_raw("defect_band_approx")
         out = self._save(raw, tmp_path)
 
@@ -356,7 +356,8 @@ class TestSpinCorrectionOnLoad:
             assert npz["ground_state_zfs_matrix"][2, 2] == pytest.approx(2000.0)
             assert not npz.get("spin_correction_applied", False)
 
-        loaded = RawZFSData.load(out)
+        with caplog.at_level("INFO", logger="spinlabs"):
+            loaded = RawZFSData.load(out)
         h = 6.62607015e-34
         assert loaded.spin_correction_applied is True
         assert loaded.ground_state_zfs.unit == "J"
@@ -364,7 +365,7 @@ class TestSpinCorrectionOnLoad:
         assert loaded.ground_state_zfs.matrix[0, 0] == pytest.approx(-1500.0e6 * h)
         entry = loaded.first_order[1060]
         assert entry["tensor"][2, 2] == pytest.approx(2970.0e6 * h)
-        assert "Applied spin correction scaling: 1.5" in capsys.readouterr().out
+        assert "Applied spin correction scaling: 1.5" in caplog.text
 
         # Saving the corrected object persists the flag; re-loading must not rescale
         out2 = tmp_path / "resaved.npz"
@@ -409,12 +410,13 @@ class TestSpinCorrectionOnLoad:
         assert raw.ground_state_zfs.matrix[2, 2] == pytest.approx(2000.0e6 * h)
         assert raw.first_order[1060]["tensor"][2, 2] == pytest.approx(1980.0e6 * h)
 
-    def test_all_bands_is_never_scaled(self, tmp_path, capsys):
+    def test_all_bands_is_never_scaled(self, tmp_path, caplog):
         out = self._save(self._make_raw("all_bands"), tmp_path)
-        loaded = RawZFSData.load(out)
+        with caplog.at_level("INFO", logger="spinlabs"):
+            loaded = RawZFSData.load(out)
         assert loaded.spin_correction_applied is False
         assert loaded.ground_state_zfs.matrix[2, 2] == pytest.approx(2000.0e6 * 6.62607015e-34)
-        assert capsys.readouterr().out == ""
+        assert "spin correction" not in caplog.text
 
 
 def test_combine_flag_mismatch_raises():

@@ -8,6 +8,18 @@ import argparse
 from spinlabs.logging_utils import configure_logging
 
 
+def add_verbosity_args(parser: argparse.ArgumentParser) -> None:
+    """Add the shared ``-v``/``-q`` console logging flags to a subcommand."""
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="info-level console logging; repeat (-vv) for debug output",
+    )
+    parser.add_argument("-q", "--quiet", action="store_true", help="Show only errors")
+
+
 def build_parser() -> argparse.ArgumentParser:
     from spinlabs.cli.package import build_package_parser
     from spinlabs.cli.plotting import build_plot_parser
@@ -31,7 +43,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     # Configure console logging once at the entry point so every subcommand
     # (including ones without their own flags, e.g. `plot`) gets sane levels.
-    verbosity = getattr(args, "verbosity", 0)
+    verbosity = getattr(args, "verbose", 0)
+    if getattr(args, "debug", False):
+        # --debug dumps go out as DEBUG records; show them on the console.
+        verbosity = max(verbosity, 2)
     quiet = getattr(args, "quiet", False)
     configure_logging(verbosity=verbosity, quiet=quiet)
     args.func(args)

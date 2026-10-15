@@ -40,19 +40,6 @@ def dummy_coupling_file(tmp_path):
     return save_file
 
 
-@pytest.fixture(autouse=True)
-def _reset_root_logger():
-    logger = logging.getLogger("spinlabs")
-    saved = logger.level, list(logger.handlers), logger.propagate
-    logger.handlers.clear()
-    logger.setLevel(logging.NOTSET)
-    yield
-    level, handlers, propagate = saved
-    logger.handlers[:] = handlers
-    logger.setLevel(level)
-    logger.propagate = propagate
-
-
 def _capture_records():
     class Capture(logging.Handler):
         def __init__(self):
@@ -260,3 +247,37 @@ def test_console_level_independent_of_db_capture(tmp_path):
 
     rows = reg.list_run_logs(reg.ensure_db())
     assert any(r["message"] == "dbg-only message" and r["level"] == "DEBUG" for r in rows)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["package", "--defect-folder", "x", "-v"],
+        ["plot", "t1", "-q"],
+        ["plot", "convergence", "x.npz", "-vv"],
+        ["run", "--coupling-file", "x.npz", "-v"],
+    ],
+)
+def test_every_subcommand_accepts_verbosity_flags(argv):
+    from spinlabs.cli import build_parser
+
+    args = build_parser().parse_args(argv)
+    assert hasattr(args, "verbose") and hasattr(args, "quiet")
+
+
+def test_debug_flag_enables_debug_console(monkeypatch):
+    """``run -d`` emits DEBUG records, so main must open the console to DEBUG."""
+    import spinlabs.cli as cli
+
+    seen = {}
+    monkeypatch.setattr(cli, "configure_logging", lambda verbosity, quiet: seen.update(v=verbosity, q=quiet))
+    monkeypatch.setattr(cli, "build_parser", lambda: _StubParser())
+    cli.main([])
+    assert seen == {"v": 2, "q": False}
+
+
+class _StubParser:
+    def parse_args(self, argv):
+        import argparse
+
+        return argparse.Namespace(verbose=0, quiet=False, debug=True, func=lambda a: None)

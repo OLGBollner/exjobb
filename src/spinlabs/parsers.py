@@ -19,6 +19,10 @@ from pymatgen.core import Structure
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor, _normalize_calc_method
 
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
+
 ZFS_REGEX = re.compile(
     r"Spin-spin contribution to zero-field splitting tensor \(MHz\)\s*-+\s*"
     r"D_xx\s+D_yy\s+D_zz\s+D_xy\s+D_xz\s+D_yz\s*-+\s*([\s\d\.\-]+?)(?=\s*-{3,})",
@@ -181,7 +185,7 @@ def parse_phonopy_yaml(yaml_path: str | Path, poscar_path: str | Path | None = N
                         f"({sibling}) vs {n_lattice} atoms in eigenvectors "
                         f"of {path}"
                     )
-                print(f"Trying to read data from: {sibling}")
+                LOGGER.info(f"Trying to read data from: {sibling}")
                 struct = sibling_struct
 
     if struct is not None:
@@ -342,7 +346,7 @@ def prepare_phonopy_yaml(
         f.write("\n")
         f.write("\n".join(struct_lines))
         f.write("\n")
-    print(
+    LOGGER.info(
         f"wrote {out} (structure data from {poscar_path})"
         + (f"; removed {n_dup} duplicate q-point block(s)" if n_dup else "")
     )
@@ -490,7 +494,7 @@ def parse_perturbation_directory(
             warnings.warn(f"No OUTCARs found in: {dir_path}")
         return {}
     if verbose:
-        print(f"Parsing {len(outcar_files)} OUTCARs in {dir_path} ...")
+        LOGGER.info(f"Parsing {len(outcar_files)} OUTCARs in {dir_path} ...")
 
     worker_fn = _worker_parse_outcar_1d if order == 1 else _worker_parse_outcar_2d
     results = {}
@@ -511,7 +515,7 @@ def parse_perturbation_directory(
     if verbose:
         skipped = len(outcar_files) - len(results)
         suffix = f" ({skipped} skipped)" if skipped else ""
-        print(f"  -> {len(results)}/{len(outcar_files)} parsed{suffix}")
+        LOGGER.info(f"  -> {len(results)}/{len(outcar_files)} parsed{suffix}")
 
     return results
 

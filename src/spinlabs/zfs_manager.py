@@ -10,6 +10,10 @@ from spinlabs.symmetry import twin_of, _build_groups_from_labels
 from spinlabs.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, _normalize_calc_method
 from spinlabs.utils import MathUtils
 
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
+
 
 class ZFSManager:
     """
@@ -57,8 +61,8 @@ class ZFSManager:
             if stored_syms is not None and fresh_labels is not stored_syms:
                 mismatched = [i for i, (a, b) in enumerate(zip(stored_syms, fresh_labels)) if a != b]
                 if mismatched:
-                    print(
-                        f"Warning: {len(mismatched)} stored symmetry label(s) differ "
+                    LOGGER.warning(
+                        f"{len(mismatched)} stored symmetry label(s) differ "
                         f"from fresh classification: {mismatched[:10]}"
                         f"{'...' if len(mismatched) > 10 else ''}. "
                         f"Using fresh classification."
@@ -294,7 +298,7 @@ class ZFSManager:
                     self.second_order[(si, sj)] = enriched
 
         if dropped:
-            print(
+            LOGGER.warning(
                 f"Note: {len(dropped)} raw mode indices have no partner in the "
                 f"phonon spectrum ({n_phon} modes kept) and were skipped: "
                 f"{sorted(set(dropped))[:10]}{'...' if len(set(dropped)) > 10 else ''}. "
@@ -336,18 +340,18 @@ class ZFSManager:
         total_modes = self.nmodes
         n_1d = len(self.zfs_tensors)
         n_2d = len(self.zfs_tensors_2d)
-        print(f"Tensor data size: {n_1d} 1D, {n_2d} 2D out of {total_modes} total modes")
+        LOGGER.info(f"Tensor data size: {n_1d} 1D, {n_2d} 2D out of {total_modes} total modes")
 
         treated = self.zfs_tensors.keys() if (0 < n_1d <= n_2d or n_2d == 0) else self.zfs_tensors_2d.keys()
         mode_set = {x for item in treated for x in (item if isinstance(item, tuple) else (item,))}
-        print(f"Treated unique modes: {len(mode_set)}")
+        LOGGER.info(f"Treated unique modes: {len(mode_set)}")
         return mode_set
 
     def calculate_first_order_derivatives(self, ipr_thresh: Optional[float] = None):
         """
         Calculates 1st order finite difference derivatives dD/dq and spin-phonon coupling coefficients.
         """
-        print("Calculating first-order derivatives...")
+        LOGGER.info("Calculating first-order derivatives...")
         n_modes = self.nmodes
 
         zfs_deriv = np.zeros((n_modes, 3, 3))
@@ -363,7 +367,7 @@ class ZFSManager:
         spectrum = self.spectrum
         if len(self.treated_modes) < n_modes and spectrum is not None:
             inherit_coefficients = True
-            print("Degenerate modes inherit coefficients")
+            LOGGER.debug("Degenerate modes inherit coefficients")
 
         for i, item in sorted(self.zfs_tensors.items()):
             if i not in self.treated_modes:
@@ -423,10 +427,10 @@ class ZFSManager:
                     V_p_m[i] / CONSTANTS["MHz2J"],
                 )
 
-        print("Symmetry adjusted coefficients (1st order):")
-        print(f"V_00:  {np.sum(V_0_0 > 0)}")
-        print(f"V_pm:  {np.sum(V_p_m > 0)}")
-        print(f"V_0pm: {np.sum(V_0_pm > 0)}")
+        LOGGER.info("Symmetry adjusted coefficients (1st order):")
+        LOGGER.info(f"V_00:  {np.sum(V_0_0 > 0)}")
+        LOGGER.info(f"V_pm:  {np.sum(V_p_m > 0)}")
+        LOGGER.info(f"V_0pm: {np.sum(V_0_pm > 0)}")
 
         return zfs_deriv, V_0_0, V_p_m, V_0_pm
 
@@ -434,7 +438,7 @@ class ZFSManager:
         """
         Calculates 2nd order finite difference derivatives d2D/dqi dqj and 2-phonon coupling coefficients.
         """
-        print("Calculating second-order derivatives...")
+        LOGGER.info("Calculating second-order derivatives...")
         n_modes = self.nmodes
         phonon_energies = self.get_phonon_frequencies()
 
@@ -517,10 +521,10 @@ class ZFSManager:
                     V_p_m_2nd[i, j] / CONSTANTS["MHz2J"],
                 )
 
-        print("Symmetry adjusted coefficients (2nd order):")
-        print(f"V_00:  {np.sum(V_0_0_2nd > 0)}")
-        print(f"V_pm:  {np.sum(V_p_m_2nd > 0)}")
-        print(f"V_0pm: {np.sum(V_0_pm_2nd > 0)}")
+        LOGGER.info("Symmetry adjusted coefficients (2nd order):")
+        LOGGER.info(f"V_00:  {np.sum(V_0_0_2nd > 0)}")
+        LOGGER.info(f"V_pm:  {np.sum(V_p_m_2nd > 0)}")
+        LOGGER.info(f"V_0pm: {np.sum(V_0_pm_2nd > 0)}")
 
         return zfs_2nd_derivs, V_0_0_2nd, V_p_m_2nd, V_0_pm_2nd
 
@@ -694,7 +698,7 @@ class ZFSManager:
                 zfs_2nd_derivs=kwargs.get("zfs_2nd_derivs"),
             )
             out = coupling_obj.save(save_name)
-            print(f"Saved ZFS spin-phonon coupling data to: {out}")
+            LOGGER.info(f"Saved ZFS spin-phonon coupling data to: {out}")
             return out
 
         # 2. If saving raw dataset (RawZFSData)
@@ -717,7 +721,7 @@ class ZFSManager:
                 second_order=second or {},
             )
             out = raw_obj.save(save_name)
-            print(f"Saved raw ZFS dataset to: {out}")
+            LOGGER.info(f"Saved raw ZFS dataset to: {out}")
             return out
 
         # 3. Fallback for generic arrays
@@ -728,7 +732,7 @@ class ZFSManager:
             "pert_scale": self.pert_scale,
         }
         np.savez(save_name, **metadata, **kwargs)
-        print(f"Saved ZFS data to: {save_name}")
+        LOGGER.info(f"Saved ZFS data to: {save_name}")
         return save_name
 
     @staticmethod
@@ -746,8 +750,10 @@ class ZFSManager:
             off_diags_zero = np.all(np.abs(d_tensor[off_diag_mask]) <= dyn_tol)
 
             if not (is_axial and is_traceless_axial and off_diags_zero):
-                print(f"\nWarning: Symmetry mismatch at index {idx} with symmetry {sym_prod}")
-                print(f"Threshold: {dyn_tol:.2e} | Scale: {tensor_scale:.2f}")
+                LOGGER.warning(
+                    f"Symmetry mismatch at index {idx} with symmetry {sym_prod} "
+                    f"(threshold: {dyn_tol:.2e} | scale: {tensor_scale:.2f})"
+                )
 
     def _debug_derivs(self, dD, q, symmetry, idx, V_0_0, V_0_pm, V_p_m):
         max_val = np.max(np.abs(dD))
@@ -761,8 +767,8 @@ class ZFSManager:
         else:
             energy = freqs[idx - 1] if len(freqs) >= idx else 0
 
-        print(f"\n{double_line}\n DEBUG DERIVATIVES\n{'-' * total_width}")
-        print(
+        LOGGER.debug(f"{double_line}\n DEBUG DERIVATIVES\n{'-' * total_width}")
+        LOGGER.debug(
             f" Mode: {idx}\n"
             f" Symmetry: {symmetry}\n"
             f" Energy: {energy}\n"
@@ -773,8 +779,8 @@ class ZFSManager:
             f" V_0_pm: {V_0_pm}\n"
             f" V_p_m: {V_p_m}"
         )
-        print(" Tensor Structure (3x3):\n")
+        LOGGER.debug(" Tensor Structure (3x3):\n")
         for row in dD:
             formatted_row = "  ".join(f"{val:>{col_width}.6f}" for val in row)
-            print(f"  [ {formatted_row} ]")
-        print(f"{double_line}\n")
+            LOGGER.debug(f"  [ {formatted_row} ]")
+        LOGGER.debug(f"{double_line}\n")

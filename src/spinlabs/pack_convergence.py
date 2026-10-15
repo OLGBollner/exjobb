@@ -22,6 +22,10 @@ import numpy as np
 
 from spinlabs.parsers import parse_outcar_energy, parse_outcar_zfs
 
+from spinlabs.logging_utils import configure_logging, get_logger
+
+LOGGER = get_logger(__name__)
+
 
 def discover_runs(run_root: Path) -> list[tuple[int, float, Path]]:
     """Find runs/<mode>_pert_<p>/OUTCAR; returns sorted (mode, pert, dir)."""
@@ -29,12 +33,12 @@ def discover_runs(run_root: Path) -> list[tuple[int, float, Path]]:
     for outcar in sorted(Path(run_root).glob("runs/*/OUTCAR")):
         m = re.fullmatch(r"(\d+)_pert_(.+)", outcar.parent.name)
         if not m:
-            print(f"warning: skipping unrecognised run dir {outcar.parent.name}", file=sys.stderr)
+            LOGGER.warning(f"skipping unrecognised run dir {outcar.parent.name}")
             continue
         try:
             runs.append((int(m.group(1)), float(m.group(2)), outcar))
         except ValueError:
-            print(f"warning: skipping unparsable run dir {outcar.parent.name}", file=sys.stderr)
+            LOGGER.warning(f"skipping unparsable run dir {outcar.parent.name}")
     return sorted(runs, key=lambda r: (r[0], r[1]))
 
 
@@ -74,7 +78,7 @@ def pack_convergence(
     for mode, pert, outcar in runs:
         tensor = parse_outcar_zfs(outcar)
         if tensor is None or bool(np.isnan(tensor.matrix).all()):
-            print(f"warning: no ZFS tensor in {outcar} (run unfinished?)", file=sys.stderr)
+            LOGGER.warning(f"no ZFS tensor in {outcar} (run unfinished?)")
             n_empty += 1
             continue
         i, j = mode_idx[mode], pert_idx[pert]
@@ -94,7 +98,7 @@ def pack_convergence(
         e0 = parse_outcar_energy(ground_state)
         if e0 is not None:
             extra["d0_energy"] = np.float64(e0)
-        print(f"ground-state tensor from {ground_state}\n{extra['d0']}")
+        LOGGER.info(f"ground-state tensor from {ground_state}\n{extra['d0']}")
 
     if defect is None or cell is None:
         inf_d, inf_c = infer_defect_cell(run_root)
@@ -119,12 +123,12 @@ def pack_convergence(
         **extra,
     )
     n_done = tensors.size // 9 - n_empty
-    print(f"metadata: {json.dumps(metadata)}")
-    print(
+    LOGGER.info(f"metadata: {json.dumps(metadata)}")
+    LOGGER.info(
         f"Packed {n_done}/{tensors.size // 9} runs ({n_empty} unfinished, {n_missing} without energy) -> {output}"
     )
-    print(f"modes: {modes}")
-    print(f"perts: {perts}")
+    LOGGER.info(f"modes: {modes}")
+    LOGGER.info(f"perts: {perts}")
     return Path(output)
 
 
@@ -154,6 +158,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging(verbosity=1)
     parser = argparse.ArgumentParser(
         description="Parse runs/<mode>_pert_<p>/OUTCAR files and pack ZFS tensors + energies into one .npz"
     )

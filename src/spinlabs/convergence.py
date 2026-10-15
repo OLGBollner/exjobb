@@ -31,6 +31,10 @@ import numpy as np
 
 from spinlabs.models import ZFSTensor
 
+from spinlabs.logging_utils import get_logger
+
+LOGGER = get_logger(__name__)
+
 
 def principal_frame(D0: np.ndarray) -> np.ndarray:
     """Ground-state principal-axis rotation R, via spinlabs.ZFSTensor.
@@ -155,9 +159,8 @@ def plot_pert_convergence(
             perts = np.concatenate(([0.0], perts))
             tensors = np.concatenate((np.broadcast_to(data["d0"], (tensors.shape[0], 1, 3, 3)), tensors), axis=1)
         else:
-            print(
-                "warning: no Q=0 point (no 0 in perts, no 'd0' key in npz); fits use the unanchored points only",
-                file=sys.stderr,
+            LOGGER.warning(
+                "no Q=0 point (no 0 in perts, no 'd0' key in npz); fits use the unanchored points only",
             )
 
     # Q=0 is the relaxed structure, so the ZFS tensor there is identical for
@@ -178,16 +181,15 @@ def plot_pert_convergence(
                     tensors[i][izero_g] = q0_shared
                     patched += 1
             if patched:
-                print(
+                LOGGER.info(
                     f"borrowed the Q=0 tensor for {patched} mode(s) that lack "
                     "their own pert=0 run (identical relaxed structure)",
-                    file=sys.stderr,
                 )
 
     wanted = mode if mode else [int(m) for m in modes]
     missing = [m for m in wanted if m not in set(modes.tolist())]
     if missing:
-        print(f"warning: modes {missing} not in npz", file=sys.stderr)
+        LOGGER.warning(f"modes {missing} not in npz")
     if output_path is None:
         output_path = npz_path.with_name(npz_path.stem + "_convergence.png")
 
@@ -203,23 +205,21 @@ def plot_pert_convergence(
         ok0 = ~np.isnan(tensors[i]).any(axis=(1, 2))
         dropped = perts[~ok0]
         if len(dropped):
-            print(
+            LOGGER.warning(
                 f"mode {mode}: dropping {len(dropped)} run(s) with no ZFS tensor "
                 f"(unfinished or failed): {np.array2string(dropped)}",
-                file=sys.stderr,
             )
         if ok0.sum() < 2:
-            print(f"mode {mode}: fewer than 2 finished runs, skipping")
+            LOGGER.warning(f"mode {mode}: fewer than 2 finished runs, skipping")
             continue
         p_all, t_all = perts[ok0], tensors[i][ok0]
         # fixed principal frame from the Q=0 (relaxed) tensor; plot the
         # diagonal components of every tensor rotated into that frame
         izero = int(np.argmin(np.abs(p_all)))
         if not np.isclose(p_all[izero], 0.0):
-            print(
+            LOGGER.warning(
                 f"mode {mode}: warning: no Q=0 tensor; principal frame taken "
                 "from the smallest-|Q| perturbation instead",
-                file=sys.stderr,
             )
         R = principal_frame(t_all[izero])
         # reference for --deviation: the Q=0 values BEFORE any drop, so the
@@ -231,7 +231,7 @@ def plot_pert_convergence(
             p_use = p_all[np.abs(p_all) > 0]
             t_use = t_all[np.abs(p_all) > 0]
             if len(p_use) == 0:
-                print(f"mode {mode}: --drop-anchor leaves no points, skipping", file=sys.stderr)
+                LOGGER.warning(f"mode {mode}: --drop-anchor leaves no points, skipping")
                 continue
         vals = np.stack([np.diag(R.T @ t @ R) for t in t_use])
         trace = vals.sum(axis=1)
@@ -301,9 +301,9 @@ def plot_pert_convergence(
                             row[-1] = f"{cent:.6g}"
                     if cents:
                         msg += f"\n    central d2 (|Q|:value): {', '.join(cents)} MHz/pert^2"
-            print(20 * "-")
-            print(msg)
-            print(20 * "-", "\n")
+            LOGGER.info(20 * "-")
+            LOGGER.info(msg)
+            LOGGER.info(20 * "-")
             csv_rows.append(tuple(row))
         for j, title in enumerate(["ax + b", "ax² + bx + c"]):
             axes[0, j].set_title(title)
@@ -317,7 +317,7 @@ def plot_pert_convergence(
         out = output_path.with_name(f"{stem}_mode{mode}{ext}")
         fig.savefig(out, dpi=150)
         out_files.append(out)
-        print(f"  -> {out}")
+        LOGGER.info(f"  -> {out}")
         if show:
             plt.show()
 
@@ -329,5 +329,5 @@ def plot_pert_convergence(
             fh.write(",".join(header) + "\n")
             for row in csv_rows:
                 fh.write(",".join(str(v) for v in row) + "\n")
-        print(f"  -> {csv_path}")
+        LOGGER.info(f"  -> {csv_path}")
     return out_files
