@@ -1,4 +1,4 @@
-"""CLI command for packaging raw ZFS simulation data into a single .npz."""
+"""CLI command for scanning/packaging raw ZFS simulation data into a single .npz."""
 
 import argparse
 import re
@@ -65,7 +65,7 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
         type=str,
         nargs="+",
         choices=["all", "approx"],
-        default=["all"],
+        default=["all", "approx"],
         metavar="METHOD",
         help="ZFS calculation method(s) to package: all or approx (default: all).",
     )
@@ -75,6 +75,13 @@ def build_package_parser(parser: argparse.ArgumentParser) -> None:
         default=Path("data"),
         help="Root folder for packaged data (default: ./data).",
     )
+
+    parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Scan the destination folders for completed runs instead of packaging."
+        )
+
     parser.set_defaults(func=_run)
 
 
@@ -135,28 +142,27 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
 
     for method in methods:
         calc_method = _normalize_calc_method(method)
-        folder = args.output_root / f"{defect}_{cell_size}" / calc_method / date_dir
-        folder.mkdir(parents=True, exist_ok=True)
+
+        if not args.scan:
+            folder = args.output_root / f"{defect}_{cell_size}" / calc_method / date_dir
+            folder.mkdir(parents=True, exist_ok=True)
 
         datasets = {o: _collect(o) for o in orders}
         for o in orders:
-            print(f"  {o} order: {len(datasets[o])} perturbation(s) found in {defect_folder / _ORDER_DIRS[o]}")
+            print(f"  {o} order: {len(datasets[o])} perturbation length(s) found in {defect_folder / _ORDER_DIRS[o]}")
         pert_scales = sorted(set().union(*datasets.values()))
         if args.pert is not None:
             missing = [p for p in args.pert if p not in pert_scales]
             for p in missing:
                 warnings.warn(f"Perturbation scale {p:g} not found in {defect_folder.name}; skipping")
         if not pert_scales:
-            warnings.warn(f"Nothing to package for {defect_folder.name} ({calc_method}); skipping")
+            warnings.warn(f"No data to in {defect_folder.name} ({calc_method}); skipping")
             continue
-        print(f"Perturbation scales to package: {pert_scales}")
+        print(f"Perturbation scales to scan/package: {pert_scales}")
         for pert_scale in pert_scales:
             raw = None
             for o in orders:
                 if pert_scale not in datasets[o]:
-                    continue
-                if not any(datasets[o][pert_scale].rglob("OUTCAR")):
-                    warnings.warn(f"No OUTCARs in {datasets[o][pert_scale]}; skipping {o} order")
                     continue
                 data = parse_zfs_simulation_dataset(
                     sim_folder=datasets[o][pert_scale], order=_ORDER_NUM[o], calc_method=method, verbose=True
@@ -165,20 +171,22 @@ def _run_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str]) 
             if raw is None:
                 warnings.warn(f"No data parsed for {defect_folder.name} ({calc_method}, pert {pert_scale:g}); skipping")
                 continue
-            pert_folder = folder / f"pert_{pert_scale:g}"
-            pert_folder.mkdir(parents=True, exist_ok=True)
-            save_path = raw.save(pert_folder / raw._default_name())
-            register_file(
-                ensure_db(),
-                save_path,
-                "packaged_zfs",
-                defect=defect,
-                cell_size=cell_size,
-                calc_method=calc_method,
-                pert_order=([1] if raw.has_first_order else []) + ([2] if raw.has_second_order else []),
-                pert_scale=pert_scale,
-            )
-            print(f"Saved raw data in: {save_path}")
+
+            if not args.scan:
+                pert_folder = folder / f"pert_{pert_scale:g}"
+                pert_folder.mkdir(parents=True, exist_ok=True)
+                save_path = raw.save(pert_folder / raw._default_name())
+                register_file(
+                    ensure_db(),
+                    save_path,
+                    "packaged_zfs",
+                    defect=defect,
+                    cell_size=cell_size,
+                    calc_method=calc_method,
+                    pert_order=([1] if raw.has_first_order else []) + ([2] if raw.has_second_order else []),
+                    pert_scale=pert_scale,
+                )
+                print(f"Saved raw data in: {save_path}")
 
 
 _DICT_ORDER_SUFFIXES = {

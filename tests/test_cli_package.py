@@ -51,6 +51,7 @@ def _make_args(tmp_path, orders="first,second", pert=None):
         pert=pert,
         method=["all"],
         output_root=tmp_path / "data",
+        scan=False,
     )
 
 

@@ -117,9 +117,10 @@ def test_run_full_pipeline_from_coupling_data(tmp_path, dummy_coupling_file):
 def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
     """
     Verifies that passing a single raw_zfs_file containing both 1D and 2D data:
-    1. Preserves order=2 (or detects it automatically) and places the run under a pert_ folder.
+    1. Analyzes both orders (order=[1, 2] or detected automatically) and places the run under a pert_ folder.
     2. Computes both 1D and 2D couplings via process_both_orders.
     3. Preserves calc_method='all_bands' instead of resetting to None.
+    4. order=2 alone still runs, keeping 2D couplings under V2_* rather than the 1D V_* keys.
     """
     n_modes = 4
     pert_scale = 0.025
@@ -176,11 +177,11 @@ def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
     ph_file = tmp_path / "phonon_data.npz"
     spec.save(ph_file)
 
-    # Test 1: User explicitly passes order=2
+    # Test 1: User explicitly asks for both orders
     res = run_full_pipeline(
         raw_zfs_file=raw_file,
         phonon_file=ph_file,
-        order=2,
+        order=[1, 2],
         calc_method="all_bands",
         save_plots=False,
         output_root=tmp_path / "runs1",
@@ -195,7 +196,7 @@ def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
     assert cdata.V2_0_0 is not None
     assert cdata.calc_method == "all_bands"
 
-    # Test 2: User passes order=None, pipeline should detect second-order data and use order=2
+    # Test 2: User passes order=None, pipeline should detect and analyze both orders
     res2 = run_full_pipeline(
         raw_zfs_file=raw_file,
         phonon_file=ph_file,
@@ -210,6 +211,21 @@ def test_raw_zfs_file_with_both_orders_computes_order_2(tmp_path):
     cdata2 = SpinPhononCouplingData.load(run_dir2 / "spin_phonon_coupling.npz")
     assert cdata2.has_second_order
     assert cdata2.V2_0_0 is not None
+
+    # Test 3: order=2 only; the 2D couplings must not overwrite the 1D V_* keys
+    res3 = run_full_pipeline(
+        raw_zfs_file=raw_file,
+        phonon_file=ph_file,
+        order=2,
+        calc_method="all_bands",
+        save_plots=False,
+        output_root=tmp_path / "runs3",
+        temperatures=[10.0],
+    )
+    cdata3 = SpinPhononCouplingData.load(res3["run_dir"] / "spin_phonon_coupling.npz")
+    assert cdata3.has_second_order
+    assert np.asarray(cdata3.V_0_0).shape == (n_modes,)
+    assert np.asarray(cdata3.V2_0_0).shape == (n_modes, n_modes)
 
 
 def _write_mock_outcar(path: Path, d_diag=(-950.0, -950.0, 1900.0), energy=-500.123):
