@@ -3,7 +3,7 @@
 It shares the ``--defect/--cell-size/--method/--order/--pert-scale`` filter
 flags with ``run --query``. Rows are written through :func:`register_run` and
 read back through :func:`find_runs` so the tests exercise the exact format the
-pipeline produces (``order`` as a plain int, ``n_dims`` as a JSON array).
+pipeline produces (``order`` as a JSON list such as ``[1, 2]``).
 """
 
 
@@ -51,9 +51,8 @@ def registry_db(tmp_path, monkeypatch):
         init_state="ms_1",
         defect="NV",
         cell=512,
-        order=1,
+        order=[1, 2],
         pert=0.025,
-        n_dims=[1, 2],
         npz_files=[run_dir / "t1_relaxation.npz"],
     )
     registry.finish_run(conn, run_id, "done")
@@ -74,7 +73,7 @@ def test_query_resolves_single_run(registry_db, monkeypatch, tmp_path):
         monkeypatch,
         [
             "--query", "--defect", "NV", "--cell-size", "512", "--method", "all",
-            "--order", "1", "--pert-scale", "0.025", "-o", str(tmp_path / "out.png"),
+            "--order", "1", "2", "--pert-scale", "0.025", "-o", str(tmp_path / "out.png"),
         ],
         tmp_path,
     )
@@ -99,7 +98,7 @@ def test_query_and_inputs_are_mutually_exclusive(monkeypatch):
 
 def test_order_column_is_quoted(registry_db):
     conn, run_dir = registry_db
-    dirs = registry.find_runs(conn, [("order", 1)])
+    dirs = registry.find_runs(conn, [("order", [1, 2])])
     assert dirs == [run_dir]
 
 
@@ -127,6 +126,15 @@ def test_order_12_roundtrip(tmp_path, monkeypatch):
     assert registry.find_runs(conn, [("order", "1")])[0].name == "r_a"
 
 
+def test_order_list_roundtrip(tmp_path, monkeypatch):
+    """A pipeline-registered order list ([1, 2]) must be queryable as '1 2'."""
+    monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "registry"))
+    conn = registry.ensure_db()
+    _add_run(conn, tmp_path / "r_c", order=[1, 2])
+    assert registry.find_runs(conn, [("order", "1 2")])[0].name == "r_c"
+    assert registry.find_runs(conn, [("order", "12")])[0].name == "r_c"
+
+
 def test_latest_returns_newest(tmp_path, monkeypatch):
     monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "registry"))
     conn = registry.ensure_db()
@@ -150,11 +158,12 @@ def test_latest_ignores_running_rows(tmp_path, monkeypatch):
     assert [d.name for d in dirs] == ["r_done"]
 
 
-def test_no_match_still_empty(tmp_path, monkeypatch):
+def test_no_match_invalid_order_errors(tmp_path, monkeypatch):
     monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "registry"))
     conn = registry.ensure_db()
     _add_run(conn, tmp_path / "r_a", order=1)
-    assert registry.find_runs(conn, [("order", "3")]) == []
+    with pytest.raises(SystemExit):
+        registry.find_runs(conn, [("order", "3")])
 
 
 @pytest.mark.parametrize("subcmd", ["coupling", "rates"])

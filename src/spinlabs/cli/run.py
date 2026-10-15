@@ -5,6 +5,7 @@ from pathlib import Path
 
 from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
+from spinlabs.registry import _order_filter_values
 
 
 def build_run_parser(parser: argparse.ArgumentParser) -> None:
@@ -33,7 +34,13 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
         help="Calculation method: 'all' for all_bands (ZFS_hyp), 'approx' for defect_band_approx (ZFS_occup). "
         "Inferred from the input file name when omitted.",
     )
-    opt.add_argument("--order", type=int, choices=[1, 2, 12], help="Perturbation order (1, 2 or 12 for combined 1d+2d data)")
+    opt.add_argument(
+        "--order",
+        nargs="+",
+        type=int,
+        choices=[1, 2, 12],
+        help="Perturbation order(s) to analyze, e.g. --order 1 2 (or 1 / 2; 12 is the legacy alias for 1 2)",
+    )
     opt.add_argument("--pert-scale", type=float, help="Override perturbation scale (e.g. 0.025)")
     opt.add_argument("--defect", help="Override defect name (e.g. NV, ClV)")
     opt.add_argument("--cell-size", type=int, help="Override supercell size (e.g. 64, 128)")
@@ -131,7 +138,7 @@ def _run(args: argparse.Namespace) -> None:
         two_phonon_file=args.two_phonon,
         calc_method=_METHOD_MAP[_infer_method(args)][0],
         zfs_folder=_METHOD_MAP[_infer_method(args)][1],
-        order=args.order,
+        order=_order_filter_values(args.order) if args.order else None,
         pert_scale=args.pert_scale,
         defect=args.defect,
         cell_size=args.cell_size,
@@ -168,7 +175,7 @@ def _run_query(args: argparse.Namespace) -> None:
         cell_size=args.cell_size,
         calc_method=_normalize_calc_method(args.method),
         pert_scale=args.pert_scale,
-        pert_order=args.order,
+        pert_order=_order_filter_values(args.order) if args.order else None,
     )
     if not files:
         print("No unanalyzed packaged data matching the query.")
@@ -190,7 +197,7 @@ def _run_query(args: argparse.Namespace) -> None:
             two_phonon_file=args.two_phonon,
             calc_method=_METHOD_MAP[method][0],
             zfs_folder=_METHOD_MAP[method][1],
-            order=args.order,
+            order=_order_filter_values(args.order) if args.order else None,
             pert_scale=args.pert_scale,
             defect=args.defect,
             cell_size=args.cell_size,

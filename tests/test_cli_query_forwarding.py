@@ -99,7 +99,7 @@ def test_query_forwards_order_and_pert_scale(captured, monkeypatch):
     args = _parse(["--query", "--order", "1", "--pert-scale", "0.025"])
     args.func(args)
 
-    assert captured[0]["order"] == 1
+    assert captured[0]["order"] == [1]
     assert captured[0]["pert_scale"] == 0.025
 
 

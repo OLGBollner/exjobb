@@ -5,7 +5,7 @@ from pathlib import Path
 
 from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
 from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
-from spinlabs.registry import ensure_db, find_runs
+from spinlabs.registry import _order_filter_values, ensure_db, find_runs
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -156,7 +156,13 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--method", choices=["all", "approx"], help="Filter by calculation method: 'all' for all_bands, 'approx' for defect_band_approx"
     )
-    parser.add_argument("--order", type=int, choices=[1, 2, 12], help="Filter by perturbation order (1, 2 or 12)")
+    parser.add_argument(
+        "--order",
+        nargs="+",
+        type=int,
+        choices=[1, 2, 12],
+        help="Filter by perturbation order(s), e.g. --order 1 2 (12 is the legacy alias for 1 2)",
+    )
     parser.add_argument("--pert-scale", type=float, help="Filter by perturbation scale (e.g. 0.025)")
     parser.add_argument("--latest", action="store_true", help="With --query, use only the most recent matching run")
     parser.add_argument(
@@ -175,7 +181,7 @@ def _query_filters(args: argparse.Namespace) -> list[tuple[str, str]]:
     if args.method is not None:
         out.append(("method", {"all": "all_bands", "approx": "defect_band_approx"}[args.method]))
     if args.order is not None:
-        out.append(("order", args.order))
+        out.append(("order", _order_filter_values(args.order)))
     if args.pert_scale is not None:
         out.append(("pert", args.pert_scale))
     return out
