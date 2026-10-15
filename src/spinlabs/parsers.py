@@ -487,7 +487,7 @@ def parse_perturbation_directory(
     outcar_files = list(dir_path.glob("**/OUTCAR"))
     if not outcar_files:
         if verbose:
-            print(f"No OUTCARs found in: {dir_path}")
+            warnings.warn(f"No OUTCARs found in: {dir_path}")
         return {}
     if verbose:
         print(f"Parsing {len(outcar_files)} OUTCARs in {dir_path} ...")
@@ -546,7 +546,7 @@ def parse_zfs_simulation_dataset(
     elif calc_method in ("approx", "defect_band_approx"):
         calc_method, default_zfs = ("defect_band_approx", "ZFS_occup")
     else:
-        raise ValueError(f"{calc_method} is mot a valid zfs calculation method.")
+        raise ValueError(f"{calc_method} is not a valid zfs calculation method.")
 
     final_zfs_folder = zfs_folder or default_zfs
 

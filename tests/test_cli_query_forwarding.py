@@ -76,22 +76,19 @@ def test_query_forwards_run_name_for_a_single_match(captured, monkeypatch):
     assert captured[0]["run_name"] == "my_named_run"
 
 
-def test_query_rejects_run_name_when_several_datasets_match(captured, monkeypatch):
+def test_query_runs_every_match_under_its_own_run_name(captured, monkeypatch):
     _matches(
         monkeypatch,
         "/data/NV_512_raw_zfs_data_all_bands_12d.npz",
         "/data/ClV_128_raw_zfs_data_all_bands_12d.npz",
     )
     args = _parse(["--query", "--run-name", "my_named_run"])
+    args.func(args)
 
-    with pytest.raises(SystemExit) as excinfo:
-        args.func(args)
-
-    message = str(excinfo.value)
-    assert "my_named_run" in message
-    assert "ClV_128_raw_zfs_data_all_bands_12d.npz" in message
-    # nothing may run once the name is known to be ambiguous
-    assert captured == []
+    assert [c["run_name"] for c in captured] == [
+        "my_named_run_NV_512_raw_zfs_data_all_bands_12d",
+        "my_named_run_ClV_128_raw_zfs_data_all_bands_12d",
+    ]
 
 
 def test_query_forwards_order_and_pert_scale(captured, monkeypatch):
@@ -99,7 +96,7 @@ def test_query_forwards_order_and_pert_scale(captured, monkeypatch):
     args = _parse(["--query", "--order", "1", "--pert-scale", "0.025"])
     args.func(args)
 
-    assert captured[0]["order"] == 1
+    assert captured[0]["order"] == [1]
     assert captured[0]["pert_scale"] == 0.025
 
 

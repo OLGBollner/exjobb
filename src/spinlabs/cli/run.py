@@ -5,6 +5,7 @@ from pathlib import Path
 
 from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
+from spinlabs.registry import parse_orders
 
 
 def build_run_parser(parser: argparse.ArgumentParser) -> None:
@@ -33,7 +34,13 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
         help="Calculation method: 'all' for all_bands (ZFS_hyp), 'approx' for defect_band_approx (ZFS_occup). "
         "Inferred from the input file name when omitted.",
     )
-    opt.add_argument("--order", type=int, choices=[1, 2, 12], help="Perturbation order (1, 2 or 12 for combined 1d+2d data)")
+    opt.add_argument(
+        "--order",
+        nargs="+",
+        type=int,
+        choices=[1, 2, 12],
+        help="Perturbation order(s) to analyze, e.g. --order 1 2 (or 1 / 2; 12 is the legacy alias for 1 2)",
+    )
     opt.add_argument("--pert-scale", type=float, help="Override perturbation scale (e.g. 0.025)")
     opt.add_argument("--defect", help="Override defect name (e.g. NV, ClV)")
     opt.add_argument("--cell-size", type=int, help="Override supercell size (e.g. 64, 128)")
@@ -131,7 +138,7 @@ def _run(args: argparse.Namespace) -> None:
         two_phonon_file=args.two_phonon,
         calc_method=_METHOD_MAP[_infer_method(args)][0],
         zfs_folder=_METHOD_MAP[_infer_method(args)][1],
-        order=args.order,
+        order=parse_orders(args.order) if args.order else None,
         pert_scale=args.pert_scale,
         defect=args.defect,
         cell_size=args.cell_size,
@@ -168,29 +175,28 @@ def _run_query(args: argparse.Namespace) -> None:
         cell_size=args.cell_size,
         calc_method=_normalize_calc_method(args.method),
         pert_scale=args.pert_scale,
-        pert_order=args.order,
+        pert_order=parse_orders(args.order) if args.order else None,
     )
     if not files:
         print("No unanalyzed packaged data matching the query.")
         return
-    if args.run_name and len(files) > 1:
-        listing = "\n  ".join(str(p) for p in files)
-        raise SystemExit(
-            f"--run-name '{args.run_name}' is ambiguous: the query matches {len(files)} datasets, "
-            "which would all be written under that one name.\n"
-            f"  {listing}\n"
-            "Narrow the query (--defect/--cell-size/--method/--order/--pert-scale) or drop --run-name."
-        )
+    # With multiple matched datasets, disambiguate the run-name so each
+    # dataset lands in its own <run_name>_<stem> directory instead of
+    # silently sharing/creating duplicate <run_name>_1, _2, ... folders.
     for path in files:
         print(f"Running: {path}")
         method = _infer_method_from_file(Path(path))
+        if args.run_name and len(files) > 1:
+            run_name = f"{args.run_name}_{Path(path).stem}"
+        else:
+            run_name = args.run_name
         run_full_pipeline(
             raw_zfs_file=str(path),
             phonon_file=args.phonon_file,
             two_phonon_file=args.two_phonon,
             calc_method=_METHOD_MAP[method][0],
             zfs_folder=_METHOD_MAP[method][1],
-            order=args.order,
+            order=parse_orders(args.order) if args.order else None,
             pert_scale=args.pert_scale,
             defect=args.defect,
             cell_size=args.cell_size,
@@ -200,7 +206,7 @@ def _run_query(args: argparse.Namespace) -> None:
             temperatures=args.temperatures,
             init_state=args.init_state,
             output_root=args.output_root if args.output_root else "runs",
-            run_name=args.run_name,
+            run_name=run_name,
             save_plots=args.plot,
             show_plots=False,
             debug=args.debug,
