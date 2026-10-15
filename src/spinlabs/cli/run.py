@@ -7,6 +7,7 @@ from spinlabs.cli import add_verbosity_args
 from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
 from spinlabs.registry import ensure_db, parse_orders
+from spinlabs.relaxation_dynamics import INIT_STATES
 
 from spinlabs.logging_utils import get_logger
 
@@ -56,7 +57,12 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
         "--temperatures", type=float, nargs="+", metavar="T", help="Explicit temperature grid in K (overrides --t-*)"
     )
     opt.add_argument(
-        "--init-state", choices=["ms_0", "ms_1", "ms_-1"], default="ms_0", help="Initial spin state (default: ms_0)"
+        "--init-state",
+        nargs="+",
+        choices=INIT_STATES,
+        default=list(INIT_STATES),
+        help="Initial spin state(s) to solve the relaxation dynamics for; all share one run directory "
+        "(default: all of ms_1 ms_0 ms_-1)",
     )
     opt.add_argument(
         "-o", "--output-root", default="runs", help="Root folder for output run directories (default: runs)"

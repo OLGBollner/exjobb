@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS runs (
     zfs_files TEXT,                           -- JSON list of file paths
     phonon_file TEXT,
     method TEXT,
-    init_state TEXT,
+    init_state TEXT,                          -- JSON list of initial states, e.g. '["ms_1", "ms_0", "ms_-1"]'
     command TEXT,
     defect TEXT,
     cell INTEGER,
@@ -259,7 +259,7 @@ def register_run(
     zfs_files: list[str | Path] | None = None,
     phonon_file: str | Path | None = None,
     method: str | None = None,
-    init_state: str | None = None,
+    init_state: str | Sequence[str] | None = None,
     command: str | None = None,
     defect: str | None = None,
     cell: int | None = None,
@@ -279,7 +279,11 @@ def register_run(
 
     ``order`` is the perturbation orders actually present in the analyzed
     data, normalized to a JSON list (e.g. ``[1, 2]`` for combined data).
+    ``init_state`` is the initial state(s) whose dynamics the run solved,
+    stored as a JSON list (one run directory holds every state).
     """
+    if isinstance(init_state, str):
+        init_state = [init_state]
     conn.execute(
         """INSERT INTO runs (run_dir, started_at, status, zfs_files, phonon_file, method, init_state, command,
                             defect, cell, "order", pert, temp_min, temp_max, n_temps, npz_files, git_hash)
@@ -290,7 +294,7 @@ def register_run(
             json.dumps([str(Path(p).resolve()) for p in (zfs_files or [])]),
             str(Path(phonon_file).resolve()) if phonon_file else None,
             method,
-            init_state,
+            json.dumps(list(init_state)) if init_state else None,
             command,
             defect,
             cell,
@@ -385,7 +389,8 @@ def find_runs(
     plus ``timestamp`` as an alias for ``started_at``); unknown fields raise
     SystemExit so typos fail loudly. Values match like the old CSV index:
     exact and case-insensitive, with numeric fields compared numerically and
-    list fields (``npz_files`` per name) matching any element. ``order`` is a
+    list fields (``npz_files`` per name, ``init_state`` per state; legacy
+    scalar ``init_state`` values count as one-element lists) matching any element. ``order`` is a
     JSON list of the orders present in the data (e.g. ``'[1, 2]'``); a filter
     matches when every requested order is present (``--order 1`` matches
     ``[1]`` and ``[1, 2]`` runs, ``--order 1 2`` matches only combined runs).
@@ -396,7 +401,7 @@ def find_runs(
     """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
     numeric = {"cell", "pert", "temp_min", "temp_max", "n_temps"}
-    list_like = {"npz_files"}
+    list_like = {"npz_files", "init_state"}
     sql = "SELECT run_dir FROM runs WHERE status = 'done'"
     params: list[object] = []
     for field, value in filters:
@@ -416,7 +421,7 @@ def find_runs(
                 try:
                     items = json.loads(raw) if isinstance(raw, str) else raw
                 except (TypeError, json.JSONDecodeError):
-                    items = []
+                    items = [raw]  # legacy scalar, e.g. init_state 'ms_0'
                 if not isinstance(items, list):
                     items = [items]
                 if wanted in [str(i).lower() for i in items]:

@@ -103,7 +103,7 @@ def test_run_query_forwards_temperature_and_init_state(tmp_path):
     run_dirs = list(out.glob("spi17*"))
     assert len(run_dirs) == 1, f"expected one run dir, got {run_dirs}"
     info = json.loads((run_dirs[0] / "run_info.json").read_text())
-    assert info["init_state"] == "ms_1"
+    assert info["init_state"] == ["ms_1"]
     assert info["temperatures"]["min"] == 0.0
     # pipeline appends a +1 K guard point, so max is t_end + 1
     assert info["temperatures"]["max"] == pytest.approx(501.0)

@@ -29,7 +29,7 @@ from spinlabs.plotter import (
     plot_t1,
     plot_transition_rates_stacked,
 )
-from spinlabs.relaxation_dynamics import RelaxationDynamics
+from spinlabs.relaxation_dynamics import INIT_POPULATIONS, INIT_STATES, RelaxationDynamics, t1_file_name
 from spinlabs.transition_rate import TransitionRate
 from spinlabs.zfs_manager import ZFSManager
 
@@ -183,7 +183,7 @@ def run_full_pipeline(
     t_end: float = 300.0,
     t_step: float = 10.0,
     temperatures: Sequence[float] | None = None,
-    init_state: str = "ms_0",
+    init_state: str | Sequence[str] = INIT_STATES,
     output_root: str | Path = "runs",
     run_name: str | None = None,
     save_plots: bool = True,
@@ -195,7 +195,8 @@ def run_full_pipeline(
       1. Ingest raw simulation (OUTCARs or raw .npz)
       2. Calculate ZFS spin-phonon couplings and derivatives
       3. Compute 1-phonon, Raman and two-phonon transition rates vs temperature
-      4. Compute population relaxation dynamics and T_1 times
+      4. Compute population relaxation dynamics and T_1 times, once per
+         initial state in ``init_state`` (one state or several; default all)
       5. Save all results bunched together in a dedicated unique run folder
       6. (Optional) Generate and save publication-ready figures
     Keyword-only wrapper: see :func:`_execute_pipeline` for the pipeline body.
@@ -255,7 +256,7 @@ def _execute_pipeline(
     t_end: float = 300.0,
     t_step: float = 10.0,
     temperatures: Sequence[float] | None = None,
-    init_state: str = "ms_0",
+    init_state: str | Sequence[str] = INIT_STATES,
     output_root: str | Path = "runs",
     run_name: str | None = None,
     save_plots: bool = True,
@@ -265,6 +266,10 @@ def _execute_pipeline(
     """Pipeline body of :func:`run_full_pipeline` (DB logging already owned)."""
 
     LOGGER.info("Starting spinlabs pipeline run")
+    init_states = list(dict.fromkeys([init_state] if isinstance(init_state, str) else init_state))
+    unknown = [s for s in init_states if s not in INIT_POPULATIONS]
+    if unknown or not init_states:
+        raise ValueError(f"init_state must be one or more of {', '.join(INIT_STATES)}, got {init_state!r}")
     # ── 1. Resolve order and method ──────────────────────────────────────────
     # ``--order`` is a filter: which orders to analyze / look for. It accepts
     # one or more integers (1, 2); the legacy scalar 12 means "both".
@@ -593,39 +598,36 @@ def _execute_pipeline(
     LOGGER.info(f"      Saved directional rates -> {dir_rates_path.name}")
 
     # ── 7. Population Relaxation Dynamics & T1 Times ─────────────────────────
-    ms_mapping = {
-        "ms_1": [1.0, 0.0, 0.0],
-        "ms_0": [0.0, 1.0, 0.0],
-        "ms_-1": [0.0, 0.0, 1.0],
-    }
-    init_pop = ms_mapping.get(init_state, [0.0, 1.0, 0.0])
+    # Only this step depends on the initial state, so every state shares the
+    # run directory (and the couplings/rates above) and gets its own T1 file.
+    t1_paths: dict[str, Path] = {}
+    for state in init_states:
+        LOGGER.info(f"[4/5] Solving population relaxation dynamics (initial state: {state})...")
+        dynamics = RelaxationDynamics(init_state=INIT_POPULATIONS[state], rates_data=str(dir_rates_path))
 
-    LOGGER.info(f"[4/5] Solving population relaxation dynamics (initial state: {init_state})...")
-    dynamics = RelaxationDynamics(init_state=init_pop, rates_data=str(dir_rates_path))
+        t1_fit_arr = np.asarray(dynamics.compute_T1_range(), dtype=float)
+        t1_eig_arr = np.asarray(
+            [dynamics.get_T1_eigenval(temp_index=i)[0] for i in range(len(valid_temps_arr))], dtype=float
+        )
+        rates_fit = np.where(np.isfinite(t1_fit_arr) & (t1_fit_arr > 0), 1.0 / t1_fit_arr, np.nan)
+        rates_eig = np.where(np.isfinite(t1_eig_arr) & (t1_eig_arr > 0), 1.0 / t1_eig_arr, np.nan)
 
-    t1_fit_list = dynamics.compute_T1_range()
-    t1_eig_list = [dynamics.get_T1_eigenval(temp_index=i)[0] for i in range(len(valid_temps_arr))]
-
-    t1_fit_arr = np.asarray(t1_fit_list, dtype=float)
-    t1_eig_arr = np.asarray(t1_eig_list, dtype=float)
-    rates_fit = np.where(np.isfinite(t1_fit_arr) & (t1_fit_arr > 0), 1.0 / t1_fit_arr, np.nan)
-    rates_eig = np.where(np.isfinite(t1_eig_arr) & (t1_eig_arr > 0), 1.0 / t1_eig_arr, np.nan)
-
-    t1_path = run_dir / "t1_relaxation.npz"
-    np.savez(
-        t1_path,
-        defect=defect,
-        cell_size=cell_size,
-        calc_method=calc_method,
-        order=analyzed,
-        init_state=init_state,
-        temperatures=valid_temps_arr,
-        t1_fit=t1_fit_arr,
-        t1_eigenval=t1_eig_arr,
-        rates_fit=rates_fit,
-        rates_eigenval=rates_eig,
-    )
-    LOGGER.info(f"      Saved T1 relaxation -> {t1_path.name}")
+        t1_path = run_dir / t1_file_name(state)
+        np.savez(
+            t1_path,
+            defect=defect,
+            cell_size=cell_size,
+            calc_method=calc_method,
+            order=analyzed,
+            init_state=state,
+            temperatures=valid_temps_arr,
+            t1_fit=t1_fit_arr,
+            t1_eigenval=t1_eig_arr,
+            rates_fit=rates_fit,
+            rates_eigenval=rates_eig,
+        )
+        t1_paths[state] = t1_path
+        LOGGER.info(f"      Saved T1 relaxation -> {t1_path.name}")
 
     # ── 8. Summary and Metadata ──────────────────────────────────────────────
     run_info = {
@@ -646,7 +648,7 @@ def _execute_pipeline(
             "spin_phonon_coupling": str(coupling_path),
             "transition_rates": str(rates_path),
             "directional_rates": str(dir_rates_path),
-            "t1_relaxation": str(t1_path),
+            "t1_relaxation": {state: str(p) for state, p in t1_paths.items()},
         },
         "temperatures": {
             "min": float(np.min(valid_temps_arr)),
@@ -654,7 +656,7 @@ def _execute_pipeline(
             "count": len(valid_temps_arr),
             "points": len(valid_temps_arr),
         },
-        "init_state": init_state,
+        "init_state": init_states,
     }
 
     info_path = run_dir / "run_info.json"
@@ -671,7 +673,7 @@ def _execute_pipeline(
         zfs_files=[str(Path(p).resolve()) for p in _zfs_paths] if raw_data is not None else None,
         phonon_file=ph_path if ph_path is not None else None,
         method=calc_method,
-        init_state=init_state,
+        init_state=init_states,
         defect=str(defect),
         cell=cell_size,
         order=analyzed,
@@ -760,7 +762,7 @@ def _execute_pipeline(
             # T1 plot
             try:
                 ft1_path = fig_dir / "t1_vs_temperature.png"
-                plot_t1([t1_path], output_path=ft1_path, plain_name=True)
+                plot_t1(list(t1_paths.values()), output_path=ft1_path, plain_name=True)
                 figures_saved.append(ft1_path)
             except Exception as e:
                 LOGGER.warning(f"Could not generate T1 plot: {e}")
@@ -780,7 +782,7 @@ def _execute_pipeline(
             "coupling_path": coupling_path,
             "rates_path": rates_path,
             "directional_rates_path": dir_rates_path,
-            "t1_path": t1_path,
+            "t1_paths": t1_paths,
             "figures": figures_saved,
         }
     except Exception:

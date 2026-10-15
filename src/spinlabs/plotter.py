@@ -9,6 +9,7 @@ import numpy as np
 
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import SpinPhononCouplingData
+from spinlabs.relaxation_dynamics import find_t1_files
 from spinlabs.utils import MathUtils
 
 from spinlabs.logging_utils import get_logger
@@ -359,14 +360,14 @@ def plot_run_rates(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool)
 
 
 def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
-    """Plots T_1 relaxation times vs temperature."""
-    t1_file = run_dir / "t1_relaxation.npz"
-    if not t1_file.exists():
-        LOGGER.warning(f"Skipping T1 plot: {t1_file} not found.")
+    """Plots T_1 relaxation times vs temperature, one curve per initial state."""
+    t1_files = find_t1_files(run_dir)
+    if not t1_files:
+        LOGGER.warning(f"Skipping T1 plot: no t1_relaxation*.npz in {run_dir}.")
         return
 
     out_file = out_dir / f"t1_vs_temperature.{fmt}"
-    plot_t1([t1_file], output_path=out_file, plain_name=True)
+    plot_t1(t1_files, output_path=out_file, plain_name=True)
     LOGGER.info(f"  [✓] Saved T1 plot -> {out_file}")
 
 
@@ -395,8 +396,8 @@ def plot_t1(
     """
     Plot T_1 curves from one or more npz files or run directories in a single figure.
 
-    Each input is either a T1 npz file (e.g. ``t1_relaxation.npz``) or a run
-    directory containing one. Only the ODE-fit T1 is drawn; the eigenvalue
+    Each input is either a T1 npz file (e.g. ``t1_relaxation_ms_0.npz``) or a
+    run directory, which contributes one curve per initial state it holds. Only the ODE-fit T1 is drawn; the eigenvalue
     estimate is unreliable for initial states other than ms=0. Legend labels
     are built from the npz metadata: details shared by every curve are left
     out, the rest go in each label. No title is set. The output filename gets the metadata
@@ -407,12 +408,17 @@ def plot_t1(
     meta_parts: list[str] = []
     curves: list[tuple[np.ndarray, np.ndarray, str, list[str]]] = []
 
-    for path in inputs:
-        path = Path(path)
+    files: list[Path] = []
+    for path in map(Path, inputs):
         if path.is_dir():
-            path = path / "t1_relaxation.npz"
-            if not path.exists():
-                raise FileNotFoundError(f"No t1_relaxation.npz in run directory: {path.parent}")
+            found = find_t1_files(path)
+            if not found:
+                raise FileNotFoundError(f"No t1_relaxation*.npz in run directory: {path}")
+            files.extend(found)
+        else:
+            files.append(path)
+
+    for path in files:
         data = np.load(str(path), allow_pickle=True)
         temperatures = np.asarray(data["temperatures"], dtype=float)
         defect = str(data.get("defect", ""))

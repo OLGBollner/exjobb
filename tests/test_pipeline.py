@@ -69,7 +69,10 @@ def test_run_full_pipeline_from_coupling_data(tmp_path, dummy_coupling_file):
     assert (run_dir / "spin_phonon_coupling.npz").exists()
     assert (run_dir / "transition_rates.npz").exists()
     assert (run_dir / "directional_rates.npz").exists()
-    assert (run_dir / "t1_relaxation.npz").exists()
+    # Every initial state is solved into the same run directory.
+    for state in ("ms_1", "ms_0", "ms_-1"):
+        assert (run_dir / f"t1_relaxation_{state}.npz").exists()
+    assert not (run_dir / "t1_relaxation.npz").exists()
     assert (run_dir / "run_info.json").exists()
 
     # Check run_info.json contents
@@ -78,9 +81,11 @@ def test_run_full_pipeline_from_coupling_data(tmp_path, dummy_coupling_file):
     assert info["defect"] == "NV"
     assert info["cell_size"] == 64
     assert info["temperatures"]["count"] == 3
+    assert info["init_state"] == ["ms_1", "ms_0", "ms_-1"]
 
-    # Check t1_relaxation.npz contents
-    t1_data = np.load(run_dir / "t1_relaxation.npz")
+    # Check T1 file contents
+    t1_data = np.load(run_dir / "t1_relaxation_ms_0.npz")
+    assert str(t1_data["init_state"]) == "ms_0"
     assert len(t1_data["temperatures"]) == 3
     assert len(t1_data["t1_eigenval"]) == 3
     assert len(t1_data["t1_fit"]) == 3
@@ -310,3 +315,21 @@ def test_pipeline_with_mismatched_sim_folders_raises(tmp_path):
             output_root=tmp_path / "runs_mismatched",
             temperatures=[10.0],
         )
+
+
+def test_pipeline_registers_one_run_for_all_init_states(tmp_path, dummy_coupling_file):
+    import spinlabs.registry as registry
+
+    res = run_full_pipeline(
+        coupling_file=dummy_coupling_file,
+        output_root=tmp_path / "runs",
+        temperatures=[50.0, 100.0],
+        init_state=["ms_0", "ms_-1"],
+        save_plots=False,
+    )
+
+    assert set(res["t1_paths"]) == {"ms_0", "ms_-1"}
+    rows = registry.ensure_db().execute("SELECT init_state, run_dir FROM runs").fetchall()
+    assert rows == [('["ms_0", "ms_-1"]', str(Path(res["run_dir"]).resolve()))]
+    # The state filter matches any state the run solved.
+    assert registry.find_runs(registry.ensure_db(), [("init_state", "ms_-1")]) == [Path(rows[0][1])]

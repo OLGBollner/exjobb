@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import scipy.constants as Cn
 from scipy.integrate import odeint
@@ -5,6 +7,33 @@ from scipy.optimize import curve_fit
 from spinlabs.logging_utils import get_logger
 
 LOGGER = get_logger(__name__)
+
+# Initial spin states in table/column order, and their initial populations
+# over (ms=+1, ms=0, ms=-1).
+INIT_STATES = ("ms_1", "ms_0", "ms_-1")
+INIT_POPULATIONS = {
+    "ms_1": [1.0, 0.0, 0.0],
+    "ms_0": [0.0, 1.0, 0.0],
+    "ms_-1": [0.0, 0.0, 1.0],
+}
+
+
+def t1_file_name(init_state: str) -> str:
+    """T1 result file of one initial state inside a run directory."""
+    return f"t1_relaxation_{init_state}.npz"
+
+
+def find_t1_files(run_dir: str | Path) -> list[Path]:
+    """T1 result files in a run directory, in :data:`INIT_STATES` order.
+
+    Runs solve the dynamics for several initial states into
+    ``t1_relaxation_<state>.npz``; older runs hold a single
+    ``t1_relaxation.npz``, which is returned when no per-state file exists.
+    """
+    run_dir = Path(run_dir)
+    files = [run_dir / t1_file_name(s) for s in INIT_STATES if (run_dir / t1_file_name(s)).exists()]
+    legacy = run_dir / "t1_relaxation.npz"
+    return files or ([legacy] if legacy.exists() else [])
 
 
 class RelaxationDynamics:

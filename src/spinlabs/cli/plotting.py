@@ -7,6 +7,7 @@ from spinlabs.cli import add_verbosity_args
 from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
 from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
 from spinlabs.registry import ensure_db, find_runs, parse_orders
+from spinlabs.relaxation_dynamics import find_t1_files
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -192,10 +193,10 @@ def _query_filters(args: argparse.Namespace) -> list[tuple[str, str]]:
 def _run_t1(args: argparse.Namespace) -> None:
     if args.query:
         dirs = _resolve_query_runs(args)
-        inputs = [d / "t1_relaxation.npz" for d in dirs]
-        missing = [i for i in inputs if not i.exists()]
+        missing = [d for d in dirs if not find_t1_files(d)]
         if missing:
-            raise SystemExit(f"error: missing t1_relaxation.npz in: {', '.join(str(m) for m in missing)}")
+            raise SystemExit(f"error: missing t1_relaxation*.npz in: {', '.join(str(m) for m in missing)}")
+        inputs = [f for d in dirs for f in find_t1_files(d)]
     else:
         if not args.inputs:
             raise SystemExit("error: provide npz/run paths, or use --query to select registry runs")
