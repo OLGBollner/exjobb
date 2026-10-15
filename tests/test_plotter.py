@@ -89,20 +89,32 @@ class TestPlotter:
 
         fig, ax = plot_t1([p1, p2])
         labels = [line.get_label() for line in ax.get_lines()]
-        assert "NV 512, all_bands, 0" in " ".join(labels)
-        assert "ClV 128, defect_band, +1" in " ".join(labels)
-        # one colour per file: first and last lines share the file colour
+        assert labels == ["NV 512 ($m_s=0$)", "ClV 128 (decontaminated, $m_s=+1$)"]
+        # one colour per file
         assert ax.get_lines()[0].get_color() != ax.get_lines()[1].get_color()
         plt.close(fig)
 
-    def test_plot_t1_eigenval_curves_plotted(self, tmp_path):
-        """When t1_eigenval is present both curves appear for that file."""
+    def test_plot_t1_eigenval_not_plotted(self, tmp_path):
+        """Only the ODE-fit T1 is drawn, even when t1_eigenval is present."""
         p = self._make_t1_npz(tmp_path, "both.npz", t1_eigenval=np.array([1e-4, 3e-4, 9e-4]))
 
         fig, ax = plot_t1([p])
-        assert len(ax.get_lines()) == 2
-        assert any("Eigenvalue" in line.get_label() for line in ax.get_lines())
-        assert any("ODE fit" in line.get_label() for line in ax.get_lines())
+        assert len(ax.get_lines()) == 1
+        np.testing.assert_allclose(ax.get_lines()[0].get_ydata(), [1e-3, 2e-3, 4e-3])
+        plt.close(fig)
+
+    def test_plot_t1_shared_details_left_out(self, tmp_path):
+        """Details common to every curve are left out of the labels and no title is set."""
+        p1 = self._make_t1_npz(tmp_path, "a.npz", cell_size="512", init_state="ms_0")
+        p2 = self._make_t1_npz(tmp_path, "b.npz", cell_size="64", init_state="ms_0")
+        for p in (p1, p2):
+            data = dict(np.load(p))
+            data["order"] = np.array([1, 2])
+            np.savez(p, **data)
+
+        fig, ax = plot_t1([p1, p2])
+        assert [line.get_label() for line in ax.get_lines()] == ["NV 512", "NV 64"]
+        assert ax.get_title() == ""
         plt.close(fig)
 
     def test_plot_t1_legacy_keys_fallback(self, tmp_path):

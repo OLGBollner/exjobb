@@ -370,6 +370,22 @@ def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
     LOGGER.info(f"  [✓] Saved T1 plot -> {out_file}")
 
 
+_CALC_METHOD_LABELS = {"all_bands": "", "defect_band_approx": "decontaminated", "defect_band": "decontaminated"}
+_INIT_STATE_LABELS = {"ms_0": "$m_s=0$", "ms_1": "$m_s=+1$", "ms_-1": "$m_s=-1$"}
+
+
+def _t1_label_parts(defect: str, cell_size: str, calc_method: str, init_state: str) -> tuple[str, list[str]]:
+    """Return the legend head (e.g. ``NV 512``) and readable detail strings for one T1 curve."""
+    head = f"{defect} {cell_size}".strip()
+    details = []
+    method = _CALC_METHOD_LABELS.get(calc_method, calc_method.replace("_", " "))
+    if method:
+        details.append(method)
+    if init_state:
+        details.append(_INIT_STATE_LABELS.get(init_state, f"$m_s={init_state.removeprefix('ms_')}$"))
+    return head, details
+
+
 def plot_t1(
     inputs: Sequence[str | Path],
     output_path: str | Path | None = None,
@@ -380,15 +396,18 @@ def plot_t1(
     Plot T_1 curves from one or more npz files or run directories in a single figure.
 
     Each input is either a T1 npz file (e.g. ``t1_relaxation.npz``) or a run
-    directory containing one. Labels and the output filename are built from
-    the npz metadata unless ``plain_name`` is set.
+    directory containing one. Only the ODE-fit T1 is drawn; the eigenvalue
+    estimate is unreliable for initial states other than ms=0. Legend labels
+    are built from the npz metadata: details shared by every curve are left
+    out, the rest go in each label. No title is set. The output filename gets the metadata
+    appended unless ``plain_name`` is set.
     """
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
     colors = plt.cm.tab10.colors
-    plotted_any = False
     meta_parts: list[str] = []
+    curves: list[tuple[np.ndarray, np.ndarray, str, list[str]]] = []
 
-    for idx, path in enumerate(inputs):
+    for path in inputs:
         path = Path(path)
         if path.is_dir():
             path = path / "t1_relaxation.npz"
@@ -401,60 +420,40 @@ def plot_t1(
         calc_method = str(data.get("calc_method", ""))
         init_state = str(data.get("init_state", ""))
 
-        t1_fit = np.asarray(data["t1_fit"], dtype=float) if "t1_fit" in data else None
-        t1_eigenval = np.asarray(data["t1_eigenval"], dtype=float) if "t1_eigenval" in data else None
-        if t1_fit is None and "T1_times" in data:
-            t1_fit = np.asarray(data["T1_times"], dtype=float)
-        if t1_fit is None and "T1_range" in data:
-            t1_fit = np.asarray(data["T1_range"], dtype=float)
-
-        label_suffix = f" ({defect} {cell_size}" if defect else " ("
-        if calc_method:
-            label_suffix += f", {calc_method}"
-        if init_state:
-            label_suffix += f", {init_state}"
-        label_suffix += ")"
-
-        color = colors[idx % len(colors)]
-        if t1_fit is not None:
-            valid = np.isfinite(t1_fit) & (t1_fit > 0)
-            if np.any(valid):
-                ax.plot(
-                    temperatures[valid],
-                    t1_fit[valid],
-                    "o-",
-                    color=color,
-                    linewidth=2,
-                    markersize=5,
-                    label=f"$T_1$ ODE fit{label_suffix}",
-                )
-                plotted_any = True
-        if t1_eigenval is not None:
-            valid_eig = np.isfinite(t1_eigenval) & (t1_eigenval > 0)
-            if np.any(valid_eig):
-                ax.plot(
-                    temperatures[valid_eig],
-                    t1_eigenval[valid_eig],
-                    "--",
-                    color=color,
-                    linewidth=1.8,
-                    label=f"$T_1$ Eigenvalue{label_suffix}",
-                )
-                plotted_any = True
+        t1_fit = None
+        for key in ("t1_fit", "T1_times", "T1_range"):
+            if key in data:
+                t1_fit = np.asarray(data[key], dtype=float)
+                break
 
         meta_parts.extend(x.replace(" ", "-") for x in (defect, cell_size, calc_method, init_state) if x)
 
-    if not plotted_any:
+        if t1_fit is None:
+            continue
+        valid = np.isfinite(t1_fit) & (t1_fit > 0)
+        if not np.any(valid):
+            continue
+        head, details = _t1_label_parts(defect, cell_size, calc_method, init_state)
+        curves.append((temperatures[valid], t1_fit[valid], head or path.stem, details))
+
+    if not curves:
         LOGGER.warning("No valid T1 data found in the provided files.")
         plt.close(fig)
         return fig, ax
 
-    ax.set_xlabel("Temperature (K)", fontsize=14)
-    ax.set_ylabel(r"$T_1$ (s)", fontsize=14)
+    # Details every curve shares are left out so the labels stay short (state them in the caption).
+    shared = [d for d in curves[0][3] if all(d in c[3] for c in curves)] if len(curves) > 1 else []
+    for idx, (temps, t1, head, details) in enumerate(curves):
+        own = [d for d in details if d not in shared]
+        label = f"{head} ({', '.join(own)})" if own else head
+        ax.plot(temps, t1, "-", color=colors[idx % len(colors)], linewidth=2, label=label)
+
+    ax.set_xlabel("Temperature (K)", fontsize=16)
+    ax.set_ylabel(r"$T_1$ (s)", fontsize=16)
     ax.set_yscale("log")
-    ax.grid(True, which="both", linestyle=":", alpha=0.6)
-    ax.tick_params(axis="both", which="both", direction="in")
-    ax.legend(frameon=True, fontsize=11)
+    ax.grid(True, which="major", linestyle=":", alpha=0.6)
+    ax.tick_params(axis="both", which="both", direction="in", labelsize=12)
+    ax.legend(loc="best", frameon=True, fontsize=14)
     fig.tight_layout()
 
     if output_path is not None:
