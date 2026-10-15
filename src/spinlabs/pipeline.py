@@ -223,7 +223,7 @@ def run_full_pipeline(
             for req in user_orders:
                 if req == 2 and not coupling_data.has_second_order:
                     raise ValueError(
-                        f"--order 2 requested, but the input dataset contains no "
+                        "--order 2 requested, but the input dataset contains no "
                         "second-order (2d) tensors. Rerun without --order 2 or with input that "
                         "includes second-order perturbation data."
                     )
@@ -329,13 +329,13 @@ def run_full_pipeline(
             for req in user_orders:
                 if req == 2 and not has_2d:
                     raise ValueError(
-                        f"--order 2 requested, but the input dataset contains no "
+                        "--order 2 requested, but the input dataset contains no "
                         "second-order (2d) tensors. Rerun without --order 2 or with input that "
                         "includes second-order perturbation data."
                     )
                 if req == 1 and raw_data is not None and not has_1d:
                     raise ValueError(
-                        f"--order 1 requested, but the input dataset contains no "
+                        "--order 1 requested, but the input dataset contains no "
                         "first-order (1d) tensors. Rerun without --order 1 or with input that "
                         "includes first-order perturbation data."
                     )
