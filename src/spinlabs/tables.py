@@ -88,6 +88,26 @@ def _npz_str(data: np.lib.npyio.NpzFile, key: str) -> str | None:
     return value or None
 
 
+def _single_state(run_states: str | None, npz: Path) -> str | None:
+    """The registry's initial state for a T1 file lacking one, if unambiguous.
+
+    The registry stores a JSON list (legacy rows: one state as a plain string).
+    A run that solved several states cannot tell which one the file holds.
+    """
+    if not run_states:
+        return None
+    try:
+        states = json.loads(run_states)
+    except json.JSONDecodeError:
+        return run_states
+    if isinstance(states, str):
+        return states
+    if len(states) == 1:
+        return states[0]
+    LOGGER.warning(f"{npz.name} has no init_state and its run solved {', '.join(states)}; cannot tell which")
+    return None
+
+
 def collect_t1_rows(
     conn: sqlite3.Connection,
     temperature: float = 300.0,
@@ -140,8 +160,7 @@ def collect_t1_rows(
             defect = run_defect or _npz_str(data, "defect")
             cell = run_cell if run_cell is not None else _npz_str(data, "cell_size")
             method = run_method or _npz_str(data, "calc_method")
-            # Legacy runs stored one state as a plain string in the registry.
-            init_state = _npz_str(data, "init_state") or run_states
+            init_state = _npz_str(data, "init_state") or _single_state(run_states, npz)
             if not (defect and method and init_state):
                 LOGGER.warning(f"Skipping {npz}: missing defect/method/initial state metadata")
                 continue

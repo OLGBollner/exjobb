@@ -159,3 +159,31 @@ def test_t1_rows_read_every_state_file_of_one_run(tmp_path):
 
     assert row.t1 == {"ms_1": pytest.approx(0.02), "ms_0": pytest.approx(0.04), "ms_-1": pytest.approx(0.02)}
     assert r"NV 64 & 20.0 & 40.0 & 20.0 \\" in format_t1_table([row])
+
+
+def _add_stateless_run(conn, tmp_path, name, init_state):
+    """A run whose t1_relaxation.npz lacks the init_state key."""
+    run_dir = tmp_path / "runs" / "NV_64" / "pert_0.1" / "all_bands" / name
+    run_dir.mkdir(parents=True)
+    temps = np.array([0.0, 301.0])
+    np.savez(run_dir / "t1_relaxation.npz", defect="NV", cell_size=64, calc_method="all_bands",
+             temperatures=temps, t1_fit=np.full_like(temps, 0.05))
+    run_id = registry.register_run(conn, run_dir=run_dir, method="all_bands", init_state=init_state,
+                                   defect="NV", cell=64, pert=0.1)
+    registry.finish_run(conn, run_id, "done")
+
+
+def test_t1_file_without_state_takes_the_runs_single_state(tmp_path):
+    conn = registry.ensure_db()
+    _add_stateless_run(conn, tmp_path, "run", ["ms_1"])
+
+    (row,) = collect_t1_rows(conn)
+
+    assert row.t1 == {"ms_1": pytest.approx(0.05)}
+
+
+def test_t1_file_without_state_is_skipped_when_run_solved_several(tmp_path):
+    conn = registry.ensure_db()
+    _add_stateless_run(conn, tmp_path, "run", ["ms_1", "ms_0"])
+
+    assert collect_t1_rows(conn) == []
