@@ -402,8 +402,9 @@ def find_runs(
     columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
     numeric = {"cell", "pert", "temp_min", "temp_max", "n_temps"}
     list_like = {"npz_files", "init_state"}
-    sql = "SELECT run_dir FROM runs WHERE status = 'done'"
-    params: list[object] = []
+    # Repeating a field ORs its values: [("defect", "NV"), ("defect", "ClV")]
+    # matches runs of either defect; distinct fields are ANDed.
+    by_column: dict[str, list[object]] = {}
     for field, value in filters:
         column = "started_at" if field == "timestamp" else field
         if column not in columns | {"timestamp"}:
@@ -411,6 +412,9 @@ def find_runs(
                 f"error: unknown run filter '{field}'; valid fields: "
                 + ", ".join(sorted(columns | {"timestamp"}))
             )
+        by_column.setdefault(column, []).append(value)
+
+    def clause(column: str, value: object) -> tuple[str, list[object]]:
         if column in list_like:
             # Matches when any stored element equals the value (case-insensitive).
             wanted = str(value).strip().lower()
@@ -427,12 +431,8 @@ def find_runs(
                 if wanted in [str(i).lower() for i in items]:
                     keep.append(raw)
             if not keep:
-                sql += " AND 0"  # nothing matches this filter
-            else:
-                placeholders = ", ".join("?" * len(keep))
-                sql += f' AND "{column}" IN ({placeholders})'
-                params.extend(keep)
-            continue
+                return "0", []  # nothing matches this filter
+            return f'"{column}" IN ({", ".join("?" * len(keep))})', keep
         if column == "order":
             # Subset semantics: every requested order must be present in the
             # run's data, mirroring find_packaged(pert_order=...).
@@ -455,13 +455,8 @@ def find_runs(
                 if set(wanted_orders).issubset(have):
                     keep.append(raw)
             if not keep:
-                sql += " AND 0"
-            else:
-                placeholders = ", ".join("?" * len(keep))
-                sql += f' AND "{column}" IN ({placeholders})'
-                params.extend(keep)
-            continue
-        sql += f' AND "{column}" = ?'
+                return "0", []
+            return f'"{column}" IN ({", ".join("?" * len(keep))})', keep
         if column in numeric:
             try:
                 number = float(value)
@@ -470,7 +465,14 @@ def find_runs(
                 value = number
             except ValueError:
                 pass
-        params.append(value)
+        return f'"{column}" = ?', [value]
+
+    sql = "SELECT run_dir FROM runs WHERE status = 'done'"
+    params: list[object] = []
+    for column, values in by_column.items():
+        parts = [clause(column, v) for v in values]
+        sql += " AND (" + " OR ".join(c for c, _ in parts) + ")"
+        params.extend(p for _, ps in parts for p in ps)
     if latest:
         # Newest run first; ties broken by the higher (later-registered) id.
         sql += " ORDER BY started_at DESC, id DESC LIMIT 1"

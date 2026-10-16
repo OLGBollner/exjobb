@@ -63,9 +63,9 @@ def _make_phonon_alongside(npz_path):
 
 def _query_args(tmp_path, out_root, run_name="spi17"):
     return argparse.Namespace(
-        defect="NV",
-        cell_size=512,
-        method="all_bands",
+        defect=["NV"],
+        cell_size=[512],
+        method=["all_bands"],
         pert_scale=None,
         order=None,
         t_start=0.0,

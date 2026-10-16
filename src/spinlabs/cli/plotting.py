@@ -7,7 +7,7 @@ from spinlabs.cli import add_verbosity_args
 from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
 from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
 from spinlabs.registry import ensure_db, find_runs, parse_orders
-from spinlabs.relaxation_dynamics import find_t1_files
+from spinlabs.relaxation_dynamics import INIT_STATES, find_t1_files, normalize_init_state
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -37,6 +37,14 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
     t1 = subparsers.add_parser("t1", help="Plot T1 curves from one or more npz files or run directories in one figure")
     t1.add_argument("inputs", nargs="*", type=Path)
     _add_query_args(t1)
+    t1.add_argument(
+        "--init-state",
+        nargs="+",
+        type=normalize_init_state,
+        choices=INIT_STATES,
+        metavar="STATE",
+        help="Only plot these initial spin state(s): ms_1 ms_0 ms_-1, or 1 0 -1 (default: every state found)",
+    )
     t1.add_argument("--plain-name", action="store_true", help="Do not append metadata to the output filename")
     _add_output_args(t1)
     t1.set_defaults(func=_run_t1)
@@ -154,10 +162,13 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
         help="Plot the completed runs in the registry matching the filters "
         "(--defect/--cell-size/--method/--order/--pert-scale). Same syntax as 'run --query'",
     )
-    parser.add_argument("--defect", help="Filter by defect name (e.g. NV, ClV)")
-    parser.add_argument("--cell-size", type=int, help="Filter by supercell size (e.g. 64, 128)")
+    parser.add_argument("--defect", nargs="+", help="Filter by defect name(s) (e.g. NV ClV)")
+    parser.add_argument("--cell-size", nargs="+", type=int, help="Filter by supercell size(s) (e.g. 64 128)")
     parser.add_argument(
-        "--method", choices=["all", "approx"], help="Filter by calculation method: 'all' for all_bands, 'approx' for defect_band_approx"
+        "--method",
+        nargs="+",
+        choices=["all", "approx"],
+        help="Filter by calculation method(s): 'all' for all_bands, 'approx' for defect_band_approx",
     )
     parser.add_argument(
         "--order",
@@ -166,7 +177,9 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
         choices=[1, 2, 12],
         help="Filter by perturbation order(s), e.g. --order 1 2 (12 is the legacy alias for 1 2)",
     )
-    parser.add_argument("--pert-scale", type=float, help="Filter by perturbation scale (e.g. 0.025)")
+    parser.add_argument(
+        "--pert-scale", nargs="+", type=float, help="Filter by perturbation scale(s) (e.g. 0.1 0.025)"
+    )
     parser.add_argument("--latest", action="store_true", help="With --query, use only the most recent matching run")
     parser.add_argument(
         "-r", "--output-root", default="runs",
@@ -175,18 +188,19 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _query_filters(args: argparse.Namespace) -> list[tuple[str, str]]:
-    """--query flag values as (column, value) filters for registry.find_runs."""
+    """--query flag values as (column, value) filters for registry.find_runs.
+
+    Each value of a multi-valued flag becomes its own filter; find_runs ORs
+    repeated fields, so ``--defect NV ClV`` matches runs of either defect.
+    """
     out = []
-    if args.defect is not None:
-        out.append(("defect", args.defect))
-    if args.cell_size is not None:
-        out.append(("cell", args.cell_size))
-    if args.method is not None:
-        out.append(("method", {"all": "all_bands", "approx": "defect_band_approx"}[args.method]))
+    out += [("defect", d) for d in args.defect or []]
+    out += [("cell", c) for c in args.cell_size or []]
+    out += [("method", {"all": "all_bands", "approx": "defect_band_approx"}[m]) for m in args.method or []]
     if args.order is not None:
         out.append(("order", parse_orders(args.order)))
-    if args.pert_scale is not None:
-        out.append(("pert", args.pert_scale))
+    out += [("pert", p) for p in args.pert_scale or []]
+    out += [("init_state", s) for s in getattr(args, "init_state", None) or []]
     return out
 
 
@@ -202,7 +216,7 @@ def _run_t1(args: argparse.Namespace) -> None:
             raise SystemExit("error: provide npz/run paths, or use --query to select registry runs")
         inputs = args.inputs
     out = args.output or _default_output(args, "t1", "t1")
-    plot_t1(inputs, output_path=out, show=args.show, plain_name=args.plain_name)
+    plot_t1(inputs, output_path=out, show=args.show, plain_name=args.plain_name, init_states=args.init_state)
 
 
 

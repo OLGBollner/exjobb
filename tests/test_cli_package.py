@@ -393,3 +393,60 @@ def test_register_only_orders_from_content(tmp_path):
     args.func(args)
     rows = conn.execute("SELECT pert_order FROM files WHERE kind='packaged_zfs'").fetchall()
     assert json.loads(rows[0][0]) == [2]
+
+
+def test_package_copies_full_phonon_spectrum(tmp_path, monkeypatch):
+    """The full-spectrum phonon npz lands in data/<defect>_<cell>/ and is registered."""
+    _tree(tmp_path)
+    db = _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "phonon_data.npz").write_bytes(b"full")
+    (tmp_path / "NV_512" / "phonon_data_sym_n1022.npz").write_bytes(b"sym")
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path))
+
+    dest = tmp_path / "data" / "NV_512" / "phonon_data.npz"
+    assert dest.read_bytes() == b"full"
+    row = sqlite3.connect(db).execute(
+        "SELECT path, defect, cell_size FROM files WHERE kind = 'phonon'"
+    ).fetchone()
+    assert row == (str(dest.resolve()), "NV", 512)
+
+
+def test_package_finds_differently_named_phonon(tmp_path, monkeypatch):
+    _tree(tmp_path)
+    _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "phonons.npz").write_bytes(b"full")
+    (tmp_path / "NV_512" / "phonons_sym.npz").write_bytes(b"sym")
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path))
+    assert (tmp_path / "data" / "NV_512" / "phonon_data.npz").read_bytes() == b"full"
+
+
+def test_package_skips_symmetry_reduced_only_phonon(tmp_path, monkeypatch):
+    _tree(tmp_path)
+    _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "phonons_sym.npz").write_bytes(b"sym")
+    with _patch(lambda **kw: _raw(order=kw["order"])), pytest.warns(UserWarning, match="symmetry-reduced"):
+        _run(_make_args(tmp_path))
+    assert not (tmp_path / "data" / "NV_512" / "phonon_data.npz").exists()
+
+
+def test_scan_does_not_copy_phonon(tmp_path, monkeypatch):
+    _tree(tmp_path)
+    _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "phonon_data.npz").write_bytes(b"full")
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path, scan=True))
+    assert not (tmp_path / "data").exists()
+
+
+def test_register_only_registers_packaged_phonon(tmp_path, monkeypatch):
+    from spinlabs.cli.package import _register_only
+
+    db = _registry(monkeypatch, tmp_path)
+    dest = tmp_path / "data" / "ClV_128" / "phonon_data.npz"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"full")
+    _register_only(tmp_path / "data")
+    row = sqlite3.connect(db).execute("SELECT kind, defect, cell_size FROM files").fetchone()
+    assert row == ("phonon", "ClV", 128)

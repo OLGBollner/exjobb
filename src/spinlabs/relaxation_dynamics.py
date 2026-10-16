@@ -18,6 +18,12 @@ INIT_POPULATIONS = {
 }
 
 
+def normalize_init_state(value: str) -> str:
+    """Accept ``ms_0``, ``ms0``, ``0`` (and likewise for 1/-1/+1) and return the ``ms_<m>`` name."""
+    text = str(value).strip().lower().removeprefix("ms").lstrip("_").removeprefix("+")
+    return f"ms_{text}"
+
+
 def t1_file_name(init_state: str) -> str:
     """T1 result file of one initial state inside a run directory."""
     return f"t1_relaxation_{init_state}.npz"

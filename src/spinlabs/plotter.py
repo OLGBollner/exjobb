@@ -392,6 +392,7 @@ def plot_t1(
     output_path: str | Path | None = None,
     show: bool = False,
     plain_name: bool = False,
+    init_states: Sequence[str] | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
     """
     Plot T_1 curves from one or more npz files or run directories in a single figure.
@@ -401,7 +402,8 @@ def plot_t1(
     estimate is unreliable for initial states other than ms=0. Legend labels
     are built from the npz metadata: details shared by every curve are left
     out, the rest go in each label. No title is set. The output filename gets the metadata
-    appended unless ``plain_name`` is set.
+    appended unless ``plain_name`` is set. With ``init_states`` only curves of
+    those initial states (e.g. ``["ms_0"]``) are drawn.
     """
     fig, ax = plt.subplots(figsize=(10, 6))
     colors = plt.cm.tab10.colors
@@ -425,6 +427,8 @@ def plot_t1(
         cell_size = str(data.get("cell_size", ""))
         calc_method = str(data.get("calc_method", ""))
         init_state = str(data.get("init_state", ""))
+        if init_states is not None and init_state not in init_states:
+            continue
 
         t1_fit = None
         for key in ("t1_fit", "T1_times", "T1_range"):

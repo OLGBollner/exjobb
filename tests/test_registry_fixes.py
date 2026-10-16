@@ -77,9 +77,9 @@ def test_run_query_normalizes_method(tmp_path, monkeypatch):
     )
 
     args = argparse.Namespace(
-        defect="NV",
-        cell_size=512,
-        method="all",
+        defect=["NV"],
+        cell_size=[512],
+        method=["all"],
         pert_scale=None,
         order=None,
         output_root=str(tmp_path / "runs"),
@@ -345,3 +345,20 @@ def test_find_runs_npz_files_matches_single_name(tmp_path):
     conn.commit()
     assert [p.name for p in registry.find_runs(conn, [("npz_files", "B.npz")])] == [d.name]
     assert registry.find_runs(conn, [("npz_files", "a.npz+b.npz")]) == []
+
+
+def test_find_runs_repeated_field_ors_values(tmp_path):
+    """Repeating a filter field matches any of its values; distinct fields AND."""
+    import spinlabs.registry as registry
+
+    conn = registry.ensure_db()
+    for defect, pert in [("NV", 0.025), ("ClV", 0.1), ("DiV", 0.025), ("NV", 0.1)]:
+        registry.register_run(conn, run_dir=tmp_path / f"{defect}_{pert}", defect=defect, cell=128,
+                              order=1, pert=pert, method="all_bands", npz_files=["t1_relaxation.npz"])
+    conn.execute("UPDATE runs SET status='done'")
+    conn.commit()
+
+    names = lambda f: sorted(p.name for p in registry.find_runs(conn, f))
+    assert names([("defect", "NV"), ("defect", "ClV")]) == ["ClV_0.1", "NV_0.025", "NV_0.1"]
+    assert names([("defect", "NV"), ("defect", "DiV"), ("pert", 0.025)]) == ["DiV_0.025", "NV_0.025"]
+    assert names([("pert", 0.1), ("pert", 0.025), ("defect", "ClV")]) == ["ClV_0.1"]

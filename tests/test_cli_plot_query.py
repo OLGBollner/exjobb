@@ -204,3 +204,39 @@ def test_plot_path_and_query_conflict(subcmd, registry_db):
     args = build_parser().parse_args(["plot", subcmd, "some_dir", "--query", "--defect", "NV"])
     with pytest.raises(SystemExit, match="not both"):
         args.func(args)
+
+
+def test_plot_query_multi_valued_filters_become_repeated_fields():
+    from spinlabs.cli import build_parser
+    from spinlabs.cli.plotting import _query_filters
+
+    args = build_parser().parse_args(
+        ["plot", "rates", "--query", "--defect", "NV", "ClV", "--pert-scale", "0.1", "0.025", "--method", "all"]
+    )
+    assert _query_filters(args) == [
+        ("defect", "NV"), ("defect", "ClV"), ("method", "all_bands"), ("pert", 0.1), ("pert", 0.025),
+    ]
+
+
+@pytest.mark.parametrize("given,expected", [("0", "ms_0"), ("1", "ms_1"), ("-1", "ms_-1"), ("+1", "ms_1"), ("ms_0", "ms_0"), ("ms-1", "ms_-1")])
+def test_plot_t1_init_state_accepts_shorthand(given, expected):
+    from spinlabs.cli import build_parser
+
+    args = build_parser().parse_args(["plot", "t1", "--query", "--init-state", given])
+    assert args.init_state == [expected]
+
+
+def test_plot_t1_init_state_filters_query_and_curves(tmp_path):
+    import numpy as np
+    from spinlabs.cli import build_parser
+    from spinlabs.cli.plotting import _query_filters
+    from spinlabs.plotter import plot_t1
+
+    args = build_parser().parse_args(["plot", "t1", "--query", "--defect", "ClV", "--init-state", "0", "-1"])
+    assert ("init_state", "ms_0") in _query_filters(args) and ("init_state", "ms_-1") in _query_filters(args)
+
+    for state in ("ms_1", "ms_0", "ms_-1"):
+        np.savez(tmp_path / f"t1_relaxation_{state}.npz", temperatures=[10.0, 20.0], t1_fit=[1.0, 0.5],
+                 defect="ClV", cell_size=128, calc_method="all_bands", init_state=state)
+    _, ax = plot_t1([tmp_path], init_states=["ms_0"])
+    assert len(ax.get_lines()) == 1

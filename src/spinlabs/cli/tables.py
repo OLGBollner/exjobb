@@ -1,6 +1,7 @@
 """CLI subcommands for generating LaTeX tables from the registry."""
 
 import argparse
+from itertools import product
 import sys
 from pathlib import Path
 
@@ -50,15 +51,18 @@ def build_table_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa:
 
 def _add_run_filter_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--temperature", type=float, default=300.0, help="Temperature in K to read T1 at (default: 300)")
-    parser.add_argument("--defect", help="Only this defect (e.g. NV, ClV)")
-    parser.add_argument("--cell-size", type=int, help="Only this supercell size (e.g. 64, 512)")
+    parser.add_argument("--defect", nargs="+", help="Only these defect(s) (e.g. NV ClV)")
+    parser.add_argument("--cell-size", nargs="+", type=int, help="Only these supercell size(s) (e.g. 64 512)")
     parser.add_argument(
-        "--method", choices=["all", "approx"], help="Only 'all' (all_bands) or 'approx' (defect_band_approx) runs"
+        "--method",
+        nargs="+",
+        choices=["all", "approx"],
+        help="Only 'all' (all_bands) and/or 'approx' (defect_band_approx) runs",
     )
     parser.add_argument(
         "--order", nargs="+", type=int, choices=[1, 2, 12], help="Only runs containing these perturbation orders"
     )
-    parser.add_argument("--pert-scale", type=float, help="Only this perturbation scale (e.g. 0.025)")
+    parser.add_argument("--pert-scale", nargs="+", type=float, help="Only these perturbation scale(s) (e.g. 0.1 0.025)")
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -70,18 +74,18 @@ def _add_output_args(parser: argparse.ArgumentParser) -> None:
     add_verbosity_args(parser)
 
 
+_METHODS = {"all": "all_bands", "approx": "defect_band_approx"}
+
+
 def _filters(args: argparse.Namespace) -> list[tuple[str, object]]:
+    # One filter per value; find_runs ORs repeated fields.
     out: list[tuple[str, object]] = []
-    if args.defect is not None:
-        out.append(("defect", args.defect))
-    if args.cell_size is not None:
-        out.append(("cell", args.cell_size))
-    if args.method is not None:
-        out.append(("method", {"all": "all_bands", "approx": "defect_band_approx"}[args.method]))
+    out += [("defect", d) for d in args.defect or []]
+    out += [("cell", c) for c in args.cell_size or []]
+    out += [("method", _METHODS[m]) for m in args.method or []]
     if args.order is not None:
         out.append(("order", parse_orders(args.order)))
-    if args.pert_scale is not None:
-        out.append(("pert", args.pert_scale))
+    out += [("pert", p) for p in args.pert_scale or []]
     return out
 
 
@@ -101,19 +105,23 @@ def _run_defects(args: argparse.Namespace) -> None:
         sources = args.inputs
     else:
         # D is a ground-state property: it does not depend on order or pert-scale.
-        sources = find_packaged(
-            conn,
-            defect=args.defect,
-            cell_size=args.cell_size,
-            calc_method={"all": "all_bands", "approx": "defect_band_approx", None: None}[args.method],
-            exclude_run=False,
-        )
+        sources = []
+        for defect, cell, method in product(args.defect or [None], args.cell_size or [None], args.method or [None]):
+            for path in find_packaged(
+                conn,
+                defect=defect,
+                cell_size=cell,
+                calc_method=_METHODS.get(method),
+                exclude_run=False,
+            ):
+                if path not in sources:
+                    sources.append(path)
     d_rows = collect_d_rows(list(sources))
     if args.inputs:
         d_rows = [
             r for r in d_rows
-            if (args.defect is None or r["defect"] == args.defect)
-            and (args.cell_size is None or r["cell"] == str(args.cell_size))
+            if (args.defect is None or r["defect"] in args.defect)
+            and (args.cell_size is None or r["cell"] in {str(c) for c in args.cell_size})
         ]
     t1_rows = [] if args.no_t1 else collect_t1_rows(
         conn, args.temperature, _filters(args), output_root=args.output_root, by_pert=False

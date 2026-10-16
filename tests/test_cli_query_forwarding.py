@@ -189,3 +189,56 @@ def test_non_query_run_solves_every_init_state_in_one_run(captured):
 
     assert len(captured) == 1
     assert captured[0]["init_state"] == ["ms_1", "ms_0", "ms_-1"]
+
+
+def test_query_accepts_multiple_defects(captured, monkeypatch):
+    """`--defect NV DiV ClV` queries each defect and forwards the matching one."""
+    seen = []
+
+    def fake_find(conn, *, defect, **kwargs):
+        seen.append(defect)
+        return [f"/data/{defect}_128_raw_zfs_data_all_bands_1d.npz"]
+
+    monkeypatch.setattr(registry, "find_packaged", fake_find)
+    args = _parse(["--query", "--defect", "NV", "DiV", "ClV"])
+    args.func(args)
+
+    assert seen == ["NV", "DiV", "ClV"]
+    assert [c["defect"] for c in captured] == ["NV", "DiV", "ClV"]
+
+
+def test_multiple_defects_rejected_without_query():
+    args = _parse(["--raw-zfs-file", "x_all_bands.npz", "--defect", "NV", "ClV"])
+    with pytest.raises(SystemExit):
+        args.func(args)
+
+
+def test_query_runs_every_filter_combination(captured, monkeypatch):
+    """`--defect NV ClV --pert-scale 0.1 0.025` queries all four combinations."""
+    seen = []
+
+    def fake_find(conn, *, defect, pert_scale, **kwargs):
+        seen.append((defect, pert_scale))
+        return [f"/data/{defect}_128_pert_{pert_scale}_all_bands_1d.npz"]
+
+    monkeypatch.setattr(registry, "find_packaged", fake_find)
+    args = _parse(["--query", "--defect", "NV", "ClV", "--pert-scale", "0.1", "0.025"])
+    args.func(args)
+
+    combos = [("NV", 0.1), ("NV", 0.025), ("ClV", 0.1), ("ClV", 0.025)]
+    assert seen == combos
+    assert [(c["defect"], c["pert_scale"]) for c in captured] == combos
+
+
+def test_query_runs_a_dataset_matched_twice_once(captured, monkeypatch):
+    monkeypatch.setattr(registry, "find_packaged", lambda *a, **k: ["/data/NV_128_all_bands_1d.npz"])
+    args = _parse(["--query", "--cell-size", "128", "512"])
+    args.func(args)
+    assert len(captured) == 1
+
+
+@pytest.mark.parametrize("flag", [["--cell-size", "64", "128"], ["--method", "all", "approx"], ["--pert-scale", "0.1", "0.025"]])
+def test_multiple_filter_values_rejected_without_query(flag):
+    args = _parse(["--raw-zfs-file", "x_all_bands.npz", *flag])
+    with pytest.raises(SystemExit):
+        args.func(args)

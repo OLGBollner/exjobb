@@ -1,13 +1,14 @@
 """CLI subcommand for the end-to-end analysis pipeline."""
 
 import argparse
+from itertools import product
 from pathlib import Path
 
 from spinlabs.cli import add_verbosity_args
 from spinlabs.models import _normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
 from spinlabs.registry import ensure_db, parse_orders
-from spinlabs.relaxation_dynamics import INIT_STATES
+from spinlabs.relaxation_dynamics import INIT_STATES, normalize_init_state
 
 from spinlabs.logging_utils import get_logger
 
@@ -36,9 +37,10 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     opt.add_argument("--two-phonon", metavar="FILE", help="Two-phonon Raman .npz file (optional)")
     opt.add_argument(
         "--method",
+        nargs="+",
         choices=["all", "approx"],
         help="Calculation method: 'all' for all_bands (ZFS_hyp), 'approx' for defect_band_approx (ZFS_occup). "
-        "Inferred from the input file name when omitted.",
+        "Inferred from the input file name when omitted. With --query, both may be given",
     )
     opt.add_argument(
         "--order",
@@ -47,9 +49,23 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
         choices=[1, 2, 12],
         help="Perturbation order(s) to analyze, e.g. --order 1 2 (or 1 / 2; 12 is the legacy alias for 1 2)",
     )
-    opt.add_argument("--pert-scale", type=float, help="Override perturbation scale (e.g. 0.025)")
-    opt.add_argument("--defect", help="Override defect name (e.g. NV, ClV)")
-    opt.add_argument("--cell-size", type=int, help="Override supercell size (e.g. 64, 128)")
+    opt.add_argument(
+        "--pert-scale",
+        nargs="+",
+        type=float,
+        help="Override perturbation scale (e.g. 0.025). With --query, several may be given (e.g. 0.1 0.025)",
+    )
+    opt.add_argument(
+        "--defect",
+        nargs="+",
+        help="Override defect name (e.g. NV, ClV). With --query, several may be given (e.g. NV DiV ClV)",
+    )
+    opt.add_argument(
+        "--cell-size",
+        nargs="+",
+        type=int,
+        help="Override supercell size (e.g. 64, 128). With --query, several may be given (e.g. 128 512)",
+    )
     opt.add_argument("--t-start", type=float, default=0.0, help="Start temperature in K (default: 0.0)")
     opt.add_argument("--t-end", type=float, default=300.0, help="End temperature in K (default: 300.0)")
     opt.add_argument("--t-step", type=float, default=10.0, help="Temperature step in K (default: 10.0)")
@@ -59,10 +75,11 @@ def build_run_parser(parser: argparse.ArgumentParser) -> None:
     opt.add_argument(
         "--init-state",
         nargs="+",
+        type=normalize_init_state,
         choices=INIT_STATES,
         default=list(INIT_STATES),
         help="Initial spin state(s) to solve the relaxation dynamics for; all share one run directory "
-        "(default: all of ms_1 ms_0 ms_-1)",
+        "(default: all of ms_1 ms_0 ms_-1; 1 0 -1 also accepted)",
     )
     opt.add_argument(
         "-o", "--output-root", default="runs", help="Root folder for output run directories (default: runs)"
@@ -91,7 +108,7 @@ def _infer_method_from_file(path: Path) -> str:
 def _infer_method(args: argparse.Namespace) -> str:
     """Return 'all' or 'approx', inferring from input file/folder names when --method is omitted."""
     if args.method:
-        return args.method
+        return args.method[0]
     names = " ".join(
         str(p)
         for p in (
@@ -133,6 +150,24 @@ def _validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
         parser.error(f"input modes are mutually exclusive, got: {', '.join(given)}")
     if (args.raw_zfs_file_1d is None) != (args.raw_zfs_file_2d is None):
         parser.error("--raw-zfs-file-1d and --raw-zfs-file-2d must be given together")
+    if not args.query:
+        for flag, values in _filter_flags(args):
+            if values and len(values) > 1:
+                parser.error(f"multiple {flag} values are only supported with --query")
+
+
+def _filter_flags(args: argparse.Namespace) -> list[tuple[str, list | None]]:
+    """The multi-valued registry filter flags, as (flag, values) pairs."""
+    return [
+        ("--defect", args.defect),
+        ("--cell-size", args.cell_size),
+        ("--method", args.method),
+        ("--pert-scale", args.pert_scale),
+    ]
+
+
+def _first(values: list | None):
+    return values[0] if values else None
 
 
 def _run(args: argparse.Namespace) -> None:
@@ -151,9 +186,9 @@ def _run(args: argparse.Namespace) -> None:
         calc_method=_METHOD_MAP[_infer_method(args)][0],
         zfs_folder=_METHOD_MAP[_infer_method(args)][1],
         order=parse_orders(args.order) if args.order else None,
-        pert_scale=args.pert_scale,
-        defect=args.defect,
-        cell_size=args.cell_size,
+        pert_scale=_first(args.pert_scale),
+        defect=_first(args.defect),
+        cell_size=_first(args.cell_size),
         t_start=args.t_start,
         t_end=args.t_end,
         t_step=args.t_step,
@@ -181,21 +216,28 @@ def _run_query(args: argparse.Namespace) -> None:
     from spinlabs.registry import find_packaged
 
     conn = ensure_db()
-    files = find_packaged(
-        conn,
-        defect=args.defect,
-        cell_size=args.cell_size,
-        calc_method=_normalize_calc_method(args.method),
-        pert_scale=args.pert_scale,
-        pert_order=parse_orders(args.order) if args.order else None,
-    )
+    # Multi-valued filters query every combination; each dataset is run with
+    # the filter values that matched it.
+    files: list[tuple[Path, str | None, int | None, float | None]] = []
+    for defect, cell_size, method, pert_scale in product(
+        *[values or [None] for _, values in _filter_flags(args)]
+    ):
+        matched = find_packaged(
+            conn,
+            defect=defect,
+            cell_size=cell_size,
+            calc_method=_normalize_calc_method(method),
+            pert_scale=pert_scale,
+            pert_order=parse_orders(args.order) if args.order else None,
+        )
+        files.extend((path, defect, cell_size, pert_scale) for path in matched if path not in [f[0] for f in files])
     if not files:
         LOGGER.warning("No unanalyzed packaged data matching the query.")
         return
     # With multiple matched datasets, disambiguate the run-name so each
     # dataset lands in its own <run_name>_<stem> directory instead of
     # silently sharing/creating duplicate <run_name>_1, _2, ... folders.
-    for path in files:
+    for path, defect, cell_size, pert_scale in files:
         LOGGER.info(f"Running: {path}")
         method = _infer_method_from_file(Path(path))
         if args.run_name and len(files) > 1:
@@ -209,9 +251,9 @@ def _run_query(args: argparse.Namespace) -> None:
             calc_method=_METHOD_MAP[method][0],
             zfs_folder=_METHOD_MAP[method][1],
             order=parse_orders(args.order) if args.order else None,
-            pert_scale=args.pert_scale,
-            defect=args.defect,
-            cell_size=args.cell_size,
+            pert_scale=pert_scale,
+            defect=defect,
+            cell_size=cell_size,
             t_start=args.t_start,
             t_end=args.t_end,
             t_step=args.t_step,
