@@ -480,7 +480,9 @@ def find_runs(
     rows = conn.execute(sql, params).fetchall()
     if latest:
         # Rows are oldest first, so the last row per configuration is the
-        # newest (ties broken by the higher, later-registered id).
+        # newest (ties broken by the higher, later-registered id). The pop
+        # moves a configuration to the end on each newer run, so the result
+        # stays ordered by each configuration's newest run.
         newest: dict[tuple, tuple] = {}
         for row in rows:
             newest.pop(row[1:], None)
