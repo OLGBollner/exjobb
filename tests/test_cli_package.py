@@ -81,10 +81,8 @@ def test_default_combines_orders_into_one_file(tmp_path, monkeypatch):
     with _patch(lambda **kw: _raw(order=kw["order"])):
         _run(_make_args(tmp_path))
     files = list((tmp_path / "data").rglob("*.npz"))
-    run_dir = (
-        tmp_path / "data" / "NV_512" / "all_bands" / date.today().strftime("%Y%m%d")
-    )
-    assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz"]
+    run_dir = tmp_path / "data" / "NV_512" / "pert_0.025" / "all_bands" / date.today().strftime("%Y%m%d")
+    assert files == [run_dir / "NV_512_raw_zfs_data_all_bands_12d.npz"]
     conn = sqlite3.connect(db)
     row = conn.execute("SELECT defect, cell_size, calc_method, pert_order, pert_scale FROM files").fetchone()
     assert row == ("NV", 512, "all_bands", "[1, 2]", 0.025)
@@ -95,10 +93,8 @@ def test_single_order_saves_separate_file(tmp_path):
     with _patch():
         _run(_make_args(tmp_path, orders="first"))
     files = list((tmp_path / "data").rglob("*.npz"))
-    run_dir = (
-        tmp_path / "data" / "NV_512" / "all_bands" / date.today().strftime("%Y%m%d")
-    )
-    assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz"]
+    run_dir = tmp_path / "data" / "NV_512" / "pert_0.025" / "all_bands" / date.today().strftime("%Y%m%d")
+    assert files == [run_dir / "NV_512_raw_zfs_data_all_bands_1d.npz"]
 
 
 def test_pert_filter(tmp_path):
@@ -256,9 +252,9 @@ def test_multiple_folders_and_methods(tmp_path, monkeypatch):
     with _patch(lambda **kw: _raw(order=kw["order"], calc_method=kw["calc_method"])):
         _run(args)
     day = date.today().strftime("%Y%m%d")
-    assert (tmp_path / "data" / "NV_512" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz").exists()
-    assert (tmp_path / "data" / "NV_512" / "defect_band_approx" / day / "pert_0.025" / "NV_512_raw_zfs_data_defect_band_approx_12d.npz").exists()
-    assert (tmp_path / "data" / "ClV_128" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
+    assert (tmp_path / "data" / "NV_512" / "pert_0.025" / "all_bands" / day / "NV_512_raw_zfs_data_all_bands_12d.npz").exists()
+    assert (tmp_path / "data" / "NV_512" / "pert_0.025" / "defect_band_approx" / day / "NV_512_raw_zfs_data_defect_band_approx_12d.npz").exists()
+    assert (tmp_path / "data" / "ClV_128" / "pert_0.025" / "all_bands" / day / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
     conn = sqlite3.connect(db)
     rows = conn.execute("SELECT defect, cell_size, calc_method, pert_order, pert_scale FROM files ORDER BY id").fetchall()
     assert len(rows) == 4
@@ -314,7 +310,7 @@ def test_register_only(tmp_path):
 
     root = tmp_path / "data"
     day = date.today().strftime("%Y%m%d")
-    d1 = root / "NV_512" / "all_bands" / day / "pert_0.1"
+    d1 = root / "NV_512" / "pert_0.1" / "all_bands" / day
     d1.mkdir(parents=True)
     np.savez(
         d1 / "NV_512_raw_zfs_data_all_bands_12d.npz",

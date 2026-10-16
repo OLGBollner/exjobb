@@ -285,10 +285,10 @@ def _print_scan_summary(scanned: list[_Scanned], phonons: dict[tuple[str, int], 
 
 
 def _save_raw(scanned: list[_Scanned], output_root: Path) -> None:
-    """Write each scanned dataset to <output_root>/<defect>_<cell>/<method>/<date>/pert_<p>/ and register it."""
+    """Write each scanned dataset to <output_root>/<defect>_<cell>/pert_<p>/<method>/<date>/ and register it."""
     date_dir = date.today().strftime("%Y%m%d")
     for s in scanned:
-        pert_folder = output_root / f"{s.defect}_{s.cell_size}" / s.calc_method / date_dir / f"pert_{s.pert_scale:g}"
+        pert_folder = output_root / f"{s.defect}_{s.cell_size}" / f"pert_{s.pert_scale:g}" / s.calc_method / date_dir
         pert_folder.mkdir(parents=True, exist_ok=True)
         save_path = s.raw.save(pert_folder / s.raw._default_name())
         register_file(

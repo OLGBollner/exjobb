@@ -169,27 +169,27 @@ def _run_label(run_dir: Path, meta: tuple | None) -> str:
 
 
 def _run_figure_subdir(run_dir: Path, meta: tuple | None) -> Path:
-    """Figure folder of a run, mirroring the run layout: ``<defect>_<cell>/<method>/pert_<x>/<run name>``.
+    """Figure folder of a run, mirroring the run layout: ``<defect>_<cell>/pert_<x>/<method>/<run name>``.
 
     The run name (its timestamp) is the leaf. Unregistered runs keep their
-    path below the ``pert_*`` folder when they sit in that layout, else just their name.
+    last four path parts when they sit in that layout, else just their name.
     """
     if meta is None:
         parts = run_dir.parts
-        if len(parts) >= 4 and parts[-2].startswith("pert_"):
+        if len(parts) >= 4 and parts[-3].startswith("pert_"):
             return Path(*parts[-4:])
         return Path(run_dir.name)
     defect, cell, method, pert = meta
     head = f"{defect}_{cell}" if cell is not None else str(defect)
     pert_dir = f"pert_{pert:g}" if pert is not None else "pert_none"
-    return Path(head) / (method or "unknown_method") / pert_dir / run_dir.name
+    return Path(head) / pert_dir / (method or "unknown_method") / run_dir.name
 
 
 def _combined_figure_subdir(run_dirs: list[Path]) -> Path:
     """Figure folder for one figure drawn from several runs, in the per-run layout.
 
     Levels every run shares are kept; differing values are joined with ``+``
-    (e.g. ``NV_64+NV_512/all_bands/pert_0.1``). The leaf is the newest run's
+    (e.g. ``NV_64+NV_512/pert_0.1/all_bands``). The leaf is the newest run's
     name (the last run, as queries list runs oldest first). Folders that are
     neither registered runs nor in the run layout (loose npz files) add no level.
     """

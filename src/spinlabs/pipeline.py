@@ -72,7 +72,7 @@ def get_unique_run_dir(
     """
     Creates a unique run directory so prior results are never overwritten.
 
-    Layout: <output_root>/<defect>_<cell>/<method>/<pert>_<scale>/<YYYYmmdd_HHMMSS>
+    Layout: <output_root>/<defect>_<cell>/pert_<scale>/<method>/<YYYYmmdd_HHMMSS>
     With --run-name, <output_root>/<run_name>[_N] is used instead.
     """
     base = Path(output_root)
@@ -92,8 +92,8 @@ def get_unique_run_dir(
 
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     leaf = (
-        base / f"{defect}_{cell_size}" / calc_method
-        / _pert_dir_name(pert_scale) / now_str
+        base / f"{defect}_{cell_size}" / _pert_dir_name(pert_scale)
+        / calc_method / now_str
     )
     if not leaf.exists():
         leaf.mkdir(parents=True, exist_ok=True)
