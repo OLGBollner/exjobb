@@ -185,6 +185,29 @@ def _run_figure_subdir(run_dir: Path, meta: tuple | None) -> Path:
     return Path(head) / (method or "unknown_method") / pert_dir / run_dir.name
 
 
+def _combined_figure_subdir(run_dirs: list[Path]) -> Path:
+    """Figure folder for one figure drawn from several runs, in the per-run layout.
+
+    Levels every run shares are kept; differing values are joined with ``+``
+    (e.g. ``NV_64+NV_512/all_bands/pert_0.1``). The leaf is the newest run's
+    name (the last run, as queries list runs oldest first). Folders that are
+    neither registered runs nor in the run layout (loose npz files) add no level.
+    """
+    subdirs = [
+        sub.parts
+        for d in dict.fromkeys(run_dirs)
+        if len((sub := _run_figure_subdir(d, _run_meta(d))).parts) > 1
+    ]
+    if not subdirs:
+        return Path()
+    if len(subdirs) == 1:
+        return Path(*subdirs[0])
+    if len({len(parts) for parts in subdirs}) != 1:
+        return Path(subdirs[-1][-1])  # mixed layouts: only the newest run's name
+    levels = ["+".join(dict.fromkeys(level)) for level in zip(*(parts[:-1] for parts in subdirs))]
+    return Path(*levels, subdirs[-1][-1])
+
+
 def _plot_each_run(args: argparse.Namespace, kind: str, plot_run) -> None:
     """Plot every selected run in its own figure(s); with --show all windows open together."""
     shown = []
@@ -271,7 +294,12 @@ def _run_t1(args: argparse.Namespace) -> None:
         if not args.inputs:
             raise SystemExit("error: provide npz/run paths, or use --query to select registry runs")
         inputs = args.inputs
-    out = args.output or _default_output(args, "t1", "t1")
+    if args.output:
+        out = args.output
+    else:
+        run_dirs = dirs if args.query else [Path(p) if Path(p).is_dir() else Path(p).parent for p in inputs]
+        out = _figures_dir("t1") / _combined_figure_subdir(run_dirs) / f"t1.{args.fmt}"
+        out.parent.mkdir(parents=True, exist_ok=True)
     plot_t1(inputs, output_path=out, show=args.show, plain_name=args.plain_name, init_states=args.init_state)
 
 

@@ -332,3 +332,18 @@ def test_run_figure_subdir_puts_run_name_last(tmp_path):
     # Unregistered runs fall back to their own path layout, or just their name.
     assert _run_figure_subdir(run, None) == Path("NV_64/all_bands/pert_0.1/20261015_094009")
     assert _run_figure_subdir(tmp_path / "old_data", None) == Path("old_data")
+
+
+def test_combined_figure_subdir_joins_differing_levels(tmp_path, monkeypatch):
+    """T1 figures of several runs share one folder: common levels kept, differing ones joined with '+'."""
+    monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "registry"))
+    from spinlabs.cli.plotting import _combined_figure_subdir
+
+    runs = tmp_path / "runs"
+    a = runs / "NV_64" / "all_bands" / "pert_0.1" / "20261015_094009"
+    b = runs / "NV_512" / "all_bands" / "pert_0.1" / "20261016_071501"
+    assert _combined_figure_subdir([a]) == Path("NV_64/all_bands/pert_0.1/20261015_094009")
+    assert _combined_figure_subdir([a, b]) == Path("NV_64+NV_512/all_bands/pert_0.1/20261016_071501")
+    # Loose npz folders outside the run layout add no level.
+    assert _combined_figure_subdir([tmp_path]) == Path()
+    assert _combined_figure_subdir([tmp_path, a]) == Path("NV_64/all_bands/pert_0.1/20261015_094009")
