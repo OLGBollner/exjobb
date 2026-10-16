@@ -21,6 +21,7 @@ from spinlabs.models import RawZFSData, _normalize_calc_method
 from spinlabs.registry import ensure_db, register_file
 from spinlabs.pack_convergence import pack_convergence
 from spinlabs.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
+from spinlabs.vasp.trees import default_phonon
 
 from spinlabs.logging_utils import get_logger
 
@@ -231,11 +232,16 @@ PACKAGED_PHONON_NAME = "phonon_data.npz"
 
 
 def _find_phonon_npz(defect_folder: Path) -> Path | None:
-    """The full-spectrum phonon .npz in a defect folder, or None (with a warning)."""
-    for name in _PHONON_NAMES:
-        if (defect_folder / name).is_file():
-            return defect_folder / name
-    candidates = sorted(defect_folder.glob("*phonon*.npz"))
+    """The full-spectrum phonon .npz of a defect, or None (with a warning).
+
+    Looks in <defect>/data/ (where the VASP trees keep it) before the defect folder itself.
+    """
+    search_dirs = [default_phonon(defect_folder).parent, defect_folder]
+    for folder in search_dirs:
+        for name in _PHONON_NAMES:
+            if (folder / name).is_file():
+                return folder / name
+    candidates = sorted(p for folder in search_dirs for p in folder.glob("*phonon*.npz"))
     full = [p for p in candidates if "sym" not in p.stem]
     if len(full) == 1:
         return full[0]

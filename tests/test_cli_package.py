@@ -408,6 +408,18 @@ def test_package_copies_full_phonon_spectrum(tmp_path, monkeypatch):
     assert row == (str(dest.resolve()), "NV", 512)
 
 
+def test_package_finds_phonon_in_defect_data_folder(tmp_path, monkeypatch):
+    """<defect>/data/phonon_data.npz (the VASP-tree location) is preferred over the defect folder."""
+    _tree(tmp_path)
+    _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "data").mkdir()
+    (tmp_path / "NV_512" / "data" / "phonon_data.npz").write_bytes(b"full")
+    (tmp_path / "NV_512" / "data" / "phonon_data_sym126.npz").write_bytes(b"sym")
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path))
+    assert (tmp_path / "data" / "NV_512" / "phonon_data.npz").read_bytes() == b"full"
+
+
 def test_package_finds_differently_named_phonon(tmp_path, monkeypatch):
     _tree(tmp_path)
     _registry(monkeypatch, tmp_path)
