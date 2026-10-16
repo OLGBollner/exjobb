@@ -17,7 +17,7 @@ from typing import NamedTuple
 
 from spinlabs.cli import add_verbosity_args
 from spinlabs.logging_utils import attach_db_logging
-from spinlabs.models import RawZFSData, _normalize_calc_method
+from spinlabs.models import RawZFSData, normalize_calc_method
 from spinlabs.registry import ensure_db, register_file
 from spinlabs.pack_convergence import pack_convergence
 from spinlabs.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
@@ -197,7 +197,7 @@ def _scan_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str])
 
     found: list[_Scanned] = []
     for method in methods:
-        calc_method = _normalize_calc_method(method)
+        calc_method = normalize_calc_method(method)
         datasets = {o: _collect(o) for o in orders}
         for o in orders:
             LOGGER.info(f"  {o} order: {len(datasets[o])} perturbation length(s) found in {defect_folder / _ORDER_DIRS[o]}")
@@ -366,7 +366,7 @@ def _register_only(data_path: Path) -> None:
                 defect = str(data["defect"])
                 cell_size = int(data["cell_size"])
                 pert_scale = float(data["pert_scale"])
-                calc_method = _normalize_calc_method(str(data["calc_method"]))
+                calc_method = normalize_calc_method(str(data["calc_method"]))
                 # Derive orders from the npz content itself: a non-empty
                 # first_order / second_order mapping means that perturbation
                 # order is present in the file. Fall back to the filename
@@ -443,7 +443,7 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
         method = next((v for k, v in method_map.items() if k in suffix), None)
         defect, cell = split_defect_folder_name(defect_folder.name)
         stem = f"{defect}_{cell}_{date.today():%Y%m%d}_conv_{suffix}"
-        calc_method = _normalize_calc_method(method) if method else method
+        calc_method = normalize_calc_method(method) if method else method
         date_dir = date.today().strftime("%Y%m%d")
         leaf = args.output_root / f"{defect}_{cell}" / (calc_method or "conv") / date_dir
         leaf.mkdir(parents=True, exist_ok=True)

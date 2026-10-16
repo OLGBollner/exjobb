@@ -5,7 +5,7 @@ from itertools import product
 from pathlib import Path
 
 from spinlabs.cli import add_verbosity_args
-from spinlabs.models import _normalize_calc_method
+from spinlabs.models import normalize_calc_method
 from spinlabs.pipeline import run_full_pipeline
 from spinlabs.registry import ensure_db, parse_orders
 from spinlabs.relaxation_dynamics import INIT_STATES, normalize_init_state
@@ -226,7 +226,7 @@ def _run_query(args: argparse.Namespace) -> None:
             conn,
             defect=defect,
             cell_size=cell_size,
-            calc_method=_normalize_calc_method(method),
+            calc_method=normalize_calc_method(method),
             pert_scale=pert_scale,
             pert_order=parse_orders(args.order) if args.order else None,
         )

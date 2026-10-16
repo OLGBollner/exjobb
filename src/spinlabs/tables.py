@@ -254,9 +254,9 @@ def infer_defect(folder: Path) -> str:
 
 def _method_column(npz_path: Path, calc_method: str | None = None) -> str | None:
     """Table column from the stored calc_method, else from the filename."""
-    from spinlabs.models import _normalize_calc_method
+    from spinlabs.models import normalize_calc_method
 
-    stored = _normalize_calc_method(calc_method)
+    stored = normalize_calc_method(calc_method)
     if stored in METHOD_COLUMN:
         return METHOD_COLUMN[stored]
     for fragment, column in METHOD_COLUMN.items():

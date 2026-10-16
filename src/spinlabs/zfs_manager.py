@@ -7,7 +7,7 @@ import numpy as np
 
 from spinlabs.constants import CONSTANTS
 from spinlabs.symmetry import twin_of, _build_groups_from_labels
-from spinlabs.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, _normalize_calc_method
+from spinlabs.models import ZFSTensor, PhononSpectrum, PerturbationEntry, RawZFSData, SpinPhononCouplingData, normalize_calc_method
 from spinlabs.utils import MathUtils
 
 from spinlabs.logging_utils import get_logger
@@ -713,7 +713,7 @@ class ZFSManager:
                 calc_method=self.calc_method,
                 # Tensors stored on the manager were ingested via parse/load,
                 # which apply the 3/2 correction for approx data at intake.
-                spin_correction_applied=_normalize_calc_method(self.calc_method) == "defect_band_approx",
+                spin_correction_applied=normalize_calc_method(self.calc_method) == "defect_band_approx",
                 order=kwargs.get("order", 1 if first is not None else 2),
                 ground_state_zfs=gs_tensor,
                 eigen_rotation=self.eigen_rotation,
