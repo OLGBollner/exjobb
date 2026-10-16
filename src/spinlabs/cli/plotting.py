@@ -3,6 +3,8 @@
 import argparse
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+
 from spinlabs.cli import add_verbosity_args
 from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
 from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
@@ -140,18 +142,67 @@ def _resolve_run_dirs(args: argparse.Namespace) -> list[Path]:
     return [p if p.is_dir() else p.parent for p in provided]
 
 
-def _run_coupling(args: argparse.Namespace) -> None:
+def _run_meta(run_dir: Path) -> tuple | None:
+    """Registry (defect, cell, method, pert) of a run directory, or None if it is not registered."""
+    conn = ensure_db()
+    row = conn.execute(
+        "SELECT defect, cell, method, pert FROM runs WHERE run_dir = ? ORDER BY id DESC LIMIT 1", (str(run_dir),)
+    ).fetchone()
+    if row is None:
+        # Runs stored from another host are matched by directory name.
+        rows = conn.execute("SELECT run_dir, defect, cell, method, pert FROM runs ORDER BY id DESC")
+        row = next((r[1:] for r in rows if r[0] and Path(r[0]).name == run_dir.name), None)
+    return row if row is not None and row[0] else None
+
+
+def _run_label(run_dir: Path, meta: tuple | None) -> str:
+    """Readable run configuration (e.g. ``NV 512, all bands, pert 0.1``), else the dir name."""
+    if meta is None:
+        return run_dir.name
+    defect, cell, method, pert = meta
+    parts = [f"{defect} {cell}" if cell is not None else defect]
+    if method:
+        parts.append(method.replace("_", " "))
+    if pert is not None:
+        parts.append(f"pert {pert:g}")
+    return ", ".join(parts) + f" ({run_dir.name})"
+
+
+def _run_figure_subdir(run_dir: Path, meta: tuple | None) -> Path:
+    """Figure folder of a run, mirroring the run layout: ``<defect>_<cell>/<method>/pert_<x>/<run name>``.
+
+    The run name (its timestamp) is the leaf. Unregistered runs keep their
+    path below the ``pert_*`` folder when they sit in that layout, else just their name.
+    """
+    if meta is None:
+        parts = run_dir.parts
+        if len(parts) >= 4 and parts[-2].startswith("pert_"):
+            return Path(*parts[-4:])
+        return Path(run_dir.name)
+    defect, cell, method, pert = meta
+    head = f"{defect}_{cell}" if cell is not None else str(defect)
+    pert_dir = f"pert_{pert:g}" if pert is not None else "pert_none"
+    return Path(head) / (method or "unknown_method") / pert_dir / run_dir.name
+
+
+def _plot_each_run(args: argparse.Namespace, kind: str, plot_run) -> None:
+    """Plot every selected run in its own figure(s); with --show all windows open together."""
+    shown = []
     for run_dir in _resolve_run_dirs(args):
-        out_dir = args.output / run_dir.name if args.output else _figures_dir("coupling") / run_dir.name
+        meta = _run_meta(run_dir)
+        out_dir = (args.output or _figures_dir(kind)) / _run_figure_subdir(run_dir, meta)
         out_dir.mkdir(parents=True, exist_ok=True)
-        plot_run_coupling(run_dir, out_dir, args.fmt, args.dpi, args.show)
+        shown += plot_run(run_dir, out_dir, args.fmt, args.dpi, args.show, title=_run_label(run_dir, meta)) or []
+    if shown:
+        plt.show()
+
+
+def _run_coupling(args: argparse.Namespace) -> None:
+    _plot_each_run(args, "coupling", plot_run_coupling)
 
 
 def _run_rates(args: argparse.Namespace) -> None:
-    for run_dir in _resolve_run_dirs(args):
-        out_dir = args.output / run_dir.name if args.output else _figures_dir("rates") / run_dir.name
-        out_dir.mkdir(parents=True, exist_ok=True)
-        plot_run_rates(run_dir, out_dir, args.fmt, args.dpi, args.show)
+    _plot_each_run(args, "rates", plot_run_rates)
 
 
 def _add_query_args(parser: argparse.ArgumentParser) -> None:

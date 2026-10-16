@@ -291,12 +291,32 @@ def plot_2d_spectral_density_map(
     return fig, ax
 
 
-def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
-    """Plots 1D and diagonal 2D spin-phonon couplings and spectral functions."""
+def _finish_run_figures(figures: list[plt.Figure], title: str | None, show: bool) -> list[plt.Figure]:
+    """Name each run figure's window after its run; close the figures unless they are to be shown.
+
+    The title only labels the interactive window, not the saved image (metadata
+    belongs in the filename).
+    """
+    for fig in figures:
+        if title and fig.canvas.manager is not None:
+            fig.canvas.manager.set_window_title(title)
+        if not show:
+            plt.close(fig)
+    return figures if show else []
+
+
+def plot_run_coupling(
+    run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool, title: str | None = None
+) -> list[plt.Figure]:
+    """Plots 1D and diagonal 2D spin-phonon couplings and spectral functions.
+
+    Returns the figures left open for ``show`` (the caller calls ``plt.show()``,
+    so several runs open together in separate windows).
+    """
     coupling_file = run_dir / "spin_phonon_coupling.npz"
     if not coupling_file.exists():
         LOGGER.warning(f"Skipping coupling plot: {coupling_file} not found.")
-        return
+        return []
 
     data = SpinPhononCouplingData.load(coupling_file)
     data_display = data.to_unit("MHz").frequencies_to_unit("meV")
@@ -316,6 +336,7 @@ def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bo
     # Backward compatible alias
     out_file_alias = out_dir / f"coupling_spectral.{fmt}"
     fig1.savefig(out_file_alias, dpi=dpi, bbox_inches="tight")
+    figures = [fig1]
 
     # 2D plot (diagonal phonons i == j)
     if data_display.V2_0_0 is not None:
@@ -345,18 +366,27 @@ def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bo
         out_file2 = out_dir / f"coupling_spectral_2d.{fmt}"
         fig2.savefig(out_file2, dpi=dpi, bbox_inches="tight")
         LOGGER.info(f"  [✓] Saved 2D coupling plot -> {out_file2}")
+        figures.append(fig2)
+
+    return _finish_run_figures(figures, title and f"Coupling: {title}", show)
 
 
-def plot_run_rates(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
-    """Plots transition rates vs temperature."""
+def plot_run_rates(
+    run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool, title: str | None = None
+) -> list[plt.Figure]:
+    """Plots transition rates vs temperature, one figure per transition.
+
+    Returns the figures left open for ``show``, like :func:`plot_run_coupling`.
+    """
     rates_file = run_dir / "transition_rates.npz"
     if not rates_file.exists():
         LOGGER.warning(f"Skipping transition rates plot: {rates_file} not found.")
-        return
+        return []
 
     out_base = out_dir / f"transition_rates.{fmt}"
-    plot_transition_rates_stacked(rates_file, output_path=out_base)
+    figures = [fig for fig, _ in plot_transition_rates_stacked(rates_file, output_path=out_base)]
     LOGGER.info(f"  [✓] Saved transition rate plots in -> {out_dir}")
+    return _finish_run_figures(figures, title and f"Rates: {title}", show)
 
 
 def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):

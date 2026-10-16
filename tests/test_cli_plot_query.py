@@ -7,6 +7,8 @@ pipeline produces (``order`` as a JSON list such as ``[1, 2]``).
 """
 
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -204,9 +206,10 @@ def test_plot_run_subcommand_query(subcmd, registry_db, tmp_path, monkeypatch, c
 
     called = []
 
-    def fake_plot(run_dir, out_dir, fmt, dpi, show):
+    def fake_plot(run_dir, out_dir, fmt, dpi, show, title=None):
         out_dir.mkdir(parents=True, exist_ok=True)
         called.append(run_dir)
+        return []
 
     import spinlabs.cli.plotting as plotting
     monkeypatch.setattr(plotting, "plot_run_coupling", fake_plot)
@@ -215,7 +218,55 @@ def test_plot_run_subcommand_query(subcmd, registry_db, tmp_path, monkeypatch, c
     args.func(args)
     assert len(called) == 1
     assert called[0].name == "NV_512_pert_0.025"
-    assert (tmp_path / "figures" / subcmd / "NV_512_pert_0.025").exists()
+    assert (tmp_path / "figures" / subcmd / "NV_512" / "all_bands" / "pert_0.025" / "NV_512_pert_0.025").is_dir()
+
+
+@pytest.mark.parametrize("subcmd", ["coupling", "rates"])
+def test_plot_run_subcommand_latest_plots_each_configuration(subcmd, tmp_path, monkeypatch):
+    """--latest plots the newest run of every matching configuration, each into its own figures."""
+    monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "registry"))
+    monkeypatch.chdir(tmp_path)
+    conn = registry.ensure_db()
+    runs = [
+        ("p01_old", 0.1, "2026-10-01 12:00:00"),
+        ("p01_new", 0.1, "2026-10-05 12:00:00"),
+        ("p0025_new", 0.025, "2026-10-03 12:00:00"),
+    ]
+    for name, pert, started_at in runs:
+        run_id = registry.register_run(
+            conn,
+            run_dir=tmp_path / "runs" / name,
+            defect="NV",
+            cell=512,
+            order=1,
+            pert=pert,
+            method="all_bands",
+            init_state="ms_0",
+        )
+        registry.finish_run(conn, run_id, "done")
+        conn.execute("UPDATE runs SET started_at = ? WHERE id = ?", (started_at, run_id))
+    conn.commit()
+
+    from spinlabs.cli import build_parser
+    import spinlabs.cli.plotting as plotting
+
+    titles = {}
+
+    def fake_plot(run_dir, out_dir, fmt, dpi, show, title=None):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        titles[run_dir.name] = title
+        return []
+
+    monkeypatch.setattr(plotting, f"plot_run_{subcmd}", fake_plot)
+    args = build_parser().parse_args(
+        ["plot", subcmd, "--query", "--defect", "NV", "--pert-scale", "0.1", "0.025", "--latest"]
+    )
+    args.func(args)
+    assert sorted(titles) == ["p0025_new", "p01_new"]
+    assert titles["p01_new"] == "NV 512, all bands, pert 0.1 (p01_new)"
+    leaf = tmp_path / "figures" / subcmd / "NV_512" / "all_bands"
+    assert (leaf / "pert_0.1" / "p01_new").is_dir()
+    assert (leaf / "pert_0.025" / "p0025_new").is_dir()
 
 
 @pytest.mark.parametrize("subcmd", ["coupling", "rates", "t1"])
@@ -270,3 +321,14 @@ def test_plot_t1_init_state_filters_query_and_curves(tmp_path):
                  defect="ClV", cell_size=128, calc_method="all_bands", init_state=state)
     _, ax = plot_t1([tmp_path], init_states=["ms_0"])
     assert len(ax.get_lines()) == 1
+
+
+def test_run_figure_subdir_puts_run_name_last(tmp_path):
+    """Figure folders mirror the run layout with the run (timestamp) folder as the leaf."""
+    from spinlabs.cli.plotting import _run_figure_subdir
+
+    run = tmp_path / "runs" / "NV_64" / "all_bands" / "pert_0.1" / "20261015_094009"
+    assert _run_figure_subdir(run, ("NV", 64, "all_bands", 0.1)) == Path("NV_64/all_bands/pert_0.1/20261015_094009")
+    # Unregistered runs fall back to their own path layout, or just their name.
+    assert _run_figure_subdir(run, None) == Path("NV_64/all_bands/pert_0.1/20261015_094009")
+    assert _run_figure_subdir(tmp_path / "old_data", None) == Path("old_data")
