@@ -219,6 +219,7 @@ def _run_query(args: argparse.Namespace) -> None:
     # Multi-valued filters query every combination; each dataset is run with
     # the filter values that matched it.
     files: list[tuple[Path, str | None, int | None, float | None]] = []
+    seen: set[Path] = set()
     for defect, cell_size, method, pert_scale in product(
         *[values or [None] for _, values in _filter_flags(args)]
     ):
@@ -230,7 +231,10 @@ def _run_query(args: argparse.Namespace) -> None:
             pert_scale=pert_scale,
             pert_order=parse_orders(args.order) if args.order else None,
         )
-        files.extend((path, defect, cell_size, pert_scale) for path in matched if path not in [f[0] for f in files])
+        for path in matched:
+            if path not in seen:
+                seen.add(path)
+                files.append((path, defect, cell_size, pert_scale))
     if not files:
         LOGGER.warning("No unanalyzed packaged data matching the query.")
         return
