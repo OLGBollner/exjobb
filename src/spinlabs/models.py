@@ -878,6 +878,11 @@ def _decode_order_dict(value: Any, data: Any) -> dict:
 SPIN_CORRECTION_SCALE = 1.5
 
 
+def apply_spin_correction(tensor: ZFSTensor) -> ZFSTensor:
+    """A defect-band-approx ZFS tensor scaled by :data:`SPIN_CORRECTION_SCALE` (3/2)."""
+    return ZFSTensor(matrix=tensor.matrix * SPIN_CORRECTION_SCALE, unit=tensor.unit)
+
+
 def _scale_correction_fields(fields: dict) -> dict:
     """Returns a copy of RawZFSData constructor kwargs with approx tensors scaled by 3/2.
 
@@ -888,19 +893,19 @@ def _scale_correction_fields(fields: dict) -> dict:
     out = dict(fields)
     gs = out.get("ground_state_zfs")
     if gs is not None:
-        out["ground_state_zfs"] = ZFSTensor(matrix=gs.matrix * SPIN_CORRECTION_SCALE, unit=gs.unit)
+        out["ground_state_zfs"] = apply_spin_correction(gs)
     for name in ("first_order", "second_order"):
         entries = dict(out.get(name) or {})
         for key, entry in entries.items():
             if isinstance(entry, PerturbationEntry):
-                entry.zfs_tensor = ZFSTensor(matrix=entry.zfs_tensor.matrix * SPIN_CORRECTION_SCALE, unit=entry.zfs_tensor.unit)
+                entry.zfs_tensor = apply_spin_correction(entry.zfs_tensor)
             elif isinstance(entry, dict) and entry.get("tensor") is not None:
                 entry["tensor"] = np.asarray(entry["tensor"], dtype=float) * SPIN_CORRECTION_SCALE
         out[name] = entries
     return out
 
 
-def _normalize_calc_method(m: Optional[str]) -> Optional[str]:
+def normalize_calc_method(m: Optional[str]) -> Optional[str]:
     """Normalizes calc_method aliases ('approx' -> 'defect_band_approx', etc.)."""
     if not m or m in ("None", ""):
         return None
@@ -978,8 +983,8 @@ class RawZFSData:
             raise ValueError(f"Cannot combine RawZFSData: pert_scale mismatch ({p1} != {p2}).")
 
         # 4. Verify calc_method
-        m1 = _normalize_calc_method(self.calc_method)
-        m2 = _normalize_calc_method(other.calc_method)
+        m1 = normalize_calc_method(self.calc_method)
+        m2 = normalize_calc_method(other.calc_method)
         if m1 is not None and m2 is not None and m1 != m2:
             raise ValueError(f"Cannot combine RawZFSData: calc_method mismatch ('{m1}' != '{m2}').")
 
@@ -1240,7 +1245,7 @@ class RawZFSData:
                 fields["spin_correction_applied"] = True
                 return fields, False
             fields["spin_correction_applied"] = False
-            if not apply_corrections or _normalize_calc_method(fields.get("calc_method")) != "defect_band_approx":
+            if not apply_corrections or normalize_calc_method(fields.get("calc_method")) != "defect_band_approx":
                 return fields, False
             scaled = _scale_correction_fields(
                 {
@@ -1302,7 +1307,7 @@ class RawZFSData:
         """
         if self.spin_correction_applied:
             return
-        if _normalize_calc_method(self.calc_method) != "defect_band_approx":
+        if normalize_calc_method(self.calc_method) != "defect_band_approx":
             return
         scaled = _scale_correction_fields(
             {

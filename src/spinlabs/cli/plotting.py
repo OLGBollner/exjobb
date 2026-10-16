@@ -3,10 +3,13 @@
 import argparse
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+
 from spinlabs.cli import add_verbosity_args
 from spinlabs.convergence import plot_pert_convergence, read_conv_metadata
 from spinlabs.plotter import plot_run_coupling, plot_run_rates, plot_t1
 from spinlabs.registry import ensure_db, find_runs, parse_orders
+from spinlabs.relaxation_dynamics import INIT_STATES, find_t1_files, normalize_init_state
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -36,6 +39,14 @@ def build_plot_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa: 
     t1 = subparsers.add_parser("t1", help="Plot T1 curves from one or more npz files or run directories in one figure")
     t1.add_argument("inputs", nargs="*", type=Path)
     _add_query_args(t1)
+    t1.add_argument(
+        "--init-state",
+        nargs="+",
+        type=normalize_init_state,
+        choices=INIT_STATES,
+        metavar="STATE",
+        help="Only plot these initial spin state(s): ms_1 ms_0 ms_-1, or 1 0 -1 (default: every state found)",
+    )
     t1.add_argument("--plain-name", action="store_true", help="Do not append metadata to the output filename")
     _add_output_args(t1)
     t1.set_defaults(func=_run_t1)
@@ -131,18 +142,90 @@ def _resolve_run_dirs(args: argparse.Namespace) -> list[Path]:
     return [p if p.is_dir() else p.parent for p in provided]
 
 
-def _run_coupling(args: argparse.Namespace) -> None:
+def _run_meta(run_dir: Path) -> tuple | None:
+    """Registry (defect, cell, method, pert) of a run directory, or None if it is not registered."""
+    conn = ensure_db()
+    row = conn.execute(
+        "SELECT defect, cell, method, pert FROM runs WHERE run_dir = ? ORDER BY id DESC LIMIT 1", (str(run_dir),)
+    ).fetchone()
+    if row is None:
+        # Runs stored from another host are matched by directory name.
+        rows = conn.execute("SELECT run_dir, defect, cell, method, pert FROM runs ORDER BY id DESC")
+        row = next((r[1:] for r in rows if r[0] and Path(r[0]).name == run_dir.name), None)
+    return row if row is not None and row[0] else None
+
+
+def _run_label(run_dir: Path, meta: tuple | None) -> str:
+    """Readable run configuration (e.g. ``NV 512, all bands, pert 0.1``), else the dir name."""
+    if meta is None:
+        return run_dir.name
+    defect, cell, method, pert = meta
+    parts = [f"{defect} {cell}" if cell is not None else defect]
+    if method:
+        parts.append(method.replace("_", " "))
+    if pert is not None:
+        parts.append(f"pert {pert:g}")
+    return ", ".join(parts) + f" ({run_dir.name})"
+
+
+def _run_figure_subdir(run_dir: Path, meta: tuple | None) -> Path:
+    """Figure folder of a run, mirroring the run layout: ``<defect>_<cell>/pert_<x>/<method>/<run name>``.
+
+    The run name (its timestamp) is the leaf. Unregistered runs keep their
+    last four path parts when they sit in that layout, else just their name.
+    """
+    if meta is None:
+        parts = run_dir.parts
+        if len(parts) >= 4 and parts[-3].startswith("pert_"):
+            return Path(*parts[-4:])
+        return Path(run_dir.name)
+    defect, cell, method, pert = meta
+    head = f"{defect}_{cell}" if cell is not None else str(defect)
+    pert_dir = f"pert_{pert:g}" if pert is not None else "pert_none"
+    return Path(head) / pert_dir / (method or "unknown_method") / run_dir.name
+
+
+def _combined_figure_subdir(run_dirs: list[Path]) -> Path:
+    """Figure folder for one figure drawn from several runs, in the per-run layout.
+
+    Levels every run shares are kept; differing values are joined with ``+``
+    (e.g. ``NV_64+NV_512/pert_0.1/all_bands``). The leaf is the newest run's
+    name (the last run, as queries list runs oldest first). Folders that are
+    neither registered runs nor in the run layout (loose npz files) add no level.
+    """
+    subdirs = [
+        sub.parts
+        for d in dict.fromkeys(run_dirs)
+        if len((sub := _run_figure_subdir(d, _run_meta(d))).parts) > 1
+    ]
+    if not subdirs:
+        return Path()
+    if len(subdirs) == 1:
+        return Path(*subdirs[0])
+    if len({len(parts) for parts in subdirs}) != 1:
+        return Path(subdirs[-1][-1])  # mixed layouts: only the newest run's name
+    levels = ["+".join(dict.fromkeys(level)) for level in zip(*(parts[:-1] for parts in subdirs))]
+    return Path(*levels, subdirs[-1][-1])
+
+
+def _plot_each_run(args: argparse.Namespace, kind: str, plot_run) -> None:
+    """Plot every selected run in its own figure(s); with --show all windows open together."""
+    shown = []
     for run_dir in _resolve_run_dirs(args):
-        out_dir = args.output / run_dir.name if args.output else _figures_dir("coupling") / run_dir.name
+        meta = _run_meta(run_dir)
+        out_dir = (args.output or _figures_dir(kind)) / _run_figure_subdir(run_dir, meta)
         out_dir.mkdir(parents=True, exist_ok=True)
-        plot_run_coupling(run_dir, out_dir, args.fmt, args.dpi, args.show)
+        shown += plot_run(run_dir, out_dir, args.fmt, args.dpi, args.show, title=_run_label(run_dir, meta)) or []
+    if shown:
+        plt.show()
+
+
+def _run_coupling(args: argparse.Namespace) -> None:
+    _plot_each_run(args, "coupling", plot_run_coupling)
 
 
 def _run_rates(args: argparse.Namespace) -> None:
-    for run_dir in _resolve_run_dirs(args):
-        out_dir = args.output / run_dir.name if args.output else _figures_dir("rates") / run_dir.name
-        out_dir.mkdir(parents=True, exist_ok=True)
-        plot_run_rates(run_dir, out_dir, args.fmt, args.dpi, args.show)
+    _plot_each_run(args, "rates", plot_run_rates)
 
 
 def _add_query_args(parser: argparse.ArgumentParser) -> None:
@@ -153,10 +236,13 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
         help="Plot the completed runs in the registry matching the filters "
         "(--defect/--cell-size/--method/--order/--pert-scale). Same syntax as 'run --query'",
     )
-    parser.add_argument("--defect", help="Filter by defect name (e.g. NV, ClV)")
-    parser.add_argument("--cell-size", type=int, help="Filter by supercell size (e.g. 64, 128)")
+    parser.add_argument("--defect", nargs="+", help="Filter by defect name(s) (e.g. NV ClV)")
+    parser.add_argument("--cell-size", nargs="+", type=int, help="Filter by supercell size(s) (e.g. 64 128)")
     parser.add_argument(
-        "--method", choices=["all", "approx"], help="Filter by calculation method: 'all' for all_bands, 'approx' for defect_band_approx"
+        "--method",
+        nargs="+",
+        choices=["all", "approx"],
+        help="Filter by calculation method(s): 'all' for all_bands, 'approx' for defect_band_approx",
     )
     parser.add_argument(
         "--order",
@@ -165,8 +251,15 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
         choices=[1, 2, 12],
         help="Filter by perturbation order(s), e.g. --order 1 2 (12 is the legacy alias for 1 2)",
     )
-    parser.add_argument("--pert-scale", type=float, help="Filter by perturbation scale (e.g. 0.025)")
-    parser.add_argument("--latest", action="store_true", help="With --query, use only the most recent matching run")
+    parser.add_argument(
+        "--pert-scale", nargs="+", type=float, help="Filter by perturbation scale(s) (e.g. 0.1 0.025)"
+    )
+    parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="With --query, use only the most recent matching run of each configuration "
+        "(defect, cell size, method, order, pert-scale)",
+    )
     parser.add_argument(
         "-r", "--output-root", default="runs",
         help="Root folder holding run directories (default: runs); used to resolve runs queried from the registry",
@@ -174,34 +267,40 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _query_filters(args: argparse.Namespace) -> list[tuple[str, str]]:
-    """--query flag values as (column, value) filters for registry.find_runs."""
+    """--query flag values as (column, value) filters for registry.find_runs.
+
+    Each value of a multi-valued flag becomes its own filter; find_runs ORs
+    repeated fields, so ``--defect NV ClV`` matches runs of either defect.
+    """
     out = []
-    if args.defect is not None:
-        out.append(("defect", args.defect))
-    if args.cell_size is not None:
-        out.append(("cell", args.cell_size))
-    if args.method is not None:
-        out.append(("method", {"all": "all_bands", "approx": "defect_band_approx"}[args.method]))
+    out += [("defect", d) for d in args.defect or []]
+    out += [("cell", c) for c in args.cell_size or []]
+    out += [("method", {"all": "all_bands", "approx": "defect_band_approx"}[m]) for m in args.method or []]
     if args.order is not None:
         out.append(("order", parse_orders(args.order)))
-    if args.pert_scale is not None:
-        out.append(("pert", args.pert_scale))
+    out += [("pert", p) for p in args.pert_scale or []]
+    out += [("init_state", s) for s in getattr(args, "init_state", None) or []]
     return out
 
 
 def _run_t1(args: argparse.Namespace) -> None:
     if args.query:
         dirs = _resolve_query_runs(args)
-        inputs = [d / "t1_relaxation.npz" for d in dirs]
-        missing = [i for i in inputs if not i.exists()]
+        missing = [d for d in dirs if not find_t1_files(d)]
         if missing:
-            raise SystemExit(f"error: missing t1_relaxation.npz in: {', '.join(str(m) for m in missing)}")
+            raise SystemExit(f"error: missing t1_relaxation*.npz in: {', '.join(str(m) for m in missing)}")
+        inputs = [f for d in dirs for f in find_t1_files(d)]
     else:
         if not args.inputs:
             raise SystemExit("error: provide npz/run paths, or use --query to select registry runs")
         inputs = args.inputs
-    out = args.output or _default_output(args, "t1", "t1")
-    plot_t1(inputs, output_path=out, show=args.show, plain_name=args.plain_name)
+    if args.output:
+        out = args.output
+    else:
+        run_dirs = dirs if args.query else [Path(p) if Path(p).is_dir() else Path(p).parent for p in inputs]
+        out = _figures_dir("t1") / _combined_figure_subdir(run_dirs) / f"t1.{args.fmt}"
+        out.parent.mkdir(parents=True, exist_ok=True)
+    plot_t1(inputs, output_path=out, show=args.show, plain_name=args.plain_name, init_states=args.init_state)
 
 
 

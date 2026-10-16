@@ -7,6 +7,7 @@ the listing with --scan).
 
 import argparse
 import re
+import shutil
 import warnings
 
 import numpy as np
@@ -16,10 +17,11 @@ from typing import NamedTuple
 
 from spinlabs.cli import add_verbosity_args
 from spinlabs.logging_utils import attach_db_logging
-from spinlabs.models import RawZFSData, _normalize_calc_method
+from spinlabs.models import RawZFSData, normalize_calc_method
 from spinlabs.registry import ensure_db, register_file
 from spinlabs.pack_convergence import pack_convergence
 from spinlabs.parsers import parse_zfs_simulation_dataset, split_defect_folder_name
+from spinlabs.vasp.trees import default_phonon
 
 from spinlabs.logging_utils import get_logger
 
@@ -129,15 +131,21 @@ def _run(args: argparse.Namespace) -> None:
         return
 
     scanned: list[_Scanned] = []
+    phonons: dict[tuple[str, int], Path] = {}
     for defect_folder in defect_folders:
-        scanned.extend(_scan_raw(args, defect_folder, args.method))
-    _print_scan_summary(scanned)
+        found = _scan_raw(args, defect_folder, args.method)
+        scanned.extend(found)
+        phonon = _find_phonon_npz(defect_folder)
+        if found and phonon is not None:
+            phonons[(found[0].defect, found[0].cell_size)] = phonon
+    _print_scan_summary(scanned, phonons)
     if args.scan or not scanned:
         return
     if not getattr(args, "yes", False) and not _confirm("Save the perturbation data to file? (Y/n): "):
         print("Nothing saved.")
         return
     _save_raw(scanned, args.output_root)
+    _save_phonons(phonons, args.output_root)
 
 
 class _Scanned(NamedTuple):
@@ -189,7 +197,7 @@ def _scan_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str])
 
     found: list[_Scanned] = []
     for method in methods:
-        calc_method = _normalize_calc_method(method)
+        calc_method = normalize_calc_method(method)
         datasets = {o: _collect(o) for o in orders}
         for o in orders:
             LOGGER.info(f"  {o} order: {len(datasets[o])} perturbation length(s) found in {defect_folder / _ORDER_DIRS[o]}")
@@ -217,7 +225,52 @@ def _scan_raw(args: argparse.Namespace, defect_folder: Path, methods: list[str])
     return found
 
 
-def _print_scan_summary(scanned: list[_Scanned]) -> None:
+# Full-spectrum phonon files, most preferred first. Symmetry-reduced spectra
+# (``*sym*``) are skipped: packaged mode indices refer to the full spectrum.
+_PHONON_NAMES = ("phonon_data.npz", "phonons.npz")
+PACKAGED_PHONON_NAME = "phonon_data.npz"
+
+
+def _find_phonon_npz(defect_folder: Path) -> Path | None:
+    """The full-spectrum phonon .npz of a defect, or None (with a warning).
+
+    Looks in <defect>/data/ (where the VASP trees keep it) before the defect folder itself.
+    """
+    search_dirs = [default_phonon(defect_folder).parent, defect_folder]
+    for folder in search_dirs:
+        for name in _PHONON_NAMES:
+            if (folder / name).is_file():
+                return folder / name
+    candidates = sorted(p for folder in search_dirs for p in folder.glob("*phonon*.npz"))
+    full = [p for p in candidates if "sym" not in p.stem]
+    if len(full) == 1:
+        return full[0]
+    if full:
+        warnings.warn(
+            f"Several phonon .npz files in {defect_folder.name} ({', '.join(p.name for p in full)}); "
+            f"rename the full spectrum to {PACKAGED_PHONON_NAME} to package it"
+        )
+    elif candidates:
+        warnings.warn(
+            f"Only symmetry-reduced phonon .npz in {defect_folder.name} "
+            f"({', '.join(p.name for p in candidates)}); phonon data not packaged"
+        )
+    else:
+        warnings.warn(f"No phonon .npz found in {defect_folder.name}; phonon data not packaged")
+    return None
+
+
+def _save_phonons(phonons: dict[tuple[str, int], Path], output_root: Path) -> None:
+    """Copy each phonon file to <output_root>/<defect>_<cell>/phonon_data.npz and register it."""
+    for (defect, cell_size), src in phonons.items():
+        dest = output_root / f"{defect}_{cell_size}" / PACKAGED_PHONON_NAME
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        register_file(ensure_db(), dest, "phonon", defect=defect, cell_size=cell_size)
+        LOGGER.info(f"Copied phonon data {src} -> {dest}")
+
+
+def _print_scan_summary(scanned: list[_Scanned], phonons: dict[tuple[str, int], Path] | None = None) -> None:
     if not scanned:
         print("\nNo perturbation data found.")
         return
@@ -230,14 +283,18 @@ def _print_scan_summary(scanned: list[_Scanned]) -> None:
             f"{f'{s.defect}_{s.cell_size}':<12} {s.calc_method:<20} {s.pert_scale:>8g} "
             f"{len(s.raw.first_order):>16} {len(s.raw.second_order):>16}"
         )
+    if phonons:
+        print("\nPhonon data:")
+        for (defect, cell_size), path in phonons.items():
+            print(f"{f'{defect}_{cell_size}':<12} {path}")
     print()
 
 
 def _save_raw(scanned: list[_Scanned], output_root: Path) -> None:
-    """Write each scanned dataset to <output_root>/<defect>_<cell>/<method>/<date>/pert_<p>/ and register it."""
+    """Write each scanned dataset to <output_root>/<defect>_<cell>/pert_<p>/<method>/<date>/ and register it."""
     date_dir = date.today().strftime("%Y%m%d")
     for s in scanned:
-        pert_folder = output_root / f"{s.defect}_{s.cell_size}" / s.calc_method / date_dir / f"pert_{s.pert_scale:g}"
+        pert_folder = output_root / f"{s.defect}_{s.cell_size}" / f"pert_{s.pert_scale:g}" / s.calc_method / date_dir
         pert_folder.mkdir(parents=True, exist_ok=True)
         save_path = s.raw.save(pert_folder / s.raw._default_name())
         register_file(
@@ -284,6 +341,16 @@ def _register_only(data_path: Path) -> None:
     conn = ensure_db()
     registered, skipped = 0, 0
     for npz_path in sorted(data_path.rglob("*.npz")):
+        if npz_path.name == PACKAGED_PHONON_NAME:
+            defect, cell_size = split_defect_folder_name(npz_path.parent.name)
+            if cell_size is None:
+                warnings.warn(f"Phonon file outside a <defect>_<cell> folder, skipping: {npz_path}")
+                skipped += 1
+                continue
+            register_file(conn, npz_path, "phonon", defect=defect, cell_size=cell_size)
+            LOGGER.info(f"Registered: {npz_path} (phonon, {defect}_{cell_size})")
+            registered += 1
+            continue
         try:
             with np.load(str(npz_path), allow_pickle=True) as data:
                 keys = set(data.files)
@@ -299,7 +366,7 @@ def _register_only(data_path: Path) -> None:
                 defect = str(data["defect"])
                 cell_size = int(data["cell_size"])
                 pert_scale = float(data["pert_scale"])
-                calc_method = _normalize_calc_method(str(data["calc_method"]))
+                calc_method = normalize_calc_method(str(data["calc_method"]))
                 # Derive orders from the npz content itself: a non-empty
                 # first_order / second_order mapping means that perturbation
                 # order is present in the file. Fall back to the filename
@@ -376,7 +443,7 @@ def _run_conv(args: argparse.Namespace, defect_folder: Path) -> None:
         method = next((v for k, v in method_map.items() if k in suffix), None)
         defect, cell = split_defect_folder_name(defect_folder.name)
         stem = f"{defect}_{cell}_{date.today():%Y%m%d}_conv_{suffix}"
-        calc_method = _normalize_calc_method(method) if method else method
+        calc_method = normalize_calc_method(method) if method else method
         date_dir = date.today().strftime("%Y%m%d")
         leaf = args.output_root / f"{defect}_{cell}" / (calc_method or "conv") / date_dir
         leaf.mkdir(parents=True, exist_ok=True)

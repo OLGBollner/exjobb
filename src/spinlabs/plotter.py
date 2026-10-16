@@ -9,6 +9,7 @@ import numpy as np
 
 from spinlabs.constants import CONSTANTS
 from spinlabs.models import SpinPhononCouplingData
+from spinlabs.relaxation_dynamics import find_t1_files
 from spinlabs.utils import MathUtils
 
 from spinlabs.logging_utils import get_logger
@@ -290,12 +291,32 @@ def plot_2d_spectral_density_map(
     return fig, ax
 
 
-def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
-    """Plots 1D and diagonal 2D spin-phonon couplings and spectral functions."""
+def _finish_run_figures(figures: list[plt.Figure], title: str | None, show: bool) -> list[plt.Figure]:
+    """Name each run figure's window after its run; close the figures unless they are to be shown.
+
+    The title only labels the interactive window, not the saved image (metadata
+    belongs in the filename).
+    """
+    for fig in figures:
+        if title and fig.canvas.manager is not None:
+            fig.canvas.manager.set_window_title(title)
+        if not show:
+            plt.close(fig)
+    return figures if show else []
+
+
+def plot_run_coupling(
+    run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool, title: str | None = None
+) -> list[plt.Figure]:
+    """Plots 1D and diagonal 2D spin-phonon couplings and spectral functions.
+
+    Returns the figures left open for ``show`` (the caller calls ``plt.show()``,
+    so several runs open together in separate windows).
+    """
     coupling_file = run_dir / "spin_phonon_coupling.npz"
     if not coupling_file.exists():
         LOGGER.warning(f"Skipping coupling plot: {coupling_file} not found.")
-        return
+        return []
 
     data = SpinPhononCouplingData.load(coupling_file)
     data_display = data.to_unit("MHz").frequencies_to_unit("meV")
@@ -315,6 +336,7 @@ def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bo
     # Backward compatible alias
     out_file_alias = out_dir / f"coupling_spectral.{fmt}"
     fig1.savefig(out_file_alias, dpi=dpi, bbox_inches="tight")
+    figures = [fig1]
 
     # 2D plot (diagonal phonons i == j)
     if data_display.V2_0_0 is not None:
@@ -344,30 +366,55 @@ def plot_run_coupling(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bo
         out_file2 = out_dir / f"coupling_spectral_2d.{fmt}"
         fig2.savefig(out_file2, dpi=dpi, bbox_inches="tight")
         LOGGER.info(f"  [✓] Saved 2D coupling plot -> {out_file2}")
+        figures.append(fig2)
+
+    return _finish_run_figures(figures, title and f"Coupling: {title}", show)
 
 
-def plot_run_rates(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
-    """Plots transition rates vs temperature."""
+def plot_run_rates(
+    run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool, title: str | None = None
+) -> list[plt.Figure]:
+    """Plots transition rates vs temperature, one figure per transition.
+
+    Returns the figures left open for ``show``, like :func:`plot_run_coupling`.
+    """
     rates_file = run_dir / "transition_rates.npz"
     if not rates_file.exists():
         LOGGER.warning(f"Skipping transition rates plot: {rates_file} not found.")
-        return
+        return []
 
     out_base = out_dir / f"transition_rates.{fmt}"
-    plot_transition_rates_stacked(rates_file, output_path=out_base)
+    figures = [fig for fig, _ in plot_transition_rates_stacked(rates_file, output_path=out_base)]
     LOGGER.info(f"  [✓] Saved transition rate plots in -> {out_dir}")
+    return _finish_run_figures(figures, title and f"Rates: {title}", show)
 
 
 def plot_run_t1(run_dir: Path, out_dir: Path, fmt: str, dpi: int, show: bool):
-    """Plots T_1 relaxation times vs temperature."""
-    t1_file = run_dir / "t1_relaxation.npz"
-    if not t1_file.exists():
-        LOGGER.warning(f"Skipping T1 plot: {t1_file} not found.")
+    """Plots T_1 relaxation times vs temperature, one curve per initial state."""
+    t1_files = find_t1_files(run_dir)
+    if not t1_files:
+        LOGGER.warning(f"Skipping T1 plot: no t1_relaxation*.npz in {run_dir}.")
         return
 
     out_file = out_dir / f"t1_vs_temperature.{fmt}"
-    plot_t1([t1_file], output_path=out_file, plain_name=True)
+    plot_t1(t1_files, output_path=out_file, plain_name=True)
     LOGGER.info(f"  [✓] Saved T1 plot -> {out_file}")
+
+
+_CALC_METHOD_LABELS = {"all_bands": "", "defect_band_approx": "decontaminated", "defect_band": "decontaminated"}
+_INIT_STATE_LABELS = {"ms_0": "$m_s=0$", "ms_1": "$m_s=+1$", "ms_-1": "$m_s=-1$"}
+
+
+def _t1_label_parts(defect: str, cell_size: str, calc_method: str, init_state: str) -> tuple[str, list[str]]:
+    """Return the legend head (e.g. ``NV 512``) and readable detail strings for one T1 curve."""
+    head = f"{defect} {cell_size}".strip()
+    details = []
+    method = _CALC_METHOD_LABELS.get(calc_method, calc_method.replace("_", " "))
+    if method:
+        details.append(method)
+    if init_state:
+        details.append(_INIT_STATE_LABELS.get(init_state, f"$m_s={init_state.removeprefix('ms_')}$"))
+    return head, details
 
 
 def plot_t1(
@@ -375,86 +422,78 @@ def plot_t1(
     output_path: str | Path | None = None,
     show: bool = False,
     plain_name: bool = False,
+    init_states: Sequence[str] | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
     """
     Plot T_1 curves from one or more npz files or run directories in a single figure.
 
-    Each input is either a T1 npz file (e.g. ``t1_relaxation.npz``) or a run
-    directory containing one. Labels and the output filename are built from
-    the npz metadata unless ``plain_name`` is set.
+    Each input is either a T1 npz file (e.g. ``t1_relaxation_ms_0.npz``) or a
+    run directory, which contributes one curve per initial state it holds. Only the ODE-fit T1 is drawn; the eigenvalue
+    estimate is unreliable for initial states other than ms=0. Legend labels
+    are built from the npz metadata: details shared by every curve are left
+    out, the rest go in each label. No title is set. The output filename gets the metadata
+    appended unless ``plain_name`` is set. With ``init_states`` only curves of
+    those initial states (e.g. ``["ms_0"]``) are drawn.
     """
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
     colors = plt.cm.tab10.colors
-    plotted_any = False
     meta_parts: list[str] = []
+    curves: list[tuple[np.ndarray, np.ndarray, str, list[str]]] = []
 
-    for idx, path in enumerate(inputs):
-        path = Path(path)
+    files: list[Path] = []
+    for path in map(Path, inputs):
         if path.is_dir():
-            path = path / "t1_relaxation.npz"
-            if not path.exists():
-                raise FileNotFoundError(f"No t1_relaxation.npz in run directory: {path.parent}")
+            found = find_t1_files(path)
+            if not found:
+                raise FileNotFoundError(f"No t1_relaxation*.npz in run directory: {path}")
+            files.extend(found)
+        else:
+            files.append(path)
+
+    for path in files:
         data = np.load(str(path), allow_pickle=True)
         temperatures = np.asarray(data["temperatures"], dtype=float)
         defect = str(data.get("defect", ""))
         cell_size = str(data.get("cell_size", ""))
         calc_method = str(data.get("calc_method", ""))
         init_state = str(data.get("init_state", ""))
+        if init_states is not None and init_state not in init_states:
+            continue
 
-        t1_fit = np.asarray(data["t1_fit"], dtype=float) if "t1_fit" in data else None
-        t1_eigenval = np.asarray(data["t1_eigenval"], dtype=float) if "t1_eigenval" in data else None
-        if t1_fit is None and "T1_times" in data:
-            t1_fit = np.asarray(data["T1_times"], dtype=float)
-        if t1_fit is None and "T1_range" in data:
-            t1_fit = np.asarray(data["T1_range"], dtype=float)
-
-        label_suffix = f" ({defect} {cell_size}" if defect else " ("
-        if calc_method:
-            label_suffix += f", {calc_method}"
-        if init_state:
-            label_suffix += f", {init_state}"
-        label_suffix += ")"
-
-        color = colors[idx % len(colors)]
-        if t1_fit is not None:
-            valid = np.isfinite(t1_fit) & (t1_fit > 0)
-            if np.any(valid):
-                ax.plot(
-                    temperatures[valid],
-                    t1_fit[valid],
-                    "o-",
-                    color=color,
-                    linewidth=2,
-                    markersize=5,
-                    label=f"$T_1$ ODE fit{label_suffix}",
-                )
-                plotted_any = True
-        if t1_eigenval is not None:
-            valid_eig = np.isfinite(t1_eigenval) & (t1_eigenval > 0)
-            if np.any(valid_eig):
-                ax.plot(
-                    temperatures[valid_eig],
-                    t1_eigenval[valid_eig],
-                    "--",
-                    color=color,
-                    linewidth=1.8,
-                    label=f"$T_1$ Eigenvalue{label_suffix}",
-                )
-                plotted_any = True
+        t1_fit = None
+        for key in ("t1_fit", "T1_times", "T1_range"):
+            if key in data:
+                t1_fit = np.asarray(data[key], dtype=float)
+                break
 
         meta_parts.extend(x.replace(" ", "-") for x in (defect, cell_size, calc_method, init_state) if x)
 
-    if not plotted_any:
+        if t1_fit is None:
+            continue
+        valid = np.isfinite(t1_fit) & (t1_fit > 0)
+        if not np.any(valid):
+            continue
+        head, details = _t1_label_parts(defect, cell_size, calc_method, init_state)
+        curves.append((temperatures[valid], t1_fit[valid], head or path.stem, details))
+
+    if not curves:
         LOGGER.warning("No valid T1 data found in the provided files.")
         plt.close(fig)
         return fig, ax
 
-    ax.set_xlabel("Temperature (K)", fontsize=14)
-    ax.set_ylabel(r"$T_1$ (s)", fontsize=14)
+    # Details every curve shares are left out so the labels stay short (state them in the caption).
+    shared = [d for d in curves[0][3] if all(d in c[3] for c in curves)] if len(curves) > 1 else []
+    for idx, (temps, t1, head, details) in enumerate(curves):
+        own = [d for d in details if d not in shared]
+        label = f"{head} ({', '.join(own)})" if own else head
+        ax.plot(temps, t1, "-", color=colors[idx % len(colors)], linewidth=2, label=label)
+
+    ax.set_xlabel("Temperature (K)", fontsize=16)
+    ax.set_ylabel(r"$T_1$ (s)", fontsize=16)
     ax.set_yscale("log")
-    ax.grid(True, which="both", linestyle=":", alpha=0.6)
-    ax.tick_params(axis="both", which="both", direction="in")
-    ax.legend(frameon=True, fontsize=11)
+    ax.grid(True, which="major", linestyle=":", alpha=0.6)
+    ax.tick_params(axis="both", which="both", direction="in", labelsize=12)
+    ax.legend(loc="best", frameon=True, fontsize=14)
     fig.tight_layout()
 
     if output_path is not None:

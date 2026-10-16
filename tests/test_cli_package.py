@@ -81,10 +81,8 @@ def test_default_combines_orders_into_one_file(tmp_path, monkeypatch):
     with _patch(lambda **kw: _raw(order=kw["order"])):
         _run(_make_args(tmp_path))
     files = list((tmp_path / "data").rglob("*.npz"))
-    run_dir = (
-        tmp_path / "data" / "NV_512" / "all_bands" / date.today().strftime("%Y%m%d")
-    )
-    assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz"]
+    run_dir = tmp_path / "data" / "NV_512" / "pert_0.025" / "all_bands" / date.today().strftime("%Y%m%d")
+    assert files == [run_dir / "NV_512_raw_zfs_data_all_bands_12d.npz"]
     conn = sqlite3.connect(db)
     row = conn.execute("SELECT defect, cell_size, calc_method, pert_order, pert_scale FROM files").fetchone()
     assert row == ("NV", 512, "all_bands", "[1, 2]", 0.025)
@@ -95,10 +93,8 @@ def test_single_order_saves_separate_file(tmp_path):
     with _patch():
         _run(_make_args(tmp_path, orders="first"))
     files = list((tmp_path / "data").rglob("*.npz"))
-    run_dir = (
-        tmp_path / "data" / "NV_512" / "all_bands" / date.today().strftime("%Y%m%d")
-    )
-    assert files == [run_dir / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz"]
+    run_dir = tmp_path / "data" / "NV_512" / "pert_0.025" / "all_bands" / date.today().strftime("%Y%m%d")
+    assert files == [run_dir / "NV_512_raw_zfs_data_all_bands_1d.npz"]
 
 
 def test_pert_filter(tmp_path):
@@ -256,9 +252,9 @@ def test_multiple_folders_and_methods(tmp_path, monkeypatch):
     with _patch(lambda **kw: _raw(order=kw["order"], calc_method=kw["calc_method"])):
         _run(args)
     day = date.today().strftime("%Y%m%d")
-    assert (tmp_path / "data" / "NV_512" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_12d.npz").exists()
-    assert (tmp_path / "data" / "NV_512" / "defect_band_approx" / day / "pert_0.025" / "NV_512_raw_zfs_data_defect_band_approx_12d.npz").exists()
-    assert (tmp_path / "data" / "ClV_128" / "all_bands" / day / "pert_0.025" / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
+    assert (tmp_path / "data" / "NV_512" / "pert_0.025" / "all_bands" / day / "NV_512_raw_zfs_data_all_bands_12d.npz").exists()
+    assert (tmp_path / "data" / "NV_512" / "pert_0.025" / "defect_band_approx" / day / "NV_512_raw_zfs_data_defect_band_approx_12d.npz").exists()
+    assert (tmp_path / "data" / "ClV_128" / "pert_0.025" / "all_bands" / day / "NV_512_raw_zfs_data_all_bands_1d.npz").exists()
     conn = sqlite3.connect(db)
     rows = conn.execute("SELECT defect, cell_size, calc_method, pert_order, pert_scale FROM files ORDER BY id").fetchall()
     assert len(rows) == 4
@@ -314,7 +310,7 @@ def test_register_only(tmp_path):
 
     root = tmp_path / "data"
     day = date.today().strftime("%Y%m%d")
-    d1 = root / "NV_512" / "all_bands" / day / "pert_0.1"
+    d1 = root / "NV_512" / "pert_0.1" / "all_bands" / day
     d1.mkdir(parents=True)
     np.savez(
         d1 / "NV_512_raw_zfs_data_all_bands_12d.npz",
@@ -393,3 +389,72 @@ def test_register_only_orders_from_content(tmp_path):
     args.func(args)
     rows = conn.execute("SELECT pert_order FROM files WHERE kind='packaged_zfs'").fetchall()
     assert json.loads(rows[0][0]) == [2]
+
+
+def test_package_copies_full_phonon_spectrum(tmp_path, monkeypatch):
+    """The full-spectrum phonon npz lands in data/<defect>_<cell>/ and is registered."""
+    _tree(tmp_path)
+    db = _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "phonon_data.npz").write_bytes(b"full")
+    (tmp_path / "NV_512" / "phonon_data_sym_n1022.npz").write_bytes(b"sym")
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path))
+
+    dest = tmp_path / "data" / "NV_512" / "phonon_data.npz"
+    assert dest.read_bytes() == b"full"
+    row = sqlite3.connect(db).execute(
+        "SELECT path, defect, cell_size FROM files WHERE kind = 'phonon'"
+    ).fetchone()
+    assert row == (str(dest.resolve()), "NV", 512)
+
+
+def test_package_finds_phonon_in_defect_data_folder(tmp_path, monkeypatch):
+    """<defect>/data/phonon_data.npz (the VASP-tree location) is preferred over the defect folder."""
+    _tree(tmp_path)
+    _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "data").mkdir()
+    (tmp_path / "NV_512" / "data" / "phonon_data.npz").write_bytes(b"full")
+    (tmp_path / "NV_512" / "data" / "phonon_data_sym126.npz").write_bytes(b"sym")
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path))
+    assert (tmp_path / "data" / "NV_512" / "phonon_data.npz").read_bytes() == b"full"
+
+
+def test_package_finds_differently_named_phonon(tmp_path, monkeypatch):
+    _tree(tmp_path)
+    _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "phonons.npz").write_bytes(b"full")
+    (tmp_path / "NV_512" / "phonons_sym.npz").write_bytes(b"sym")
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path))
+    assert (tmp_path / "data" / "NV_512" / "phonon_data.npz").read_bytes() == b"full"
+
+
+def test_package_skips_symmetry_reduced_only_phonon(tmp_path, monkeypatch):
+    _tree(tmp_path)
+    _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "phonons_sym.npz").write_bytes(b"sym")
+    with _patch(lambda **kw: _raw(order=kw["order"])), pytest.warns(UserWarning, match="symmetry-reduced"):
+        _run(_make_args(tmp_path))
+    assert not (tmp_path / "data" / "NV_512" / "phonon_data.npz").exists()
+
+
+def test_scan_does_not_copy_phonon(tmp_path, monkeypatch):
+    _tree(tmp_path)
+    _registry(monkeypatch, tmp_path)
+    (tmp_path / "NV_512" / "phonon_data.npz").write_bytes(b"full")
+    with _patch(lambda **kw: _raw(order=kw["order"])):
+        _run(_make_args(tmp_path, scan=True))
+    assert not (tmp_path / "data").exists()
+
+
+def test_register_only_registers_packaged_phonon(tmp_path, monkeypatch):
+    from spinlabs.cli.package import _register_only
+
+    db = _registry(monkeypatch, tmp_path)
+    dest = tmp_path / "data" / "ClV_128" / "phonon_data.npz"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"full")
+    _register_only(tmp_path / "data")
+    row = sqlite3.connect(db).execute("SELECT kind, defect, cell_size FROM files").fetchone()
+    assert row == ("phonon", "ClV", 128)

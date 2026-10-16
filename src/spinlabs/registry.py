@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS runs (
     zfs_files TEXT,                           -- JSON list of file paths
     phonon_file TEXT,
     method TEXT,
-    init_state TEXT,
+    init_state TEXT,                          -- JSON list of initial states, e.g. '["ms_1", "ms_0", "ms_-1"]'
     command TEXT,
     defect TEXT,
     cell INTEGER,
@@ -259,7 +259,7 @@ def register_run(
     zfs_files: list[str | Path] | None = None,
     phonon_file: str | Path | None = None,
     method: str | None = None,
-    init_state: str | None = None,
+    init_state: str | Sequence[str] | None = None,
     command: str | None = None,
     defect: str | None = None,
     cell: int | None = None,
@@ -279,7 +279,11 @@ def register_run(
 
     ``order`` is the perturbation orders actually present in the analyzed
     data, normalized to a JSON list (e.g. ``[1, 2]`` for combined data).
+    ``init_state`` is the initial state(s) whose dynamics the run solved,
+    stored as a JSON list (one run directory holds every state).
     """
+    if isinstance(init_state, str):
+        init_state = [init_state]
     conn.execute(
         """INSERT INTO runs (run_dir, started_at, status, zfs_files, phonon_file, method, init_state, command,
                             defect, cell, "order", pert, temp_min, temp_max, n_temps, npz_files, git_hash)
@@ -290,7 +294,7 @@ def register_run(
             json.dumps([str(Path(p).resolve()) for p in (zfs_files or [])]),
             str(Path(phonon_file).resolve()) if phonon_file else None,
             method,
-            init_state,
+            json.dumps(list(init_state)) if init_state else None,
             command,
             defect,
             cell,
@@ -385,20 +389,23 @@ def find_runs(
     plus ``timestamp`` as an alias for ``started_at``); unknown fields raise
     SystemExit so typos fail loudly. Values match like the old CSV index:
     exact and case-insensitive, with numeric fields compared numerically and
-    list fields (``npz_files`` per name) matching any element. ``order`` is a
+    list fields (``npz_files`` per name, ``init_state`` per state; legacy
+    scalar ``init_state`` values count as one-element lists) matching any element. ``order`` is a
     JSON list of the orders present in the data (e.g. ``'[1, 2]'``); a filter
     matches when every requested order is present (``--order 1`` matches
     ``[1]`` and ``[1, 2]`` runs, ``--order 1 2`` matches only combined runs).
 
-    With ``latest`` only the most recent matching run (by ``started_at``) is
-    returned. Directories stored from another host are resolved against
+    With ``latest`` only the most recent matching run (by ``started_at``) of
+    each configuration (defect, cell, method, order, pert) is returned, so a
+    query spanning several configurations yields the newest run of each. Directories stored from another host are resolved against
     ``output_root`` by name when the stored path does not exist.
     """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
     numeric = {"cell", "pert", "temp_min", "temp_max", "n_temps"}
-    list_like = {"npz_files"}
-    sql = "SELECT run_dir FROM runs WHERE status = 'done'"
-    params: list[object] = []
+    list_like = {"npz_files", "init_state"}
+    # Repeating a field ORs its values: [("defect", "NV"), ("defect", "ClV")]
+    # matches runs of either defect; distinct fields are ANDed.
+    by_column: dict[str, list[object]] = {}
     for field, value in filters:
         column = "started_at" if field == "timestamp" else field
         if column not in columns | {"timestamp"}:
@@ -406,6 +413,9 @@ def find_runs(
                 f"error: unknown run filter '{field}'; valid fields: "
                 + ", ".join(sorted(columns | {"timestamp"}))
             )
+        by_column.setdefault(column, []).append(value)
+
+    def clause(column: str, value: object) -> tuple[str, list[object]]:
         if column in list_like:
             # Matches when any stored element equals the value (case-insensitive).
             wanted = str(value).strip().lower()
@@ -416,18 +426,14 @@ def find_runs(
                 try:
                     items = json.loads(raw) if isinstance(raw, str) else raw
                 except (TypeError, json.JSONDecodeError):
-                    items = []
+                    items = [raw]  # legacy scalar, e.g. init_state 'ms_0'
                 if not isinstance(items, list):
                     items = [items]
                 if wanted in [str(i).lower() for i in items]:
                     keep.append(raw)
             if not keep:
-                sql += " AND 0"  # nothing matches this filter
-            else:
-                placeholders = ", ".join("?" * len(keep))
-                sql += f' AND "{column}" IN ({placeholders})'
-                params.extend(keep)
-            continue
+                return "0", []  # nothing matches this filter
+            return f'"{column}" IN ({", ".join("?" * len(keep))})', keep
         if column == "order":
             # Subset semantics: every requested order must be present in the
             # run's data, mirroring find_packaged(pert_order=...).
@@ -450,13 +456,8 @@ def find_runs(
                 if set(wanted_orders).issubset(have):
                     keep.append(raw)
             if not keep:
-                sql += " AND 0"
-            else:
-                placeholders = ", ".join("?" * len(keep))
-                sql += f' AND "{column}" IN ({placeholders})'
-                params.extend(keep)
-            continue
-        sql += f' AND "{column}" = ?'
+                return "0", []
+            return f'"{column}" IN ({", ".join("?" * len(keep))})', keep
         if column in numeric:
             try:
                 number = float(value)
@@ -465,15 +466,31 @@ def find_runs(
                 value = number
             except ValueError:
                 pass
-        params.append(value)
+        return f'"{column}" = ?', [value]
+
+    group_columns = [c for c in ("defect", "cell", "method", "order", "pert") if c in columns]
+    select = ", ".join(['"run_dir"'] + [f'"{c}"' for c in group_columns])
+    sql = f"SELECT {select} FROM runs WHERE status = 'done'"
+    params: list[object] = []
+    for column, values in by_column.items():
+        parts = [clause(column, v) for v in values]
+        sql += " AND (" + " OR ".join(c for c, _ in parts) + ")"
+        params.extend(p for _, ps in parts for p in ps)
+    sql += " ORDER BY started_at, id"
+    rows = conn.execute(sql, params).fetchall()
     if latest:
-        # Newest run first; ties broken by the higher (later-registered) id.
-        sql += " ORDER BY started_at DESC, id DESC LIMIT 1"
-    else:
-        sql += " ORDER BY started_at, id"
+        # Rows are oldest first, so the last row per configuration is the
+        # newest (ties broken by the higher, later-registered id). The pop
+        # moves a configuration to the end on each newer run, so the result
+        # stays ordered by each configuration's newest run.
+        newest: dict[tuple, tuple] = {}
+        for row in rows:
+            newest.pop(row[1:], None)
+            newest[row[1:]] = row
+        rows = list(newest.values())
     results: list[Path] = []
     root = Path(output_root).resolve() if output_root else None
-    for (run_dir,) in conn.execute(sql, params):
+    for run_dir, *_ in rows:
         if not run_dir:
             continue
         path = Path(run_dir)

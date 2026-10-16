@@ -17,7 +17,7 @@ except ImportError:
 from pymatgen.core import Structure
 
 from spinlabs.constants import CONSTANTS
-from spinlabs.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor, _normalize_calc_method
+from spinlabs.models import PerturbationEntry, PhononSpectrum, RawZFSData, ZFSTensor, normalize_calc_method
 
 from spinlabs.logging_utils import get_logger
 
@@ -598,7 +598,7 @@ def parse_zfs_simulation_dataset(
     )
     # Apply the spin correction here so every consumer of parsed sim-folder
     # data sees corrected tensors, matching RawZFSData.load for npz files.
-    if _normalize_calc_method(data.calc_method) == "defect_band_approx":
+    if normalize_calc_method(data.calc_method) == "defect_band_approx":
         data._apply_spin_correction()
     return data
 
