@@ -312,10 +312,10 @@ def collect_outcar_rows(folder: Path) -> list[dict]:
     ZFS_occup/) or a parent folder containing defect folders; ZFS_* dirs are
     found recursively. ZFS_hyp/OUTCAR is the contaminated (all-electron bands)
     ground state, ZFS_occup/OUTCAR the corrected one (defect-band approx),
-    which gets the spin-correction scaling applied here, matching
-    RawZFSData.load's behaviour for packaged approx data.
+    which gets the same spin-correction scaling as RawZFSData.load applies
+    to packaged approx data.
     """
-    from spinlabs.models import SPIN_CORRECTION_SCALE, ZFSTensor
+    from spinlabs.models import SPIN_CORRECTION_SCALE, apply_spin_correction
     from spinlabs.parsers import parse_outcar_zfs
 
     rows: list[dict] = []
@@ -335,7 +335,7 @@ def collect_outcar_rows(folder: Path) -> list[dict]:
             continue
         if corrected:
             LOGGER.debug(f"Applied spin correction scaling: {SPIN_CORRECTION_SCALE}")
-            zfs = ZFSTensor(matrix=zfs.matrix * SPIN_CORRECTION_SCALE, unit=zfs.unit)
+            zfs = apply_spin_correction(zfs)
         rows.append({
             "defect": infer_defect(defect_root),
             "column": "corrected" if corrected else "contaminated",

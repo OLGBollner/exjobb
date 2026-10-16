@@ -878,6 +878,11 @@ def _decode_order_dict(value: Any, data: Any) -> dict:
 SPIN_CORRECTION_SCALE = 1.5
 
 
+def apply_spin_correction(tensor: ZFSTensor) -> ZFSTensor:
+    """A defect-band-approx ZFS tensor scaled by :data:`SPIN_CORRECTION_SCALE` (3/2)."""
+    return ZFSTensor(matrix=tensor.matrix * SPIN_CORRECTION_SCALE, unit=tensor.unit)
+
+
 def _scale_correction_fields(fields: dict) -> dict:
     """Returns a copy of RawZFSData constructor kwargs with approx tensors scaled by 3/2.
 
@@ -888,12 +893,12 @@ def _scale_correction_fields(fields: dict) -> dict:
     out = dict(fields)
     gs = out.get("ground_state_zfs")
     if gs is not None:
-        out["ground_state_zfs"] = ZFSTensor(matrix=gs.matrix * SPIN_CORRECTION_SCALE, unit=gs.unit)
+        out["ground_state_zfs"] = apply_spin_correction(gs)
     for name in ("first_order", "second_order"):
         entries = dict(out.get(name) or {})
         for key, entry in entries.items():
             if isinstance(entry, PerturbationEntry):
-                entry.zfs_tensor = ZFSTensor(matrix=entry.zfs_tensor.matrix * SPIN_CORRECTION_SCALE, unit=entry.zfs_tensor.unit)
+                entry.zfs_tensor = apply_spin_correction(entry.zfs_tensor)
             elif isinstance(entry, dict) and entry.get("tensor") is not None:
                 entry["tensor"] = np.asarray(entry["tensor"], dtype=float) * SPIN_CORRECTION_SCALE
         out[name] = entries
