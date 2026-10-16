@@ -94,8 +94,8 @@ def test_cli_errors_without_runs():
         cli.main(["table", "t1"])
 
 
-def _d(defect, cell, column, d_mhz, configuration=""):
-    return {"defect": defect, "configuration": configuration, "column": column, "cell": cell,
+def _d(defect, cell, column, d_mhz):
+    return {"defect": defect, "column": column, "cell": cell,
             "d_mhz": d_mhz, "source": f"{defect}_{cell}_{column}"}
 
 
@@ -104,7 +104,7 @@ def test_defect_table_appends_t1_per_cell_with_superscripts():
 
     d_rows = [
         _d("NV", "512", "corrected", 2945.556), _d("NV", "64", "corrected", 2832.941),
-        _d("NV", "512", "contaminated", 3045.316), _d("ClV", "128", "corrected", 1439.75, "kk"),
+        _d("NV", "512", "contaminated", 3045.316), _d("ClV", "128", "corrected", 1439.75),
     ]
     t1_rows = [
         T1Row("NV", 512, "defect_band_approx", None, {"ms_1": 0.01172, "ms_0": 0.008297, "ms_-1": 0.01172}),
@@ -119,7 +119,7 @@ def test_defect_table_appends_t1_per_cell_with_superscripts():
         r"NV & --- & --- & 2950$^{(b)}$, 2830$^{(c)}$ & 3050$^{(b)}$ & 11.7$^{(b)}$ & "
         r"8.30$^{(b)}$, 7.53$^{(c)}$ & 11.7$^{(b)}$ & --- & 4120$^{(b)}$ & --- \\" in tex
     )
-    assert r"ClV & kk & --- & 1440$^{(a)}$ & --- &" in tex
+    assert r"ClV & --- & --- & 1440$^{(a)}$ & --- &" in tex
     assert "(a) cell size 128; (b) cell size 512; (c) cell size 64" in tex
     assert r"\cmidrule(lr){6-8}" in tex
 

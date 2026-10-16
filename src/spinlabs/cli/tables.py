@@ -33,7 +33,7 @@ def build_table_parser(subparsers: argparse._SubParsersAction) -> None:  # noqa:
     defects = subparsers.add_parser(
         "defects",
         help="LaTeX table of ground-state D and the latest T1 per initial state for each defect",
-        description="Ground-state D (corrected/contaminated) per defect and configuration, with the latest "
+        description="Ground-state D (corrected/contaminated) per defect, with the latest "
         "T1 per initial spin state and method appended. Values of different supercells share a row "
         "and get a superscript letter explained in the caption.",
     )

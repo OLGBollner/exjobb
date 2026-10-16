@@ -23,16 +23,6 @@ _METHOD_SUFFIX = {"all_bands": "", "defect_band_approx": " (spin corrected)"}
 # all_bands before the spin-corrected row of the same defect.
 _METHOD_RANK = {"all_bands": 0, "defect_band_approx": 1}
 _PERT_RE = re.compile(r"(?<![A-Za-z])pert_([0-9.]+)")
-ORIENTATION_RE = re.compile(r"(?<![A-Za-z])(k{1,2}|hk|kh)(?![A-Za-z])", re.IGNORECASE)
-
-
-def infer_orientation(path: Path) -> str:
-    """Pull the orientation token (k, kk, hk, kh) out of a path, or '' if absent."""
-    for part in reversed(path.parts):  # innermost folder first, never the user's home path
-        match = ORIENTATION_RE.search(part)
-        if match:
-            return match.group(1).lower()
-    return ""
 
 
 @dataclass
@@ -45,7 +35,6 @@ class T1Row:
     pert: float | None
     t1: dict[str, float] = field(default_factory=dict)
     run_dirs: dict[str, Path] = field(default_factory=dict)
-    configuration: str = ""
 
     @property
     def label(self) -> str:
@@ -56,7 +45,6 @@ class T1Row:
         # Largest supercell first within a defect, as in the reference table.
         return (
             self.defect,
-            self.configuration,
             -(self.cell or 0),
             self.pert if self.pert is not None else float("inf"),
             _METHOD_RANK.get(self.method, 99),
@@ -118,9 +106,8 @@ def collect_t1_rows(
     """Latest completed run per defect, cell, method, pert-scale and initial state.
 
     With ``by_pert=False`` runs of all pert-scales share one row per
-    defect/configuration/cell/method and the newest run of each state wins
-    (the row's ``pert`` is then ``None``). The configuration (k, kk, hk, ...)
-    is read from the run's input file paths, as for the D table.
+    defect/cell/method and the newest run of each state wins (the row's
+    ``pert`` is then ``None``).
 
     Runs are those matching ``filters`` (same fields as :func:`find_runs`).
     Each run directory holds one T1 file per initial state it solved
@@ -134,7 +121,7 @@ def collect_t1_rows(
     meta = {
         row[0]: row[1:]
         for row in conn.execute(
-            "SELECT run_dir, defect, cell, method, pert, init_state, zfs_files FROM runs WHERE status = 'done'"
+            "SELECT run_dir, defect, cell, method, pert, init_state FROM runs WHERE status = 'done'"
         )
     }
     by_name = {Path(k).name: v for k, v in meta.items() if k}
@@ -143,18 +130,13 @@ def collect_t1_rows(
         if not t1_files:
             LOGGER.warning(f"Skipping {run_dir}: no t1_relaxation*.npz")
             continue
-        run_defect, run_cell, run_method, pert, run_states, zfs_files = meta.get(str(run_dir)) or by_name.get(
-            run_dir.name, (None,) * 6
+        run_defect, run_cell, run_method, pert, run_states = meta.get(str(run_dir)) or by_name.get(
+            run_dir.name, (None,) * 5
         )
         if pert is None:
             match = _PERT_RE.search(str(run_dir))
             pert = float(match.group(1).rstrip(".")) if match else None
         pert = float(pert) if pert is not None and by_pert else None
-        try:
-            inputs = [Path(p) for p in json.loads(zfs_files or "[]")]
-        except (TypeError, json.JSONDecodeError):
-            inputs = []
-        configuration = next((c for c in (infer_orientation(p.parent) for p in inputs) if c), "")
         for npz in t1_files:
             data = np.load(str(npz), allow_pickle=True)
             defect = run_defect or _npz_str(data, "defect")
@@ -165,8 +147,8 @@ def collect_t1_rows(
                 LOGGER.warning(f"Skipping {npz}: missing defect/method/initial state metadata")
                 continue
             cell = int(cell) if cell is not None else None
-            key = (defect, configuration, cell, method, pert)
-            row = rows.setdefault(key, T1Row(defect, cell, method, pert, configuration=configuration))
+            key = (defect, cell, method, pert)
+            row = rows.setdefault(key, T1Row(defect, cell, method, pert))
             row.t1[init_state] = t1_at(npz, temperature)
             row.run_dirs[init_state] = run_dir
     return sorted(rows.values(), key=T1Row.sort_key)
@@ -315,7 +297,6 @@ def collect_d_rows(paths: list[Path]) -> list[dict]:
                 continue
             rows.append({
                 "defect": data.defect or infer_defect(npz_path.parent),
-                "configuration": infer_orientation(npz_path.parent) or infer_orientation(path),
                 "column": column,
                 "cell": str(data.cell_size) if data.cell_size else (infer_cell(npz_path.parent) or infer_cell(path)),
                 "d_mhz": zfs.to_unit("MHz").D,
@@ -357,7 +338,6 @@ def collect_outcar_rows(folder: Path) -> list[dict]:
             zfs = ZFSTensor(matrix=zfs.matrix * SPIN_CORRECTION_SCALE, unit=zfs.unit)
         rows.append({
             "defect": infer_defect(defect_root),
-            "configuration": infer_orientation(defect_root),
             "column": "corrected" if corrected else "contaminated",
             "cell": infer_cell(defect_root),
             "d_mhz": zfs.to_unit("MHz").D,
@@ -366,10 +346,9 @@ def collect_outcar_rows(folder: Path) -> list[dict]:
     return rows
 
 
-def _entry(merged: dict, defect: str, configuration: str, cell: str) -> dict:
-    return merged.setdefault((defect, configuration, cell), {
+def _entry(merged: dict, defect: str, cell: str) -> dict:
+    return merged.setdefault((defect, cell), {
         "defect": defect,
-        "configuration": configuration,
         "cell": cell,
         "d": {c: None for c in COLUMNS},
         "t1": {},
@@ -378,22 +357,22 @@ def _entry(merged: dict, defect: str, configuration: str, cell: str) -> dict:
 
 
 def merge_rows(d_rows: list[dict], t1_rows: list[T1Row] = ()) -> list[dict]:
-    """One entry per defect+configuration+cell holding D and T1 per column.
+    """One entry per defect+cell holding D and T1 per column.
 
     D sources disagreeing by more than :data:`CONFLICT_TOL_MHZ` are reported
     and the first one kept (OUTCARs are collected before packaged npz files).
     ``entry["t1"]`` maps ``(column, init_state)`` to T1 in seconds.
     """
-    merged: dict[tuple[str, str, str], dict] = {}
+    merged: dict[tuple[str, str], dict] = {}
     for row in d_rows:
-        entry = _entry(merged, row["defect"], row["configuration"], row["cell"])
+        entry = _entry(merged, row["defect"], row["cell"])
         column = row["column"]
         previous = entry["d"][column]
         if previous is None:
             entry["d"][column] = row["d_mhz"]
             entry["sources"][column] = row["source"]
         elif abs(previous - row["d_mhz"]) > CONFLICT_TOL_MHZ:
-            name = " ".join(filter(None, (row["defect"], row["configuration"], row["cell"])))
+            name = " ".join(filter(None, (row["defect"], row["cell"])))
             LOGGER.warning(
                 f"Conflicting {column} D for {name}: {previous:.3f} MHz ({entry['sources'][column]}) "
                 f"vs {row['d_mhz']:.3f} MHz ({row['source']}); keeping the first"
@@ -403,11 +382,11 @@ def merge_rows(d_rows: list[dict], t1_rows: list[T1Row] = ()) -> list[dict]:
         if column is None:
             continue
         cell = str(t1_row.cell) if t1_row.cell is not None else ""
-        entry = _entry(merged, t1_row.defect, t1_row.configuration, cell)
+        entry = _entry(merged, t1_row.defect, cell)
         for state, value in t1_row.t1.items():
             entry["t1"][(column, state)] = value
     # Largest supercell first within a defect.
-    return sorted(merged.values(), key=lambda e: (e["defect"], e["configuration"], -int(e["cell"] or 0)))
+    return sorted(merged.values(), key=lambda e: (e["defect"], -int(e["cell"] or 0)))
 
 
 def assign_letters(merged: list[dict]) -> dict[str, str]:
@@ -456,7 +435,7 @@ def render_defect_table(
 ) -> str:
     """LaTeX table of D (MHz) and, optionally, T1 (ms) per initial state.
 
-    One row per defect+configuration; the values of the different supercells
+    One row per defect; the values of the different supercells
     are comma-separated with a superscript letter per cell, explained in the
     caption. Rows are grouped under base-crystal headers (4H-SiC, Diamond).
     Requires ``booktabs`` and ``siunitx``.
@@ -472,9 +451,9 @@ def render_defect_table(
             parts.append(_fmt_sig(value * scale) + (rf"$^{{({letter})}}$" if letter else ""))
         return ", ".join(parts) or "---"
 
-    grouped: dict[tuple[str, str], list[dict]] = {}
+    grouped: dict[str, list[dict]] = {}
     for row in merged:
-        grouped.setdefault((row["defect"], row["configuration"]), []).append(row)
+        grouped.setdefault(row["defect"], []).append(row)
 
     t1_keys = [(c, s) for c in COLUMNS for s in INIT_STATES] if include_t1 else []
     n_cols = 5 + len(t1_keys)
@@ -499,15 +478,16 @@ def render_defect_table(
         r"    \midrule",
     ]
     last_base = None
-    for defect, configuration in sorted(grouped, key=lambda k: (base_crystal_of(k[0]) == "Diamond", k)):
+    for defect in sorted(grouped, key=lambda d: (base_crystal_of(d) == "Diamond", d)):
         base = base_crystal_of(defect)
         if base != last_base:
             if last_base is not None:
                 lines.append(r"    \midrule")
             lines.append(rf"    \multicolumn{{{n_cols}}}{{c}}{{\textit{{{base}}}}} \\")
             last_base = base
-        cells = grouped[(defect, configuration)]
-        values = [tex_defect(defect), configuration or "---", "---"]
+        cells = grouped[defect]
+        # Configuration and experimental D are filled in by hand.
+        values = [tex_defect(defect), "---", "---"]
         values += [joined([(e["d"][c], e["cell"]) for e in cells]) for c in COLUMNS]
         values += [joined([(e["t1"].get(key), e["cell"]) for e in cells], scale=1e3) for key in t1_keys]
         lines.append("    " + " & ".join(values) + r" \\")
