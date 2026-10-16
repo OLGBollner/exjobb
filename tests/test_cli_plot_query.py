@@ -149,6 +149,36 @@ def test_latest_returns_newest(tmp_path, monkeypatch):
     ]
 
 
+def test_latest_keeps_newest_per_configuration(tmp_path, monkeypatch):
+    """--latest over several pert-scales/defects returns the newest run of each, not one run."""
+    monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "registry"))
+    conn = registry.ensure_db()
+    runs = [
+        ("nv_01_old", "NV", 0.1, "2026-10-01 12:00:00"),
+        ("nv_01_new", "NV", 0.1, "2026-10-05 12:00:00"),
+        ("nv_0025_new", "NV", 0.025, "2026-10-03 12:00:00"),
+        ("nv_0025_old", "NV", 0.025, "2026-10-02 12:00:00"),
+        ("clv_01", "ClV", 0.1, "2026-10-09 12:00:00"),
+    ]
+    for name, defect, pert, started_at in runs:
+        run_id = registry.register_run(
+            conn,
+            run_dir=tmp_path / name,
+            defect=defect,
+            cell=512,
+            order=1,
+            pert=pert,
+            method="all_bands",
+            init_state="ms_0",
+        )
+        registry.finish_run(conn, run_id, "done")
+        conn.execute("UPDATE runs SET started_at = ? WHERE id = ?", (started_at, run_id))
+    conn.commit()
+    filters = [("defect", "NV"), ("pert", "0.1"), ("pert", "0.025")]
+    dirs = registry.find_runs(conn, filters, latest=True)
+    assert sorted(d.name for d in dirs) == ["nv_0025_new", "nv_01_new"]
+
+
 def test_latest_ignores_running_rows(tmp_path, monkeypatch):
     monkeypatch.setenv("SPINLABS_REGISTRY_DIR", str(tmp_path / "registry"))
     conn = registry.ensure_db()

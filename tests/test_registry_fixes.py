@@ -358,7 +358,9 @@ def test_find_runs_repeated_field_ors_values(tmp_path):
     conn.execute("UPDATE runs SET status='done'")
     conn.commit()
 
-    names = lambda f: sorted(p.name for p in registry.find_runs(conn, f))
+    def names(f):
+        return sorted(p.name for p in registry.find_runs(conn, f))
+
     assert names([("defect", "NV"), ("defect", "ClV")]) == ["ClV_0.1", "NV_0.025", "NV_0.1"]
     assert names([("defect", "NV"), ("defect", "DiV"), ("pert", 0.025)]) == ["DiV_0.025", "NV_0.025"]
     assert names([("pert", 0.1), ("pert", 0.025), ("defect", "ClV")]) == ["ClV_0.1"]

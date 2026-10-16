@@ -180,7 +180,12 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--pert-scale", nargs="+", type=float, help="Filter by perturbation scale(s) (e.g. 0.1 0.025)"
     )
-    parser.add_argument("--latest", action="store_true", help="With --query, use only the most recent matching run")
+    parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="With --query, use only the most recent matching run of each configuration "
+        "(defect, cell size, method, order, pert-scale)",
+    )
     parser.add_argument(
         "-r", "--output-root", default="runs",
         help="Root folder holding run directories (default: runs); used to resolve runs queried from the registry",

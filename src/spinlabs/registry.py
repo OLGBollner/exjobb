@@ -395,8 +395,9 @@ def find_runs(
     matches when every requested order is present (``--order 1`` matches
     ``[1]`` and ``[1, 2]`` runs, ``--order 1 2`` matches only combined runs).
 
-    With ``latest`` only the most recent matching run (by ``started_at``) is
-    returned. Directories stored from another host are resolved against
+    With ``latest`` only the most recent matching run (by ``started_at``) of
+    each configuration (defect, cell, method, order, pert) is returned, so a
+    query spanning several configurations yields the newest run of each. Directories stored from another host are resolved against
     ``output_root`` by name when the stored path does not exist.
     """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
@@ -467,20 +468,27 @@ def find_runs(
                 pass
         return f'"{column}" = ?', [value]
 
-    sql = "SELECT run_dir FROM runs WHERE status = 'done'"
+    group_columns = [c for c in ("defect", "cell", "method", "order", "pert") if c in columns]
+    select = ", ".join(['"run_dir"'] + [f'"{c}"' for c in group_columns])
+    sql = f"SELECT {select} FROM runs WHERE status = 'done'"
     params: list[object] = []
     for column, values in by_column.items():
         parts = [clause(column, v) for v in values]
         sql += " AND (" + " OR ".join(c for c, _ in parts) + ")"
         params.extend(p for _, ps in parts for p in ps)
+    sql += " ORDER BY started_at, id"
+    rows = conn.execute(sql, params).fetchall()
     if latest:
-        # Newest run first; ties broken by the higher (later-registered) id.
-        sql += " ORDER BY started_at DESC, id DESC LIMIT 1"
-    else:
-        sql += " ORDER BY started_at, id"
+        # Rows are oldest first, so the last row per configuration is the
+        # newest (ties broken by the higher, later-registered id).
+        newest: dict[tuple, tuple] = {}
+        for row in rows:
+            newest.pop(row[1:], None)
+            newest[row[1:]] = row
+        rows = list(newest.values())
     results: list[Path] = []
     root = Path(output_root).resolve() if output_root else None
-    for (run_dir,) in conn.execute(sql, params):
+    for run_dir, *_ in rows:
         if not run_dir:
             continue
         path = Path(run_dir)
